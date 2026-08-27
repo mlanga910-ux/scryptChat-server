@@ -10,6 +10,8 @@ import {
   MessageRecord,
   PacketType,
   PROTOCOL_VERSION,
+  RelayServerStats,
+  RelayStatus,
 } from '../types/index';
 import { db } from '../db/index';
 import {
@@ -55,6 +57,8 @@ export type ConnectionState =
 
 export interface PeerManagerEvents {
   onStateChange: (state: ConnectionState) => void;
+  onRelayStatusChange?: (status: RelayStatus, stats?: RelayServerStats) => void;
+  onContactsPresencesUpdate?: (presences: Record<string, { isOnline: boolean; lastSeen: number }>) => void;
   onMessageReceived: (message: MessageRecord) => void;
   onFileProgress: (progress: FileTransferProgress) => void;
   onFileCompleted: (fileRecord: FileRecord, blob: Blob) => void;
@@ -65,6 +69,8 @@ export interface PeerManagerEvents {
 
 export class PeerManager {
   public state: ConnectionState = 'DISCONNECTED';
+  public relayStatus: RelayStatus = 'CONNECTING';
+  public relayStats: RelayServerStats | null = null;
   public peerConnection: RTCPeerConnection | null = null;
   public dataChannel: RTCDataChannel | null = null;
   public cryptoSession: CryptoSession | null = null;
@@ -90,12 +96,15 @@ export class PeerManager {
 
   private heartbeatInterval: any = null;
   private mailboxPollInterval: any = null;
+  private relayCheckInterval: any = null;
   private lastPingSentTime = 0;
 
   constructor(identity: IdentityRecord, events: PeerManagerEvents) {
     this.identity = identity;
     this.events = events;
+    this.checkRelayHealth();
     this.startMailboxPolling();
+    this.startRelayHealthCheck();
   }
 
   public updateIdentity(identity: IdentityRecord) {
@@ -726,10 +735,80 @@ export class PeerManager {
     }
   }
 
+  public async checkRelayHealth(): Promise<RelayStatus> {
+    try {
+      const res = await fetch('/api/signaling/status', {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+      });
+      if (res.ok) {
+        const stats: RelayServerStats = await res.json();
+        this.relayStatus = 'ONLINE';
+        this.relayStats = stats;
+        this.events.onRelayStatusChange?.('ONLINE', stats);
+        return 'ONLINE';
+      } else {
+        this.relayStatus = 'OFFLINE';
+        this.events.onRelayStatusChange?.('OFFLINE');
+        return 'OFFLINE';
+      }
+    } catch {
+      this.relayStatus = 'OFFLINE';
+      this.events.onRelayStatusChange?.('OFFLINE');
+      return 'OFFLINE';
+    }
+  }
+
+  private startRelayHealthCheck() {
+    if (this.relayCheckInterval) {
+      clearInterval(this.relayCheckInterval);
+    }
+    this.relayCheckInterval = setInterval(() => {
+      this.checkRelayHealth();
+    }, 6000);
+  }
+
   private startMailboxPolling() {
     this.mailboxPollInterval = setInterval(async () => {
       if (!this.identity?.deviceId) return;
       try {
+        // 1. Send Presence Heartbeat Ping
+        await fetch('/api/signaling/presence', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            deviceId: this.identity.deviceId,
+            displayName: this.identity.displayName || 'Secure Peer',
+          }),
+        }).catch(() => {});
+
+        // 2. Query Presence for all known contacts
+        const allContacts = await db.contacts.toArray();
+        if (allContacts.length > 0) {
+          const deviceIds = allContacts.map((c) => c.deviceId);
+          const presenceRes = await fetch('/api/signaling/presence/query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ deviceIds }),
+          });
+          if (presenceRes.ok) {
+            const pData = await presenceRes.json();
+            if (pData.success && pData.presences) {
+              for (const c of allContacts) {
+                const presence = pData.presences[c.deviceId];
+                if (presence && presence.isOnline !== c.isOnline) {
+                  await db.contacts.update(c.deviceId, {
+                    isOnline: presence.isOnline,
+                    lastSeenAt: presence.lastSeen || c.lastSeenAt,
+                  });
+                }
+              }
+              this.events.onContactsPresencesUpdate?.(pData.presences);
+            }
+          }
+        }
+
+        // 3. Pull Encrypted Mailbox items
         const res = await fetch(`/api/signaling/mailbox/pull/${this.identity.deviceId}`);
         const data = await res.json();
         if (data.success && Array.isArray(data.items) && data.items.length > 0) {
@@ -850,6 +929,10 @@ export class PeerManager {
     if (this.mailboxPollInterval) {
       clearInterval(this.mailboxPollInterval);
       this.mailboxPollInterval = null;
+    }
+    if (this.relayCheckInterval) {
+      clearInterval(this.relayCheckInterval);
+      this.relayCheckInterval = null;
     }
   }
 }

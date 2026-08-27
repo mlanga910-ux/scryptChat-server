@@ -7,6 +7,7 @@ import {
   FileTransferProgress,
   IdentityRecord,
   MessageRecord,
+  RelayStatus,
 } from './types/index';
 import { ConnectionState, PeerManager } from './webrtc/peerManager';
 import { TerminalHeader } from './components/TerminalHeader';
@@ -26,6 +27,7 @@ export default function App() {
   const [lastMessagesMap, setLastMessagesMap] = useState<Map<string, MessageRecord>>(new Map());
   const [activeTransfers, setActiveTransfers] = useState<FileTransferProgress[]>([]);
   const [connectionState, setConnectionState] = useState<ConnectionState>('DISCONNECTED');
+  const [relayStatus, setRelayStatus] = useState<RelayStatus>('CONNECTING');
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
 
   // Mobile View Switcher Tab ('peers' vs 'chat')
@@ -73,6 +75,18 @@ export default function App() {
             if (state === 'CONNECTED') {
               setMobileTab('chat');
             }
+          },
+          onRelayStatusChange: (status) => {
+            setRelayStatus(status);
+          },
+          onContactsPresencesUpdate: async () => {
+            const updated = await db.contacts.toArray();
+            setContacts(updated);
+            setActiveContact((curr) => {
+              if (!curr) return null;
+              const found = updated.find((c) => c.deviceId === curr.deviceId);
+              return found || curr;
+            });
           },
           onMessageReceived: async (msg) => {
             setMessages((prev) => {
@@ -205,6 +219,7 @@ export default function App() {
       <TerminalHeader
         identity={identity}
         connectionState={connectionState}
+        relayStatus={relayStatus}
         activeContact={activeContact}
         latencyMs={latencyMs}
         currentMobileTab={mobileTab}

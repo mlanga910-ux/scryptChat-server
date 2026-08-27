@@ -36,6 +36,8 @@ interface EncryptedMailboxItem {
 const rooms = new Map<string, SignalingRoom>();
 // Mailbox store: recipientDeviceId -> array of EncryptedMailboxItem
 const mailboxes = new Map<string, EncryptedMailboxItem[]>();
+// Device presence store: deviceId -> { lastSeen: number, displayName?: string }
+const devicePresences = new Map<string, { lastSeen: number; displayName?: string }>();
 
 // Clean expired rooms and old mailbox entries periodically
 setInterval(() => {
@@ -54,9 +56,82 @@ setInterval(() => {
       mailboxes.set(recipient, filtered);
     }
   }
+  for (const [deviceId, presence] of devicePresences.entries()) {
+    // Prune presences older than 10 minutes
+    if (now - presence.lastSeen > 10 * 60 * 1000) {
+      devicePresences.delete(deviceId);
+    }
+  }
 }, 30 * 1000);
 
 export const signalingRouter = Router();
+
+/**
+ * 0. Server Health & Relay Status
+ */
+signalingRouter.get('/status', (req: Request, res: Response) => {
+  const now = Date.now();
+  let onlineCount = 0;
+  for (const presence of devicePresences.values()) {
+    if (now - presence.lastSeen < 30000) {
+      onlineCount++;
+    }
+  }
+
+  res.json({
+    success: true,
+    status: 'online',
+    protocol: 'scryptChat/3.1',
+    serverTime: now,
+    activeRooms: rooms.size,
+    pendingMailboxes: mailboxes.size,
+    activeOnlineDevices: onlineCount,
+  });
+});
+
+/**
+ * 0.1 Device Presence Ping & Batch Query
+ */
+signalingRouter.post('/presence', (req: Request, res: Response) => {
+  const { deviceId, displayName } = req.body;
+  if (!deviceId) {
+    res.status(400).json({ error: 'deviceId is required' });
+    return;
+  }
+  devicePresences.set(deviceId, {
+    lastSeen: Date.now(),
+    displayName,
+  });
+  res.json({ success: true, timestamp: Date.now() });
+});
+
+signalingRouter.post('/presence/query', (req: Request, res: Response) => {
+  const { deviceIds } = req.body;
+  const now = Date.now();
+  const presences: Record<string, { isOnline: boolean; lastSeen: number; displayName?: string }> = {};
+
+  if (Array.isArray(deviceIds)) {
+    for (const id of deviceIds) {
+      const p = devicePresences.get(id);
+      if (p) {
+        // Active in last 25 seconds counts as currently online on relay
+        const isOnline = now - p.lastSeen < 25000;
+        presences[id] = {
+          isOnline,
+          lastSeen: p.lastSeen,
+          displayName: p.displayName,
+        };
+      } else {
+        presences[id] = {
+          isOnline: false,
+          lastSeen: 0,
+        };
+      }
+    }
+  }
+
+  res.json({ success: true, presences });
+});
 
 /**
  * 1. Create a 60-second Rolling Dynamic Pairing Room & Token
@@ -215,6 +290,12 @@ signalingRouter.post('/mailbox/send', (req: Request, res: Response) => {
     return;
   }
 
+  if (senderDeviceId) {
+    devicePresences.set(senderDeviceId, {
+      lastSeen: Date.now(),
+    });
+  }
+
   const item: EncryptedMailboxItem = {
     id: 'mail_' + Math.random().toString(36).substring(2, 11),
     senderDeviceId,
@@ -234,6 +315,11 @@ signalingRouter.post('/mailbox/send', (req: Request, res: Response) => {
 
 signalingRouter.get('/mailbox/pull/:deviceId', (req: Request, res: Response) => {
   const { deviceId } = req.params;
+  if (deviceId) {
+    devicePresences.set(deviceId, {
+      lastSeen: Date.now(),
+    });
+  }
   const items = mailboxes.get(deviceId) || [];
   // Clear after pulling
   mailboxes.delete(deviceId);

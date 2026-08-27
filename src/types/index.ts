@@ -4,6 +4,15 @@ export const PROTOCOL_VERSION: ProtocolVersion = 0x0301;
 export type VerificationStatus = 'UNVERIFIED' | 'TOFU' | 'VERIFIED';
 export type MessageDirection = 'INBOUND' | 'OUTBOUND';
 export type MessageStatus = 'queued' | 'sending' | 'delivered' | 'read' | 'failed' | 'verified';
+export type RelayStatus = 'ONLINE' | 'OFFLINE' | 'CONNECTING';
+
+export interface RelayServerStats {
+  status: 'online' | 'offline';
+  serverTime?: number;
+  activeRooms?: number;
+  pendingMailboxes?: number;
+  activeOnlineDevices?: number;
+}
 
 export enum PacketType {
   TEXT_MESSAGE = 0x10,

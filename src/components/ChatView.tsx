@@ -256,7 +256,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
             </div>
             <div
               className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-[#09090b] ${
-                isConnected ? 'bg-emerald-400' : 'bg-[#52525b]'
+                isConnected ? 'bg-emerald-400' : activeContact.isOnline ? 'bg-emerald-500' : 'bg-[#52525b]'
               }`}
             />
           </div>
@@ -271,15 +271,17 @@ export const ChatView: React.FC<ChatViewProps> = ({
             <p className="text-[11px] flex items-center gap-1.5">
               {isConnected ? (
                 <span className="text-emerald-400 font-medium flex items-center gap-1">
-                  Online
+                  Direct P2P
                   {latencyMs !== undefined && (
                     <span className="text-[#71717a] font-mono text-[10px]">
                       ({latencyMs}ms)
                     </span>
                   )}
                 </span>
+              ) : activeContact.isOnline ? (
+                <span className="text-emerald-400 font-medium">Online via Relay</span>
               ) : (
-                <span className="text-[#71717a]">Offline • Mailbox</span>
+                <span className="text-[#71717a]">Offline • Encrypted Mailbox</span>
               )}
             </p>
           </div>

@@ -128,7 +128,7 @@ export const PeerList: React.FC<PeerListProps> = ({
                   </div>
                   <div
                     className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-[#09090b] ${
-                      isConnected ? 'bg-emerald-400' : 'bg-[#52525b]'
+                      isConnected ? 'bg-emerald-400' : contact.isOnline ? 'bg-emerald-500' : 'bg-[#52525b]'
                     }`}
                   />
                 </div>

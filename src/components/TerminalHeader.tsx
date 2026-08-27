@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ConnectionState } from '../webrtc/peerManager';
-import { ContactRecord, IdentityRecord } from '../types/index';
+import { ContactRecord, IdentityRecord, RelayStatus } from '../types/index';
 import {
   Lock,
   Plus,
@@ -15,6 +15,7 @@ import {
 interface TerminalHeaderProps {
   identity: IdentityRecord | null;
   connectionState: ConnectionState;
+  relayStatus: RelayStatus;
   activeContact: ContactRecord | null;
   latencyMs: number | null;
   currentMobileTab: 'peers' | 'chat';
@@ -28,6 +29,7 @@ interface TerminalHeaderProps {
 export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   identity,
   connectionState,
+  relayStatus,
   activeContact,
   latencyMs,
   currentMobileTab,
@@ -99,7 +101,7 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
           {isDirect ? (
             <>
               <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              <span className="text-emerald-400 font-medium">Connected</span>
+              <span className="text-emerald-400 font-medium">Direct P2P</span>
               {latencyMs !== null && (
                 <span className="text-[#71717a] font-mono text-[11px] border-l border-[#27272a] pl-2">
                   {latencyMs}ms
@@ -109,12 +111,22 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
           ) : isConnecting ? (
             <>
               <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-              <span className="text-amber-300">Connecting...</span>
+              <span className="text-amber-300">Connecting P2P...</span>
+            </>
+          ) : relayStatus === 'ONLINE' ? (
+            <>
+              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+              <span className="text-[#e4e4e7] font-medium">Mailbox Online</span>
+            </>
+          ) : relayStatus === 'CONNECTING' ? (
+            <>
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+              <span className="text-amber-300">Connecting Relay...</span>
             </>
           ) : (
             <>
-              <span className="w-2 h-2 rounded-full bg-[#71717a]" />
-              <span className="text-[#a1a1aa]">Offline Mailbox</span>
+              <span className="w-2 h-2 rounded-full bg-red-400" />
+              <span className="text-red-300">Relay Offline</span>
             </>
           )}
         </div>
