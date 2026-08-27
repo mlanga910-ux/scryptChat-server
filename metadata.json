@@ -1,0 +1,6 @@
+{
+  "name": "scryptChat",
+  "description": "Secure, Local-First P2P Social Messenger & Direct File Transfer with WebRTC, Directional AES-256-GCM, Rolling 1-Minute QR Codes, and EXIF Inspector",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
