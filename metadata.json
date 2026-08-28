@@ -2,7 +2,8 @@
   "name": "scryptChat",
   "description": "Zero-trust end-to-end encrypted P2P and relay messaging with real signaling verification",
   "requestFramePermissions": [
-    "camera"
+    "camera",
+    "microphone"
   ],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

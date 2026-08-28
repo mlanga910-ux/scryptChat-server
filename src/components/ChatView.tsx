@@ -75,10 +75,29 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<any>(null);
+  const isRecordingCancelledRef = useRef<boolean>(false);
+  const audioStreamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, activeTransfers]);
+
+  // Cleanup audio tracks on unmount
+  useEffect(() => {
+    return () => {
+      if (audioStreamRef.current) {
+        audioStreamRef.current.getTracks().forEach((t) => {
+          try {
+            t.stop();
+          } catch {}
+        });
+        audioStreamRef.current = null;
+      }
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+    };
+  }, []);
 
   // Load blobs and file records for files in messages
   useEffect(() => {
@@ -133,6 +152,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStreamRef.current = stream;
+      isRecordingCancelledRef.current = false;
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
@@ -144,14 +165,24 @@ export const ChatView: React.FC<ChatViewProps> = ({
       };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const audioFile = new File([audioBlob], `voice_${Date.now()}.webm`, { type: 'audio/webm' });
-        try {
-          await onSendFile(audioFile);
-        } catch (err) {
-          console.error('Audio message send error:', err);
+        if (!isRecordingCancelledRef.current && audioChunksRef.current.length > 0) {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          const audioFile = new File([audioBlob], `voice_${Date.now()}.webm`, { type: 'audio/webm' });
+          try {
+            await onSendFile(audioFile);
+          } catch (err) {
+            console.error('Audio message send error:', err);
+          }
         }
-        stream.getTracks().forEach((track) => track.stop());
+        audioChunksRef.current = [];
+        if (audioStreamRef.current) {
+          audioStreamRef.current.getTracks().forEach((track) => {
+            try {
+              track.stop();
+            } catch {}
+          });
+          audioStreamRef.current = null;
+        }
       };
 
       mediaRecorder.start(200);
@@ -168,6 +199,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
+      isRecordingCancelledRef.current = false;
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       if (recordingTimerRef.current) {
@@ -179,6 +211,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
   const cancelRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
+      isRecordingCancelledRef.current = true;
       mediaRecorderRef.current.stop();
       audioChunksRef.current = [];
       setIsRecording(false);

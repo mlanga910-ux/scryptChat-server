@@ -5,9 +5,19 @@ import { signalingRouter } from './server/signaling';
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  // On Render, respect the PORT environment variable; in development/AI Studio container bind strictly to 3000
+  const PORT = process.env.RENDER ? (Number(process.env.PORT) || 3000) : 3000;
 
   app.use(express.json({ limit: '10mb' }));
+
+  // Serve static assets from public folder
+  const publicPath = path.join(process.cwd(), 'public');
+  app.use(express.static(publicPath));
+
+  // Handle favicon.ico explicitly to avoid 404 console errors
+  app.get('/favicon.ico', (req, res) => {
+    res.redirect(301, '/favicon.svg');
+  });
 
   // CORS Middleware for external signalling clients
   app.use((req, res, next) => {
@@ -21,7 +31,7 @@ async function startServer() {
     next();
   });
 
-  // Security Headers (CSP from Section 6)
+  // Security Headers
   app.use((req, res, next) => {
     res.setHeader(
       'Content-Security-Policy',
@@ -32,7 +42,7 @@ async function startServer() {
       "worker-src 'self' blob:;"
     );
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     next();
   });
 

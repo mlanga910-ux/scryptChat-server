@@ -86,7 +86,7 @@ export class PeerManager {
   public cryptoSession: CryptoSession | null = null;
   public activeContact: ContactRecord | null = null;
 
-  private identity: IdentityRecord;
+  public identity: IdentityRecord;
   private events: PeerManagerEvents;
 
   // Ephemeral handshake states
@@ -109,6 +109,9 @@ export class PeerManager {
   private relayCheckInterval: any = null;
   private lastPingSentTime = 0;
 
+  private fallbackRelayUrl = 'https://scryptchat.onrender.com';
+  private useFallback = false;
+
   constructor(identity: IdentityRecord, events: PeerManagerEvents) {
     this.identity = identity;
     this.events = events;
@@ -122,15 +125,18 @@ export class PeerManager {
   }
 
   public getRelayBaseUrl(): string {
+    if (this.customRelayUrl) return this.customRelayUrl;
+    if (this.useFallback) return this.fallbackRelayUrl;
     return '';
   }
 
   public setRelayBaseUrl(_url: string) {
     this.customRelayUrl = '';
+    this.useFallback = false;
     this.checkRelayHealth();
   }
 
-  public async fetchRelay(endpoint: string, options: RequestInit = {}, timeoutMs = 4500): Promise<Response> {
+  public async fetchRelay(endpoint: string, options: RequestInit = {}, timeoutMs = 8000): Promise<Response> {
     const baseUrl = this.getRelayBaseUrl();
     const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
     // Add anti-caching query parameter to prevent browser & CDN false-positive cache hits
@@ -155,8 +161,34 @@ export class PeerManager {
       });
       clearTimeout(timer);
       return response;
-    } catch (err) {
+    } catch (err: any) {
       clearTimeout(timer);
+      // If relative fetch failed and not already using fallback, try Render production fallback
+      if (
+        !this.useFallback &&
+        !baseUrl &&
+        typeof window !== 'undefined' &&
+        window.location.hostname !== 'scryptchat.onrender.com'
+      ) {
+        try {
+          const fallbackUrl = `${this.fallbackRelayUrl}${finalEndpoint}`;
+          const fallbackRes = await fetch(fallbackUrl, {
+            ...options,
+            cache: 'no-store',
+            headers: {
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Pragma': 'no-cache',
+              ...(options.headers || {}),
+            },
+          });
+          if (fallbackRes.ok) {
+            this.useFallback = true;
+            return fallbackRes;
+          }
+        } catch {
+          // Keep original error
+        }
+      }
       throw err;
     }
   }
@@ -420,7 +452,7 @@ export class PeerManager {
     };
   }
 
-  private async saveContact(deviceId: string, publicKeyRaw: string, safetyNumber: string, alias?: string): Promise<ContactRecord> {
+  public async saveContact(deviceId: string, publicKeyRaw: string, safetyNumber: string, alias?: string): Promise<ContactRecord> {
     const existing = await db.contacts.get(deviceId);
     const contact: ContactRecord = {
       deviceId,
@@ -810,15 +842,20 @@ export class PeerManager {
 
   public async checkRelayHealth(): Promise<RelayStatus> {
     const startTime = performance.now();
+    // Allow up to 15s when cold-starting or waking up from sleep, 6s for routine checks
+    const timeout = (this.relayStatus === 'CONNECTING' || this.relayStatus === 'RESTARTING') ? 15000 : 6000;
     try {
       const res = await this.fetchRelay('/api/signaling/status', {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
-      }, 4500);
+      }, timeout);
 
       if (res.ok) {
         const elapsed = Math.round(performance.now() - startTime);
-        const stats: RelayServerStats = await res.json();
+        let stats: RelayServerStats = { status: 'online' };
+        try {
+          stats = await res.json();
+        } catch {}
         this.relayStatus = 'ONLINE';
         this.relayStats = stats;
         this.relayPingMs = elapsed;
@@ -829,24 +866,30 @@ export class PeerManager {
         const isRestarting = res.status === 502 || res.status === 503 || res.status === 504;
         const status: RelayStatus = isRestarting ? 'RESTARTING' : 'OFFLINE';
         const reason = isRestarting
-          ? `Server instance restarting/waking up (HTTP ${res.status})`
+          ? `Server instance waking up on Render (HTTP ${res.status})`
           : `Signaling server returned HTTP ${res.status}`;
         this.relayStatus = status;
         this.relayPingMs = null;
         this.relayErrorReason = reason;
         this.events.onRelayStatusChange?.(status, undefined, null, reason);
+        if (isRestarting) {
+          setTimeout(() => this.checkRelayHealth(), 2500);
+        }
         return status;
       }
     } catch (err: any) {
       const isTimeout = err?.name === 'AbortError';
       const status: RelayStatus = isTimeout ? 'RESTARTING' : 'OFFLINE';
       const reason = isTimeout
-        ? 'Signaling connection timed out (Server sleeping or restarting on Render)'
+        ? 'Signaling connection timed out (Server waking up on Render free tier)'
         : (err?.message || 'Network error connecting to signaling server');
       this.relayStatus = status;
       this.relayPingMs = null;
       this.relayErrorReason = reason;
       this.events.onRelayStatusChange?.(status, undefined, null, reason);
+      if (isTimeout) {
+        setTimeout(() => this.checkRelayHealth(), 3000);
+      }
       return status;
     }
   }
@@ -860,12 +903,11 @@ export class PeerManager {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deviceId: this.identity.deviceId }),
-      }, 4000);
+      }, 5000);
       if (!res.ok) return false;
       const data = await res.json();
       return !!data.success && !!data.isConfirmed;
-    } catch (e) {
-      console.warn('Signaling pairing confirmation warning:', e);
+    } catch {
       return false;
     }
   }
@@ -924,7 +966,7 @@ export class PeerManager {
         const res = await this.fetchRelay(`/api/signaling/mailbox/pull/${this.identity.deviceId}`, {
           method: 'GET',
           headers: { 'Accept': 'application/json' },
-        }, 3500);
+        }, 3500).catch(() => null);
 
         if (res.ok) {
           const data = await res.json();

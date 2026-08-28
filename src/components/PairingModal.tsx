@@ -22,7 +22,21 @@ import {
   Clock,
   Layers,
   Sparkles,
+  Wifi,
+  Radio,
+  Eye,
+  EyeOff,
+  ShieldCheck,
+  Laptop,
+  CheckCircle2,
+  AlertCircle,
+  Link,
 } from 'lucide-react';
+import {
+  LanDiscoveryService,
+  LanDiscoveredPeer,
+  LanIncomingInvite,
+} from '../webrtc/lanDiscovery';
 
 interface PairingModalProps {
   isOpen: boolean;
@@ -32,7 +46,7 @@ interface PairingModalProps {
   onPairSuccess: () => void;
 }
 
-type TabType = 'my_code' | 'scan' | 'enter' | 'manual';
+type TabType = 'my_code' | 'scan' | 'enter' | 'lan' | 'manual';
 
 export const PairingModal: React.FC<PairingModalProps> = ({
   isOpen,
@@ -68,6 +82,14 @@ export const PairingModal: React.FC<PairingModalProps> = ({
   const scanAnimFrameRef = useRef<number | null>(null);
   const collectorRef = useRef<QrChunkCollector>(new QrChunkCollector());
 
+  // Local Network (LAN) state
+  const [isLanScanning, setIsLanScanning] = useState(false);
+  const [isLanVisible, setIsLanVisible] = useState(false);
+  const [lanPeers, setLanPeers] = useState<LanDiscoveredPeer[]>([]);
+  const [incomingInvite, setIncomingInvite] = useState<LanIncomingInvite | null>(null);
+  const [lanConnectingPeerId, setLanConnectingPeerId] = useState<string | null>(null);
+  const lanDiscoveryRef = useRef<LanDiscoveryService | null>(null);
+
   // Manual SDP state
   const [offerData, setOfferData] = useState<HandshakeOfferData | null>(null);
   const [answerData, setAnswerData] = useState<HandshakeAnswerData | null>(null);
@@ -91,6 +113,26 @@ export const PairingModal: React.FC<PairingModalProps> = ({
       setErrorMsg('');
       setIsSuccess(false);
       setStatusMessage('');
+
+      // Initialize LAN discovery service instance
+      lanDiscoveryRef.current = new LanDiscoveryService(
+        peerManager,
+        peerManager.identity,
+        {
+          onPeersUpdate: (peers) => setLanPeers(peers),
+          onIncomingInvite: (invite) => setIncomingInvite(invite),
+          onPairSuccess: () => {
+            setIsSuccess(true);
+            setStatusMessage('Direct P2P channel established over local network.');
+            setTimeout(() => {
+              onPairSuccess();
+              onClose();
+            }, 800);
+          },
+          onError: (errText) => setErrorMsg(errText),
+        }
+      );
+
       if (initialCode) {
         setJoinInput(initialCode.toUpperCase());
         setActiveTab('enter');
@@ -109,6 +151,12 @@ export const PairingModal: React.FC<PairingModalProps> = ({
       stopCamera();
       stopPolling();
       stopCountdown();
+      lanDiscoveryRef.current?.destroy();
+      lanDiscoveryRef.current = null;
+      setIsLanScanning(false);
+      setIsLanVisible(false);
+      setLanPeers([]);
+      setIncomingInvite(null);
     }
   }, [isOpen]);
 
@@ -312,6 +360,36 @@ export const PairingModal: React.FC<PairingModalProps> = ({
     }
   };
 
+  // Local Network (LAN) Handlers
+  const handleToggleLanScan = () => {
+    const next = !isLanScanning;
+    setIsLanScanning(next);
+    lanDiscoveryRef.current?.setScanning(next);
+    if (!next) {
+      setLanPeers([]);
+    }
+  };
+
+  const handleToggleLanVisible = () => {
+    const next = !isLanVisible;
+    setIsLanVisible(next);
+    lanDiscoveryRef.current?.setVisibility(next);
+  };
+
+  const handleConnectLanPeer = async (peer: LanDiscoveredPeer) => {
+    try {
+      setLanConnectingPeerId(peer.deviceId);
+      setErrorMsg('');
+      setStatusMessage(`Requesting local P2P pairing with ${peer.displayName}...`);
+      await lanDiscoveryRef.current?.connectToPeer(peer);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Local connection request failed');
+      setStatusMessage('');
+    } finally {
+      setLanConnectingPeerId(null);
+    }
+  };
+
   // Camera Management
   const startCamera = async () => {
     try {
@@ -335,7 +413,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
         videoRef.current.srcObject = stream;
         videoRef.current.setAttribute('playsinline', 'true');
         videoRef.current.muted = true;
-        await videoRef.current.play();
+        await videoRef.current.play().catch(() => {});
         runScanLoop();
       }
     } catch (err: any) {
@@ -353,7 +431,11 @@ export const PairingModal: React.FC<PairingModalProps> = ({
       scanAnimFrameRef.current = null;
     }
     if (cameraStreamRef.current) {
-      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch {}
+      });
       cameraStreamRef.current = null;
     }
     setIsCameraRunning(false);
@@ -483,39 +565,53 @@ export const PairingModal: React.FC<PairingModalProps> = ({
         </div>
 
         {/* Tab Navigation */}
-        <div className="grid grid-cols-3 p-1.5 mx-4 mt-3 bg-[#09090b] border border-[#27272a] rounded-xl text-xs font-medium">
+        <div className="grid grid-cols-4 p-1.5 mx-4 mt-3 bg-[#09090b] border border-[#27272a] rounded-xl text-xs font-medium">
           <button
             onClick={() => setActiveTab('my_code')}
-            className={`py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+            className={`py-1.5 px-1 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'my_code'
                 ? 'bg-[#27272a] text-white font-semibold shadow-sm'
                 : 'text-[#71717a] hover:text-white'
             }`}
           >
             <QrCode className="w-3.5 h-3.5" />
-            <span>My QR Code</span>
+            <span className="hidden sm:inline">My QR</span>
+            <span className="sm:hidden">QR</span>
           </button>
           <button
             onClick={() => setActiveTab('scan')}
-            className={`py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+            className={`py-1.5 px-1 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'scan'
                 ? 'bg-[#27272a] text-white font-semibold shadow-sm'
                 : 'text-[#71717a] hover:text-white'
             }`}
           >
             <Camera className="w-3.5 h-3.5" />
-            <span>Scan QR</span>
+            <span>Scan</span>
           </button>
           <button
             onClick={() => setActiveTab('enter')}
-            className={`py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+            className={`py-1.5 px-1 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'enter'
                 ? 'bg-[#27272a] text-white font-semibold shadow-sm'
                 : 'text-[#71717a] hover:text-white'
             }`}
           >
             <Key className="w-3.5 h-3.5" />
-            <span>Enter Code</span>
+            <span className="hidden sm:inline">Code</span>
+            <span className="sm:hidden">Code</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('lan')}
+            className={`py-1.5 px-1 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+              activeTab === 'lan'
+                ? 'bg-[#27272a] text-white font-semibold shadow-sm'
+                : 'text-[#71717a] hover:text-white'
+            }`}
+          >
+            <Wifi className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Local LAN</span>
+            <span className="sm:hidden">LAN</span>
           </button>
         </div>
 
@@ -524,6 +620,56 @@ export const PairingModal: React.FC<PairingModalProps> = ({
           {errorMsg && (
             <div className="p-2.5 bg-red-950/40 border border-red-900/60 text-red-300 rounded-xl text-xs">
               {errorMsg}
+            </div>
+          )}
+
+          {/* INCOMING LAN PAIRING INVITATION ALERT */}
+          {incomingInvite && (
+            <div className="p-4 bg-[#141416] border-2 border-emerald-500/80 rounded-xl space-y-3 shadow-xl animate-in fade-in duration-200">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-emerald-400 font-semibold text-xs">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                  </span>
+                  <span>Direct Local Connection Request</span>
+                </div>
+                <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 bg-[#27272a] text-[#a1a1aa] rounded">
+                  Local Network
+                </span>
+              </div>
+              <p className="text-xs text-[#d4d4d8] leading-relaxed">
+                Device <strong className="text-white font-semibold">{incomingInvite.fromDisplayName}</strong> wants to establish a direct encrypted P2P chat with you.
+              </p>
+              <div className="text-[11px] text-[#71717a] flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>Explicit permission required. No connection is formed until you click Accept.</span>
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  onClick={() => {
+                    incomingInvite.decline();
+                    setIncomingInvite(null);
+                  }}
+                  className="flex-1 py-2 px-3 bg-[#27272a] hover:bg-[#3f3f46] text-[#d4d4d8] hover:text-white rounded-lg text-xs font-medium transition-colors"
+                >
+                  Decline
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      setStatusMessage('Accepting local peer connection...');
+                      await incomingInvite.accept();
+                      setIncomingInvite(null);
+                    } catch (e: any) {
+                      setErrorMsg(e?.message || 'Failed to accept invitation');
+                    }
+                  }}
+                  className="flex-1 py-2 px-3 bg-emerald-500 hover:bg-emerald-400 text-black rounded-lg text-xs font-bold transition-colors shadow-sm"
+                >
+                  Accept &amp; Connect
+                </button>
+              </div>
             </div>
           )}
 
@@ -667,6 +813,198 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                 >
                   {isConnecting ? 'Connecting...' : 'Connect Peer'}
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: LOCAL LAN DISCOVERY */}
+          {activeTab === 'lan' && (
+            <div className="space-y-4 text-xs">
+              {/* Header card explaining serverless LAN */}
+              <div className="p-3.5 bg-[#09090b] border border-[#27272a] rounded-xl space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-white font-medium">
+                    <Wifi className="w-4 h-4 text-emerald-400" />
+                    <span>Local Network (LAN) Pairing</span>
+                  </div>
+                  <span className="text-[10px] px-2 py-0.5 bg-[#18181b] border border-[#27272a] text-emerald-400 rounded-full font-mono">
+                    Direct P2P
+                  </span>
+                </div>
+                <p className="text-[11px] text-[#71717a] leading-relaxed">
+                  Direct connection between devices on your local network. No external signaling server required when connected to the same Wi-Fi.
+                </p>
+              </div>
+
+              {/* Toggles Card */}
+              <div className="p-3.5 bg-[#09090b] border border-[#27272a] rounded-xl space-y-3.5">
+                {/* Toggle 1: Scan for local devices */}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <Radio className={`w-3.5 h-3.5 ${isLanScanning ? 'text-emerald-400 animate-pulse' : 'text-[#71717a]'}`} />
+                      <span className="font-medium text-white">Scan for Local Devices</span>
+                    </div>
+                    <p className="text-[11px] text-[#71717a]">
+                      Search for discoverable peers on your local Wi-Fi.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={isLanScanning}
+                    onClick={handleToggleLanScan}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      isLanScanning ? 'bg-white' : 'bg-[#27272a]'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full shadow ring-0 transition duration-200 ease-in-out ${
+                        isLanScanning ? 'translate-x-4 bg-black' : 'translate-x-0 bg-[#71717a]'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="border-t border-[#1e1e24]" />
+
+                {/* Toggle 2: Device visibility */}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      {isLanVisible ? (
+                        <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                      ) : (
+                        <EyeOff className="w-3.5 h-3.5 text-[#71717a]" />
+                      )}
+                      <span className="font-medium text-white">Device Visibility</span>
+                      <span
+                        className={`text-[9px] font-mono px-1.5 py-0.2 rounded ${
+                          isLanVisible
+                            ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-900/60'
+                            : 'bg-[#18181b] text-[#71717a] border border-[#27272a]'
+                        }`}
+                      >
+                        {isLanVisible ? 'Visible' : 'Stealth'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[#71717a]">
+                      {isLanVisible
+                        ? 'Visible: Other scanning devices on this Wi-Fi can see this device name.'
+                        : 'Invisible: Other local devices cannot see or detect this device.'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={isLanVisible}
+                    onClick={handleToggleLanVisible}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      isLanVisible ? 'bg-white' : 'bg-[#27272a]'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full shadow ring-0 transition duration-200 ease-in-out ${
+                        isLanVisible ? 'translate-x-4 bg-black' : 'translate-x-0 bg-[#71717a]'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* Security Guarantee Note */}
+                <div className="pt-1 flex items-start gap-2 text-[10px] text-[#a1a1aa] bg-[#141416] p-2.5 rounded-lg border border-[#27272a]">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Consent First:</strong> You have full control. No local device can connect to you without you actively clicking Accept.
+                  </span>
+                </div>
+              </div>
+
+              {/* Discovered Devices List */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-xs font-medium text-[#a1a1aa]">
+                    Discovered Devices {isLanScanning ? `(${lanPeers.length})` : ''}
+                  </span>
+                  {isLanScanning && (
+                    <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                      Scanning
+                    </span>
+                  )}
+                </div>
+
+                {!isLanScanning ? (
+                  <div className="p-5 text-center bg-[#09090b] border border-[#27272a] rounded-xl space-y-1.5">
+                    <Radio className="w-6 h-6 text-[#52525b] mx-auto" />
+                    <p className="text-xs text-[#a1a1aa] font-medium">Scanning is off</p>
+                    <p className="text-[11px] text-[#71717a] max-w-[260px] mx-auto">
+                      Turn on &ldquo;Scan for Local Devices&rdquo; to discover other peers on your Wi-Fi network.
+                    </p>
+                  </div>
+                ) : lanPeers.length === 0 ? (
+                  <div className="p-6 text-center bg-[#09090b] border border-[#27272a] rounded-xl space-y-2">
+                    <div className="relative w-10 h-10 mx-auto flex items-center justify-center">
+                      <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-500/20 animate-ping" />
+                      <Wifi className="w-5 h-5 text-emerald-400" />
+                    </div>
+                    <p className="text-xs text-white font-medium">Searching local network...</p>
+                    <p className="text-[11px] text-[#71717a] max-w-[280px] mx-auto leading-relaxed">
+                      Make sure the other device is on the same Wi-Fi, has ScryptChat open, and has <strong className="text-[#a1a1aa]">Device Visibility</strong> enabled.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {lanPeers.map((peer) => {
+                      const isTargetConnecting = lanConnectingPeerId === peer.deviceId;
+                      return (
+                        <div
+                          key={peer.deviceId}
+                          className="p-3 bg-[#09090b] border border-[#27272a] hover:border-[#3f3f46] rounded-xl flex items-center justify-between gap-3 transition-colors"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-8 h-8 rounded-lg bg-[#18181b] border border-[#27272a] flex items-center justify-center text-white shrink-0">
+                              <Laptop className="w-4 h-4 text-[#a1a1aa]" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-semibold text-white truncate text-xs">
+                                  {peer.displayName || 'Unnamed Device'}
+                                </span>
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                              </div>
+                              <div className="flex items-center gap-1.5 text-[10px] text-[#71717a] font-mono">
+                                <span>{peer.deviceId.slice(0, 16)}...</span>
+                                <span>•</span>
+                                <span className="text-[#a1a1aa]">
+                                  {peer.source === 'local-channel' ? 'Local Tab' : 'Wi-Fi'}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={() => handleConnectLanPeer(peer)}
+                            disabled={isTargetConnecting || !!lanConnectingPeerId}
+                            className="py-1.5 px-3 bg-white hover:bg-neutral-200 disabled:opacity-40 text-black font-semibold rounded-lg text-xs transition-colors shrink-0 flex items-center gap-1.5 shadow-sm"
+                          >
+                            {isTargetConnecting ? (
+                              <>
+                                <RefreshCw className="w-3 h-3 animate-spin" />
+                                <span>Connecting</span>
+                              </>
+                            ) : (
+                              <>
+                                <Link className="w-3 h-3" />
+                                <span>Connect</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           )}

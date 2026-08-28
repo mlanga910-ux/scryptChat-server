@@ -42,6 +42,48 @@ const mailboxes = new Map<string, EncryptedMailboxItem[]>();
 // Device presence store: deviceId -> { lastSeen: number, displayName?: string }
 const devicePresences = new Map<string, { lastSeen: number; displayName?: string }>();
 
+// Local Network (LAN) discovery registry
+interface LanDeviceRecord {
+  deviceId: string;
+  displayName: string;
+  subnetKey: string;
+  isVisible: boolean; // Opt-in visibility
+  lastSeen: number;
+}
+
+interface LanInviteRecord {
+  inviteId: string;
+  subnetKey: string;
+  fromDeviceId: string;
+  fromDisplayName: string;
+  toDeviceId: string;
+  offer: any;
+  status: 'pending' | 'accepted' | 'declined';
+  answer?: any;
+  createdAt: number;
+  expiresAt: number;
+}
+
+const lanDevices = new Map<string, LanDeviceRecord>();
+const lanInvites = new Map<string, LanInviteRecord>();
+
+function getClientSubnetKey(req: Request): string {
+  const forwarded = req.headers['x-forwarded-for'];
+  let ip = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress || '127.0.0.1';
+  if (ip.startsWith('::ffff:')) {
+    ip = ip.slice(7);
+  }
+  const parts = ip.split('.');
+  if (parts.length === 4) {
+    return `${parts[0]}.${parts[1]}.${parts[2]}.0/24`;
+  }
+  const v6Parts = ip.split(':');
+  if (v6Parts.length >= 4) {
+    return `${v6Parts[0]}:${v6Parts[1]}:${v6Parts[2]}:${v6Parts[3]}::/64`;
+  }
+  return ip;
+}
+
 // Clean expired rooms and old mailbox entries periodically
 setInterval(() => {
   const now = Date.now();
@@ -65,7 +107,19 @@ setInterval(() => {
       devicePresences.delete(deviceId);
     }
   }
-}, 30 * 1000);
+  // Prune LAN devices inactive for > 30 seconds
+  for (const [deviceId, lanDev] of lanDevices.entries()) {
+    if (now - lanDev.lastSeen > 30 * 1000) {
+      lanDevices.delete(deviceId);
+    }
+  }
+  // Prune expired LAN invites
+  for (const [inviteId, invite] of lanInvites.entries()) {
+    if (now > invite.expiresAt) {
+      lanInvites.delete(inviteId);
+    }
+  }
+}, 15 * 1000);
 
 export const signalingRouter = Router();
 
@@ -418,3 +472,159 @@ signalingRouter.get('/mailbox/pull/:deviceId', (req: Request, res: Response) => 
   mailboxes.delete(deviceId);
   res.json({ success: true, items });
 });
+
+/**
+ * 7. Local Network (LAN) Discovery & Direct LAN Pairing Endpoints
+ */
+
+// 7.1 Announce Presence / Toggle Visibility on Local Network
+signalingRouter.post('/lan/announce', (req: Request, res: Response) => {
+  const { deviceId, displayName, isVisible } = req.body;
+  if (!deviceId) {
+    res.status(400).json({ error: 'deviceId is required' });
+    return;
+  }
+
+  const subnetKey = getClientSubnetKey(req);
+  const now = Date.now();
+
+  if (isVisible === false) {
+    // Device opted out of visibility / invisible stealth mode
+    lanDevices.delete(deviceId);
+  } else {
+    lanDevices.set(deviceId, {
+      deviceId,
+      displayName: displayName || `Device-${deviceId.slice(-4)}`,
+      subnetKey,
+      isVisible: true,
+      lastSeen: now,
+    });
+  }
+
+  res.json({ success: true, subnetKey, isVisible: !!isVisible, timestamp: now });
+});
+
+// 7.2 Query Visible Peers on the Same Local Subnet
+signalingRouter.get('/lan/peers', (req: Request, res: Response) => {
+  const deviceId = req.query.deviceId as string;
+  const subnetKey = getClientSubnetKey(req);
+  const now = Date.now();
+
+  const peers: Array<{ deviceId: string; displayName: string; lastSeen: number }> = [];
+
+  for (const peer of lanDevices.values()) {
+    // Same subnet, actively visible, seen in last 25 seconds, and not self
+    if (
+      peer.subnetKey === subnetKey &&
+      peer.isVisible &&
+      peer.deviceId !== deviceId &&
+      now - peer.lastSeen < 25000
+    ) {
+      peers.push({
+        deviceId: peer.deviceId,
+        displayName: peer.displayName,
+        lastSeen: peer.lastSeen,
+      });
+    }
+  }
+
+  res.json({ success: true, subnetKey, peers });
+});
+
+// 7.3 Send Direct Pairing Invite to a Discovered Peer
+signalingRouter.post('/lan/invite', (req: Request, res: Response) => {
+  const { fromDeviceId, fromDisplayName, toDeviceId, offer } = req.body;
+
+  if (!fromDeviceId || !toDeviceId || !offer) {
+    res.status(400).json({ error: 'fromDeviceId, toDeviceId, and offer are required' });
+    return;
+  }
+
+  const subnetKey = getClientSubnetKey(req);
+  const inviteId = 'lan_' + Math.random().toString(36).substring(2, 11);
+  const now = Date.now();
+
+  const invite: LanInviteRecord = {
+    inviteId,
+    subnetKey,
+    fromDeviceId,
+    fromDisplayName: fromDisplayName || 'Nearby Peer',
+    toDeviceId,
+    offer,
+    status: 'pending',
+    createdAt: now,
+    expiresAt: now + 30000, // 30s TTL
+  };
+
+  lanInvites.set(inviteId, invite);
+  res.json({ success: true, inviteId, expiresAt: invite.expiresAt });
+});
+
+// 7.4 Query Pending Invites for This Device
+signalingRouter.get('/lan/invites', (req: Request, res: Response) => {
+  const deviceId = req.query.deviceId as string;
+  if (!deviceId) {
+    res.status(400).json({ error: 'deviceId is required' });
+    return;
+  }
+
+  const now = Date.now();
+  const pending: Array<{ inviteId: string; fromDeviceId: string; fromDisplayName: string; offer: any }> = [];
+
+  for (const inv of lanInvites.values()) {
+    if (inv.toDeviceId === deviceId && inv.status === 'pending' && now <= inv.expiresAt) {
+      pending.push({
+        inviteId: inv.inviteId,
+        fromDeviceId: inv.fromDeviceId,
+        fromDisplayName: inv.fromDisplayName,
+        offer: inv.offer,
+      });
+    }
+  }
+
+  res.json({ success: true, invites: pending });
+});
+
+// 7.5 Respond to Direct Invite (Accept or Decline)
+signalingRouter.post('/lan/respond', (req: Request, res: Response) => {
+  const { inviteId, accepted, answer } = req.body;
+
+  if (!inviteId) {
+    res.status(400).json({ error: 'inviteId is required' });
+    return;
+  }
+
+  const invite = lanInvites.get(inviteId);
+  if (!invite || Date.now() > invite.expiresAt) {
+    res.status(404).json({ error: 'Invite expired or not found' });
+    return;
+  }
+
+  invite.status = accepted ? 'accepted' : 'declined';
+  if (accepted && answer) {
+    invite.answer = answer;
+  }
+
+  res.json({ success: true, status: invite.status });
+});
+
+// 7.6 Check Status of an Outgoing Invite
+signalingRouter.get('/lan/invite/:inviteId/status', (req: Request, res: Response) => {
+  const { inviteId } = req.params;
+  const invite = lanInvites.get(inviteId);
+
+  if (!invite) {
+    res.status(404).json({ error: 'Invite not found or expired' });
+    return;
+  }
+
+  const isExpired = Date.now() > invite.expiresAt;
+  res.json({
+    success: true,
+    inviteId: invite.inviteId,
+    status: isExpired ? 'expired' : invite.status,
+    answer: invite.answer,
+    isExpired,
+  });
+});
+
