@@ -15,7 +15,6 @@ import { TerminalHeader } from './components/TerminalHeader';
 import { PeerList } from './components/PeerList';
 import { ChatView } from './components/ChatView';
 import { PairingModal } from './components/PairingModal';
-import { RelayStatusModal } from './components/RelayStatusModal';
 import { SecurityModal } from './components/SecurityModal';
 import { DataWipeDialog } from './components/DataWipeDialog';
 import { OnboardingModal } from './components/OnboardingModal';
@@ -40,11 +39,24 @@ export default function App() {
 
   // Modals
   const [isPairingOpen, setIsPairingOpen] = useState(false);
-  const [isRelayModalOpen, setIsRelayModalOpen] = useState(false);
+  const [initialPairCode, setInitialPairCode] = useState<string | undefined>(undefined);
   const [isSecurityOpen, setIsSecurityOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isWipeOpen, setIsWipeOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+
+  // Check URL params for direct pairing link (e.g. ?room=ABC123)
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const roomParam = params.get('room');
+      if (roomParam && /^[A-Z0-9]{6}$/i.test(roomParam.trim())) {
+        setInitialPairCode(roomParam.trim().toUpperCase());
+        setIsPairingOpen(true);
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+    } catch {}
+  }, []);
 
   // Peer Manager ref
   const peerManagerRef = useRef<PeerManager | null>(null);
@@ -239,7 +251,6 @@ export default function App() {
         onOpenSecurity={() => setIsSecurityOpen(true)}
         onOpenProfile={() => setIsProfileOpen(true)}
         onOpenWipe={() => setIsWipeOpen(true)}
-        onOpenRelayStatus={() => setIsRelayModalOpen(true)}
       />
 
       {/* Main Workspace Layout */}
@@ -307,29 +318,20 @@ export default function App() {
         />
       )}
 
-      {/* Pairing Modal (1-Minute Dynamic QR / OTP) */}
+      {/* Pairing Modal (Dynamic QR / OTP) */}
       {peerManagerRef.current && (
         <PairingModal
           isOpen={isPairingOpen}
           peerManager={peerManagerRef.current}
-          onClose={() => setIsPairingOpen(false)}
+          initialCode={initialPairCode}
+          onClose={() => {
+            setIsPairingOpen(false);
+            setInitialPairCode(undefined);
+          }}
           onPairSuccess={async () => {
             await refreshContacts();
             setMobileTab('chat');
           }}
-        />
-      )}
-
-      {/* Signaling & Relay Server Health Modal */}
-      {peerManagerRef.current && (
-        <RelayStatusModal
-          isOpen={isRelayModalOpen}
-          peerManager={peerManagerRef.current}
-          relayStatus={relayStatus}
-          relayPingMs={relayPingMs}
-          relayStats={relayStats}
-          relayErrorReason={relayErrorReason}
-          onClose={() => setIsRelayModalOpen(false)}
         />
       )}
 

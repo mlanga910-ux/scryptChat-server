@@ -9,7 +9,6 @@ import {
   Copy,
   MoreVertical,
   Shield,
-  Server,
 } from 'lucide-react';
 
 interface TerminalHeaderProps {
@@ -26,7 +25,6 @@ interface TerminalHeaderProps {
   onOpenSecurity: () => void;
   onOpenProfile: () => void;
   onOpenWipe: () => void;
-  onOpenRelayStatus?: () => void;
 }
 
 export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
@@ -43,7 +41,6 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   onOpenSecurity,
   onOpenProfile,
   onOpenWipe,
-  onOpenRelayStatus,
 }) => {
   const isDirect = connectionState === 'CONNECTED';
   const isConnecting = connectionState === 'CONNECTING' || connectionState === 'HANDSHAKING';
@@ -99,13 +96,10 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
 
       {/* Right: Status, Actions, Profile */}
       <div className="flex items-center gap-2.5">
-        {/* Status Pill Button */}
-        <button
+        {/* Status Pill Indicator */}
+        <div
           id="p2p-status-indicator"
-          type="button"
-          onClick={onOpenRelayStatus}
-          title="Click to view Signaling Server health and parameters"
-          className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] hover:border-[#3f3f46] text-xs transition-colors cursor-pointer"
+          className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-[#18181b] border border-[#27272a] text-xs select-none"
         >
           {isDirect ? (
             <>
@@ -148,7 +142,7 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
               <span className="text-red-300">Signaling Offline</span>
             </>
           )}
-        </button>
+        </div>
 
         {/* Add Contact Button */}
         <button
@@ -197,16 +191,6 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
                 className="w-full text-left px-3 py-2 text-[#e4e4e7] hover:text-white hover:bg-[#27272a] rounded-lg transition-colors"
               >
                 Profile &amp; Device
-              </button>
-              <button
-                onClick={() => {
-                  setIsMenuOpen(false);
-                  onOpenRelayStatus?.();
-                }}
-                className="w-full text-left px-3 py-2 text-[#e4e4e7] hover:text-white hover:bg-[#27272a] rounded-lg transition-colors flex items-center justify-between"
-              >
-                <span>Signaling Server</span>
-                <Server className="w-3.5 h-3.5 text-emerald-400" />
               </button>
               <button
                 onClick={() => {

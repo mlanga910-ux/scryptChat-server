@@ -80,7 +80,7 @@ signalingRouter.use((req, res, next) => {
 /**
  * 0. Server Health & Relay Status
  */
-signalingRouter.get(['/status', '/stats'], (req: Request, res: Response) => {
+signalingRouter.get(['/health', '/status', '/stats'], (req: Request, res: Response) => {
   const now = Date.now();
   let onlineCount = 0;
   for (const presence of devicePresences.values()) {
@@ -155,7 +155,7 @@ signalingRouter.post('/presence/query', (req: Request, res: Response) => {
  * 1. Create a 60-second Rolling Dynamic Pairing Room & Token
  */
 signalingRouter.post('/room/create', (req: Request, res: Response) => {
-  const { deviceId, ttlSeconds = 60 } = req.body;
+  const { deviceId, offer, ttlSeconds = 120 } = req.body;
   
   // Generate friendly 6-character code (avoid confusing letters like 0/O, 1/I)
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -172,6 +172,7 @@ signalingRouter.post('/room/create', (req: Request, res: Response) => {
     initiator: {
       deviceId: deviceId || 'initiator',
       role: 'initiator',
+      offer: offer || undefined,
       iceCandidates: [],
       updatedAt: now,
     },

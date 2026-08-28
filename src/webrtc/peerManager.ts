@@ -46,6 +46,7 @@ const RTC_CONFIG: RTCConfiguration = {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
   ],
 };
 
@@ -112,42 +113,20 @@ export class PeerManager {
     this.identity = identity;
     this.events = events;
     try {
-      const stored = localStorage.getItem('scryptchat_relay_server_url');
-      if (stored !== null && stored !== undefined) {
-        this.customRelayUrl = stored;
-      } else {
-        // If not running directly on Render, default to the deployed Render server
-        if (typeof window !== 'undefined' && window.location.hostname.includes('onrender.com')) {
-          this.customRelayUrl = '';
-        } else {
-          this.customRelayUrl = 'https://scryptchat.onrender.com';
-        }
-      }
-    } catch {
-      this.customRelayUrl = 'https://scryptchat.onrender.com';
-    }
+      localStorage.removeItem('scryptchat_relay_server_url');
+    } catch {}
+    this.customRelayUrl = '';
     this.checkRelayHealth();
     this.startMailboxPolling();
     this.startRelayHealthCheck();
   }
 
   public getRelayBaseUrl(): string {
-    if (this.customRelayUrl && this.customRelayUrl.trim()) {
-      return this.customRelayUrl.trim().replace(/\/+$/, '');
-    }
     return '';
   }
 
-  public setRelayBaseUrl(url: string) {
-    const cleaned = (url || '').trim().replace(/\/+$/, '');
-    this.customRelayUrl = cleaned;
-    try {
-      if (cleaned) {
-        localStorage.setItem('scryptchat_relay_server_url', cleaned);
-      } else {
-        localStorage.removeItem('scryptchat_relay_server_url');
-      }
-    } catch {}
+  public setRelayBaseUrl(_url: string) {
+    this.customRelayUrl = '';
     this.checkRelayHealth();
   }
 
@@ -332,6 +311,11 @@ export class PeerManager {
     // Save contact record in DB
     await this.saveContact(this.remoteDeviceId, offerData.identityPublicKeyRaw, safetyNumber, this.remoteDisplayName);
 
+    if (this.dataChannel?.readyState === 'open') {
+      this.setState('CONNECTED');
+      this.startHeartbeat();
+    }
+
     const answerData: HandshakeAnswerData = {
       protocolVer: PROTOCOL_VERSION,
       role: 'responder',
@@ -424,6 +408,11 @@ export class PeerManager {
 
     await this.saveContact(this.remoteDeviceId, answerData.identityPublicKeyRaw, safetyNumber, this.remoteDisplayName);
 
+    if (this.dataChannel?.readyState === 'open') {
+      this.setState('CONNECTED');
+      this.startHeartbeat();
+    }
+
     return {
       protocolVer: PROTOCOL_VERSION,
       role: 'initiator',
@@ -479,6 +468,15 @@ export class PeerManager {
       } else if (s === 'disconnected' || s === 'failed' || s === 'closed') {
         this.setState('DISCONNECTED');
         this.stopHeartbeat();
+      }
+    };
+    this.peerConnection.oniceconnectionstatechange = () => {
+      const s = this.peerConnection?.iceConnectionState;
+      if (s === 'connected' || s === 'completed') {
+        if (this.dataChannel?.readyState === 'open' && this.cryptoSession) {
+          this.setState('CONNECTED');
+          this.startHeartbeat();
+        }
       }
     };
   }
