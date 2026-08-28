@@ -7,6 +7,7 @@ import {
   FileTransferProgress,
   IdentityRecord,
   MessageRecord,
+  RelayServerStats,
   RelayStatus,
 } from './types/index';
 import { ConnectionState, PeerManager } from './webrtc/peerManager';
@@ -14,6 +15,7 @@ import { TerminalHeader } from './components/TerminalHeader';
 import { PeerList } from './components/PeerList';
 import { ChatView } from './components/ChatView';
 import { PairingModal } from './components/PairingModal';
+import { RelayStatusModal } from './components/RelayStatusModal';
 import { SecurityModal } from './components/SecurityModal';
 import { DataWipeDialog } from './components/DataWipeDialog';
 import { OnboardingModal } from './components/OnboardingModal';
@@ -28,6 +30,9 @@ export default function App() {
   const [activeTransfers, setActiveTransfers] = useState<FileTransferProgress[]>([]);
   const [connectionState, setConnectionState] = useState<ConnectionState>('DISCONNECTED');
   const [relayStatus, setRelayStatus] = useState<RelayStatus>('CONNECTING');
+  const [relayPingMs, setRelayPingMs] = useState<number | null>(null);
+  const [relayStats, setRelayStats] = useState<RelayServerStats | null>(null);
+  const [relayErrorReason, setRelayErrorReason] = useState<string | null>(null);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
 
   // Mobile View Switcher Tab ('peers' vs 'chat')
@@ -35,6 +40,7 @@ export default function App() {
 
   // Modals
   const [isPairingOpen, setIsPairingOpen] = useState(false);
+  const [isRelayModalOpen, setIsRelayModalOpen] = useState(false);
   const [isSecurityOpen, setIsSecurityOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isWipeOpen, setIsWipeOpen] = useState(false);
@@ -76,8 +82,11 @@ export default function App() {
               setMobileTab('chat');
             }
           },
-          onRelayStatusChange: (status) => {
+          onRelayStatusChange: (status, stats, pingMs, errorReason) => {
             setRelayStatus(status);
+            if (stats !== undefined) setRelayStats(stats || null);
+            setRelayPingMs(pingMs !== undefined ? pingMs : null);
+            setRelayErrorReason(errorReason || null);
           },
           onContactsPresencesUpdate: async () => {
             const updated = await db.contacts.toArray();
@@ -220,6 +229,8 @@ export default function App() {
         identity={identity}
         connectionState={connectionState}
         relayStatus={relayStatus}
+        relayPingMs={relayPingMs}
+        relayErrorReason={relayErrorReason}
         activeContact={activeContact}
         latencyMs={latencyMs}
         currentMobileTab={mobileTab}
@@ -228,6 +239,7 @@ export default function App() {
         onOpenSecurity={() => setIsSecurityOpen(true)}
         onOpenProfile={() => setIsProfileOpen(true)}
         onOpenWipe={() => setIsWipeOpen(true)}
+        onOpenRelayStatus={() => setIsRelayModalOpen(true)}
       />
 
       {/* Main Workspace Layout */}
@@ -305,6 +317,19 @@ export default function App() {
             await refreshContacts();
             setMobileTab('chat');
           }}
+        />
+      )}
+
+      {/* Signaling & Relay Server Health Modal */}
+      {peerManagerRef.current && (
+        <RelayStatusModal
+          isOpen={isRelayModalOpen}
+          peerManager={peerManagerRef.current}
+          relayStatus={relayStatus}
+          relayPingMs={relayPingMs}
+          relayStats={relayStats}
+          relayErrorReason={relayErrorReason}
+          onClose={() => setIsRelayModalOpen(false)}
         />
       )}
 

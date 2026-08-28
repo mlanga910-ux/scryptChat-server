@@ -4,18 +4,20 @@ import { ContactRecord, IdentityRecord, RelayStatus } from '../types/index';
 import {
   Lock,
   Plus,
-  KeyRound,
   Trash2,
   Check,
   Copy,
   MoreVertical,
   Shield,
+  Server,
 } from 'lucide-react';
 
 interface TerminalHeaderProps {
   identity: IdentityRecord | null;
   connectionState: ConnectionState;
   relayStatus: RelayStatus;
+  relayPingMs?: number | null;
+  relayErrorReason?: string | null;
   activeContact: ContactRecord | null;
   latencyMs: number | null;
   currentMobileTab: 'peers' | 'chat';
@@ -24,12 +26,15 @@ interface TerminalHeaderProps {
   onOpenSecurity: () => void;
   onOpenProfile: () => void;
   onOpenWipe: () => void;
+  onOpenRelayStatus?: () => void;
 }
 
 export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   identity,
   connectionState,
   relayStatus,
+  relayPingMs,
+  relayErrorReason,
   activeContact,
   latencyMs,
   currentMobileTab,
@@ -38,6 +43,7 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   onOpenSecurity,
   onOpenProfile,
   onOpenWipe,
+  onOpenRelayStatus,
 }) => {
   const isDirect = connectionState === 'CONNECTED';
   const isConnecting = connectionState === 'CONNECTING' || connectionState === 'HANDSHAKING';
@@ -93,17 +99,20 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
 
       {/* Right: Status, Actions, Profile */}
       <div className="flex items-center gap-2.5">
-        {/* Status Pill */}
-        <div
+        {/* Status Pill Button */}
+        <button
           id="p2p-status-indicator"
-          className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-md bg-[#18181b] border border-[#27272a] text-xs"
+          type="button"
+          onClick={onOpenRelayStatus}
+          title="Click to view Signaling Server health and parameters"
+          className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] hover:border-[#3f3f46] text-xs transition-colors cursor-pointer"
         >
           {isDirect ? (
             <>
               <span className="w-2 h-2 rounded-full bg-emerald-400" />
               <span className="text-emerald-400 font-medium">Direct P2P</span>
               {latencyMs !== null && (
-                <span className="text-[#71717a] font-mono text-[11px] border-l border-[#27272a] pl-2">
+                <span className="text-[#71717a] font-mono text-[11px] border-l border-[#27272a] pl-2 hidden sm:inline">
                   {latencyMs}ms
                 </span>
               )}
@@ -116,20 +125,30 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
           ) : relayStatus === 'ONLINE' ? (
             <>
               <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              <span className="text-[#e4e4e7] font-medium">Mailbox Online</span>
+              <span className="text-[#e4e4e7] font-medium">Signaling Online</span>
+              {relayPingMs !== null && relayPingMs !== undefined && (
+                <span className="text-[#71717a] font-mono text-[11px] border-l border-[#27272a] pl-2 hidden sm:inline">
+                  {relayPingMs}ms
+                </span>
+              )}
+            </>
+          ) : relayStatus === 'RESTARTING' ? (
+            <>
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+              <span className="text-amber-300">Signaling Restarting...</span>
             </>
           ) : relayStatus === 'CONNECTING' ? (
             <>
               <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-              <span className="text-amber-300">Connecting Relay...</span>
+              <span className="text-amber-300">Connecting Signaling...</span>
             </>
           ) : (
             <>
               <span className="w-2 h-2 rounded-full bg-red-400" />
-              <span className="text-red-300">Relay Offline</span>
+              <span className="text-red-300">Signaling Offline</span>
             </>
           )}
-        </div>
+        </button>
 
         {/* Add Contact Button */}
         <button
@@ -178,6 +197,16 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
                 className="w-full text-left px-3 py-2 text-[#e4e4e7] hover:text-white hover:bg-[#27272a] rounded-lg transition-colors"
               >
                 Profile &amp; Device
+              </button>
+              <button
+                onClick={() => {
+                  setIsMenuOpen(false);
+                  onOpenRelayStatus?.();
+                }}
+                className="w-full text-left px-3 py-2 text-[#e4e4e7] hover:text-white hover:bg-[#27272a] rounded-lg transition-colors flex items-center justify-between"
+              >
+                <span>Signaling Server</span>
+                <Server className="w-3.5 h-3.5 text-emerald-400" />
               </button>
               <button
                 onClick={() => {

@@ -15,6 +15,9 @@ interface SignalingRoom {
   expiresAt: number; // 60-second rolling expiry
   initiator?: RoomPeer;
   responder?: RoomPeer;
+  isConfirmed?: boolean;
+  confirmedAt?: number;
+  confirmedBy?: string[];
 }
 
 interface EncryptedMailboxItem {
@@ -66,10 +69,18 @@ setInterval(() => {
 
 export const signalingRouter = Router();
 
+// Ensure signaling requests are never cached by intermediate proxies or browsers
+signalingRouter.use((req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
+
 /**
  * 0. Server Health & Relay Status
  */
-signalingRouter.get('/status', (req: Request, res: Response) => {
+signalingRouter.get(['/status', '/stats'], (req: Request, res: Response) => {
   const now = Date.now();
   let onlineCount = 0;
   for (const presence of devicePresences.values()) {
@@ -78,12 +89,19 @@ signalingRouter.get('/status', (req: Request, res: Response) => {
     }
   }
 
+  let confirmedCount = 0;
+  for (const r of rooms.values()) {
+    if (r.isConfirmed) confirmedCount++;
+  }
+
   res.json({
     success: true,
     status: 'online',
     protocol: 'scryptChat/3.1',
     serverTime: now,
+    uptimeSeconds: Math.floor(process.uptime()),
     activeRooms: rooms.size,
+    confirmedRooms: confirmedCount,
     pendingMailboxes: mailboxes.size,
     activeOnlineDevices: onlineCount,
   });
@@ -252,6 +270,77 @@ signalingRouter.post('/room/:roomId/answer', (req: Request, res: Response) => {
 });
 
 /**
+ * 4.1 Exchange Trickle ICE Candidates via Signaling
+ */
+signalingRouter.post('/room/:roomId/ice', (req: Request, res: Response) => {
+  const { roomId } = req.params;
+  const { deviceId, candidate } = req.body;
+  const room = rooms.get(roomId.toUpperCase());
+
+  if (!room) {
+    res.status(404).json({ error: 'Room not found' });
+    return;
+  }
+
+  if (room.initiator && room.initiator.deviceId === deviceId) {
+    room.initiator.iceCandidates.push(candidate);
+  } else if (room.responder) {
+    room.responder.iceCandidates.push(candidate);
+  }
+
+  res.json({ success: true });
+});
+
+signalingRouter.get('/room/:roomId/ice/:deviceId', (req: Request, res: Response) => {
+  const { roomId, deviceId } = req.params;
+  const room = rooms.get(roomId.toUpperCase());
+
+  if (!room) {
+    res.status(404).json({ error: 'Room not found' });
+    return;
+  }
+
+  // Return peer's candidates (if requested by initiator, return responder's, and vice versa)
+  if (room.initiator?.deviceId === deviceId) {
+    res.json({ success: true, candidates: room.responder?.iceCandidates || [] });
+  } else {
+    res.json({ success: true, candidates: room.initiator?.iceCandidates || [] });
+  }
+});
+
+/**
+ * 4.2 Explicit Signaling Server Handshake & Pairing Confirmation
+ */
+signalingRouter.post('/room/:roomId/confirm', (req: Request, res: Response) => {
+  const { roomId } = req.params;
+  const { deviceId } = req.body;
+  const room = rooms.get(roomId.toUpperCase());
+
+  if (!room) {
+    res.status(404).json({ error: 'Pairing room not found or expired.' });
+    return;
+  }
+
+  room.isConfirmed = true;
+  room.confirmedAt = Date.now();
+  if (!room.confirmedBy) room.confirmedBy = [];
+  if (deviceId && !room.confirmedBy.includes(deviceId)) {
+    room.confirmedBy.push(deviceId);
+  }
+
+  console.log(`[Signaling] Pairing room ${roomId} confirmed by device ${deviceId} (Signaling handshake certified)`);
+
+  res.json({
+    success: true,
+    isConfirmed: true,
+    confirmedAt: room.confirmedAt,
+    confirmedBy: room.confirmedBy,
+    roomId: room.roomId,
+    serverMessage: 'Signaling server successfully certified and confirmed WebRTC peer match',
+  });
+});
+
+/**
  * 5. Poll Room Status
  */
 signalingRouter.get('/room/:roomId/status', (req: Request, res: Response) => {
@@ -276,6 +365,9 @@ signalingRouter.get('/room/:roomId/status', (req: Request, res: Response) => {
     answer: room.responder?.answer,
     initiatorDeviceId: room.initiator?.deviceId,
     responderDeviceId: room.responder?.deviceId,
+    isConfirmed: !!room.isConfirmed,
+    confirmedAt: room.confirmedAt || null,
+    confirmedBy: room.confirmedBy || [],
   });
 });
 

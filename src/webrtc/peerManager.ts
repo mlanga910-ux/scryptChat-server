@@ -57,7 +57,12 @@ export type ConnectionState =
 
 export interface PeerManagerEvents {
   onStateChange: (state: ConnectionState) => void;
-  onRelayStatusChange?: (status: RelayStatus, stats?: RelayServerStats) => void;
+  onRelayStatusChange?: (
+    status: RelayStatus,
+    stats?: RelayServerStats,
+    pingMs?: number | null,
+    errorReason?: string
+  ) => void;
   onContactsPresencesUpdate?: (presences: Record<string, { isOnline: boolean; lastSeen: number }>) => void;
   onMessageReceived: (message: MessageRecord) => void;
   onFileProgress: (progress: FileTransferProgress) => void;
@@ -71,6 +76,10 @@ export class PeerManager {
   public state: ConnectionState = 'DISCONNECTED';
   public relayStatus: RelayStatus = 'CONNECTING';
   public relayStats: RelayServerStats | null = null;
+  public relayPingMs: number | null = null;
+  public relayErrorReason: string | null = null;
+  public customRelayUrl: string = '';
+  public activeRoomId: string | null = null;
   public peerConnection: RTCPeerConnection | null = null;
   public dataChannel: RTCDataChannel | null = null;
   public cryptoSession: CryptoSession | null = null;
@@ -102,9 +111,75 @@ export class PeerManager {
   constructor(identity: IdentityRecord, events: PeerManagerEvents) {
     this.identity = identity;
     this.events = events;
+    try {
+      const stored = localStorage.getItem('scryptchat_relay_server_url');
+      if (stored !== null && stored !== undefined) {
+        this.customRelayUrl = stored;
+      } else {
+        // If not running directly on Render, default to the deployed Render server
+        if (typeof window !== 'undefined' && window.location.hostname.includes('onrender.com')) {
+          this.customRelayUrl = '';
+        } else {
+          this.customRelayUrl = 'https://scryptchat.onrender.com';
+        }
+      }
+    } catch {
+      this.customRelayUrl = 'https://scryptchat.onrender.com';
+    }
     this.checkRelayHealth();
     this.startMailboxPolling();
     this.startRelayHealthCheck();
+  }
+
+  public getRelayBaseUrl(): string {
+    if (this.customRelayUrl && this.customRelayUrl.trim()) {
+      return this.customRelayUrl.trim().replace(/\/+$/, '');
+    }
+    return '';
+  }
+
+  public setRelayBaseUrl(url: string) {
+    const cleaned = (url || '').trim().replace(/\/+$/, '');
+    this.customRelayUrl = cleaned;
+    try {
+      if (cleaned) {
+        localStorage.setItem('scryptchat_relay_server_url', cleaned);
+      } else {
+        localStorage.removeItem('scryptchat_relay_server_url');
+      }
+    } catch {}
+    this.checkRelayHealth();
+  }
+
+  public async fetchRelay(endpoint: string, options: RequestInit = {}, timeoutMs = 4500): Promise<Response> {
+    const baseUrl = this.getRelayBaseUrl();
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+    // Add anti-caching query parameter to prevent browser & CDN false-positive cache hits
+    const cacheBuster = `_cb=${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const separator = cleanEndpoint.includes('?') ? '&' : '?';
+    const finalEndpoint = `${cleanEndpoint}${separator}${cacheBuster}`;
+    const url = baseUrl ? `${baseUrl}${finalEndpoint}` : finalEndpoint;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          ...(options.headers || {}),
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      return response;
+    } catch (err) {
+      clearTimeout(timer);
+      throw err;
+    }
   }
 
   public updateIdentity(identity: IdentityRecord) {
@@ -592,7 +667,7 @@ export class PeerManager {
 
       // Post to relay mailbox buffer
       try {
-        await fetch('/api/signaling/mailbox/send', {
+        await this.fetchRelay('/api/signaling/mailbox/send', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -692,7 +767,7 @@ export class PeerManager {
       if (file.size <= 4 * 1024 * 1024) {
         const base64Content = arrayBufferToBase64(fileBytes);
         try {
-          await fetch('/api/signaling/mailbox/send', {
+          await this.fetchRelay('/api/signaling/mailbox/send', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -736,26 +811,64 @@ export class PeerManager {
   }
 
   public async checkRelayHealth(): Promise<RelayStatus> {
+    const startTime = performance.now();
     try {
-      const res = await fetch('/api/signaling/status', {
+      const res = await this.fetchRelay('/api/signaling/status', {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
-      });
+      }, 4500);
+
       if (res.ok) {
+        const elapsed = Math.round(performance.now() - startTime);
         const stats: RelayServerStats = await res.json();
         this.relayStatus = 'ONLINE';
         this.relayStats = stats;
-        this.events.onRelayStatusChange?.('ONLINE', stats);
+        this.relayPingMs = elapsed;
+        this.relayErrorReason = null;
+        this.events.onRelayStatusChange?.('ONLINE', stats, elapsed, undefined);
         return 'ONLINE';
       } else {
-        this.relayStatus = 'OFFLINE';
-        this.events.onRelayStatusChange?.('OFFLINE');
-        return 'OFFLINE';
+        const isRestarting = res.status === 502 || res.status === 503 || res.status === 504;
+        const status: RelayStatus = isRestarting ? 'RESTARTING' : 'OFFLINE';
+        const reason = isRestarting
+          ? `Server instance restarting/waking up (HTTP ${res.status})`
+          : `Signaling server returned HTTP ${res.status}`;
+        this.relayStatus = status;
+        this.relayPingMs = null;
+        this.relayErrorReason = reason;
+        this.events.onRelayStatusChange?.(status, undefined, null, reason);
+        return status;
       }
-    } catch {
-      this.relayStatus = 'OFFLINE';
-      this.events.onRelayStatusChange?.('OFFLINE');
-      return 'OFFLINE';
+    } catch (err: any) {
+      const isTimeout = err?.name === 'AbortError';
+      const status: RelayStatus = isTimeout ? 'RESTARTING' : 'OFFLINE';
+      const reason = isTimeout
+        ? 'Signaling connection timed out (Server sleeping or restarting on Render)'
+        : (err?.message || 'Network error connecting to signaling server');
+      this.relayStatus = status;
+      this.relayPingMs = null;
+      this.relayErrorReason = reason;
+      this.events.onRelayStatusChange?.(status, undefined, null, reason);
+      return status;
+    }
+  }
+
+  /**
+   * Explicitly confirm WebRTC pairing match on the signaling server
+   */
+  public async confirmPairingOnRelay(roomId: string): Promise<boolean> {
+    try {
+      const res = await this.fetchRelay(`/api/signaling/room/${roomId}/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId: this.identity.deviceId }),
+      }, 4000);
+      if (!res.ok) return false;
+      const data = await res.json();
+      return !!data.success && !!data.isConfirmed;
+    } catch (e) {
+      console.warn('Signaling pairing confirmation warning:', e);
+      return false;
     }
   }
 
@@ -765,7 +878,7 @@ export class PeerManager {
     }
     this.relayCheckInterval = setInterval(() => {
       this.checkRelayHealth();
-    }, 6000);
+    }, 5000);
   }
 
   private startMailboxPolling() {
@@ -773,25 +886,26 @@ export class PeerManager {
       if (!this.identity?.deviceId) return;
       try {
         // 1. Send Presence Heartbeat Ping
-        await fetch('/api/signaling/presence', {
+        await this.fetchRelay('/api/signaling/presence', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             deviceId: this.identity.deviceId,
             displayName: this.identity.displayName || 'Secure Peer',
           }),
-        }).catch(() => {});
+        }, 3000).catch(() => {});
 
         // 2. Query Presence for all known contacts
         const allContacts = await db.contacts.toArray();
         if (allContacts.length > 0) {
           const deviceIds = allContacts.map((c) => c.deviceId);
-          const presenceRes = await fetch('/api/signaling/presence/query', {
+          const presenceRes = await this.fetchRelay('/api/signaling/presence/query', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ deviceIds }),
-          });
-          if (presenceRes.ok) {
+          }, 3000).catch(() => null);
+
+          if (presenceRes && presenceRes.ok) {
             const pData = await presenceRes.json();
             if (pData.success && pData.presences) {
               for (const c of allContacts) {
@@ -809,13 +923,18 @@ export class PeerManager {
         }
 
         // 3. Pull Encrypted Mailbox items
-        const res = await fetch(`/api/signaling/mailbox/pull/${this.identity.deviceId}`);
-        const data = await res.json();
-        if (data.success && Array.isArray(data.items) && data.items.length > 0) {
-          for (const item of data.items) {
-            try {
-              const decodedJson = decodeURIComponent(escape(atob(item.encryptedEnvelope)));
-              const envelope = JSON.parse(decodedJson);
+        const res = await this.fetchRelay(`/api/signaling/mailbox/pull/${this.identity.deviceId}`, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+        }, 3500);
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && Array.isArray(data.items) && data.items.length > 0) {
+            for (const item of data.items) {
+              try {
+                const decodedJson = decodeURIComponent(escape(atob(item.encryptedEnvelope)));
+                const envelope = JSON.parse(decodedJson);
 
               let fileId = undefined;
               let fileRecord = undefined;
@@ -869,10 +988,11 @@ export class PeerManager {
             }
           }
         }
-      } catch (err) {
-        // Silent poll error
       }
-    }, 4000);
+    } catch (err) {
+      // Silent poll error
+    }
+  }, 4000);
   }
 
   private startHeartbeat() {

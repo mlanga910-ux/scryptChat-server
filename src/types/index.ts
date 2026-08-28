@@ -4,12 +4,14 @@ export const PROTOCOL_VERSION: ProtocolVersion = 0x0301;
 export type VerificationStatus = 'UNVERIFIED' | 'TOFU' | 'VERIFIED';
 export type MessageDirection = 'INBOUND' | 'OUTBOUND';
 export type MessageStatus = 'queued' | 'sending' | 'delivered' | 'read' | 'failed' | 'verified';
-export type RelayStatus = 'ONLINE' | 'OFFLINE' | 'CONNECTING';
+export type RelayStatus = 'ONLINE' | 'OFFLINE' | 'CONNECTING' | 'RESTARTING';
 
 export interface RelayServerStats {
   status: 'online' | 'offline';
   serverTime?: number;
+  uptimeSeconds?: number;
   activeRooms?: number;
+  confirmedRooms?: number;
   pendingMailboxes?: number;
   activeOnlineDevices?: number;
 }

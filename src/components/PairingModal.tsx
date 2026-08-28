@@ -139,7 +139,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
       const offer = await peerManager.createOffer();
       setOfferData(offer);
 
-      const res = await fetch('/api/signaling/room/create', {
+      const res = await peerManager.fetchRelay('/api/signaling/room/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deviceId: offer.deviceId, ttlSeconds: 60 }),
@@ -153,7 +153,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
       setRemainingSeconds(60);
 
       // Post offer to created room
-      await fetch(`/api/signaling/room/${code}/offer`, {
+      await peerManager.fetchRelay(`/api/signaling/room/${code}/offer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ offer, deviceId: offer.deviceId }),
@@ -165,16 +165,21 @@ export const PairingModal: React.FC<PairingModalProps> = ({
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
       pollIntervalRef.current = setInterval(async () => {
         try {
-          const statusRes = await fetch(`/api/signaling/room/${code}/status`);
+          const statusRes = await peerManager.fetchRelay(`/api/signaling/room/${code}/status`, {
+            method: 'GET',
+          }, 3000);
           const statusData = await statusRes.json();
           if (statusData.hasAnswer && statusData.answer) {
             clearInterval(pollIntervalRef.current);
-            setRoomStatusText('Peer answer received! Finalizing encryption handshake...');
+            setRoomStatusText('Peer answer received! Verifying cryptographic signature...');
             await peerManager.acceptAnswer(statusData.answer);
+            setRoomStatusText('Certifying pairing on signaling server...');
+            await peerManager.confirmPairingOnRelay(code);
+            setRoomStatusText('✓ Signaling match certified! Direct P2P active.');
             setTimeout(() => {
               onPairSuccess();
               onClose();
-            }, 600);
+            }, 700);
           }
         } catch (pollErr) {
           console.warn('Poll error:', pollErr);
@@ -201,11 +206,11 @@ export const PairingModal: React.FC<PairingModalProps> = ({
       setErrorMsg('');
       setRoomStatusText(`Connecting with code ${code}...`);
 
-      const joinRes = await fetch(`/api/signaling/room/${code}/join`, {
+      const joinRes = await peerManager.fetchRelay(`/api/signaling/room/${code}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deviceId: 'responder' }),
-      });
+      }, 4000);
       const joinData = await joinRes.json();
       if (!joinData.success || !joinData.offer) {
         throw new Error('This code has expired or is invalid. Please request a new 1-minute code.');
@@ -216,17 +221,19 @@ export const PairingModal: React.FC<PairingModalProps> = ({
       setAnswerData(answer);
 
       // Post answer back
-      await fetch(`/api/signaling/room/${code}/answer`, {
+      await peerManager.fetchRelay(`/api/signaling/room/${code}/answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ answer }),
-      });
+      }, 4000);
 
-      setRoomStatusText('Connected! Opening chat...');
+      setRoomStatusText('Answer transmitted! Confirming handshake on signaling server...');
+      await peerManager.confirmPairingOnRelay(code);
+      setRoomStatusText('✓ Signaling match certified! Direct P2P active.');
       setTimeout(() => {
         onPairSuccess();
         onClose();
-      }, 800);
+      }, 700);
     } catch (err: any) {
       setErrorMsg(err.message || 'Connecting to peer failed');
       setRoomStatusText('');
@@ -663,6 +670,33 @@ export const PairingModal: React.FC<PairingModalProps> = ({
               </div>
             </div>
           )}
+          {/* Signaling Matchmaker Status Footer */}
+          <div className="pt-2.5 border-t border-[#27272a] flex items-center justify-between text-[11px] text-[#71717a]">
+            <div className="flex items-center gap-1.5">
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  peerManager.relayStatus === 'ONLINE'
+                    ? 'bg-emerald-400'
+                    : peerManager.relayStatus === 'RESTARTING' || peerManager.relayStatus === 'CONNECTING'
+                    ? 'bg-amber-400 animate-pulse'
+                    : 'bg-red-400'
+                }`}
+              />
+              <span className="text-[#a1a1aa]">
+                Signaling Server:{' '}
+                {peerManager.relayStatus === 'ONLINE'
+                  ? 'Online'
+                  : peerManager.relayStatus === 'RESTARTING'
+                  ? 'Restarting...'
+                  : peerManager.relayStatus === 'CONNECTING'
+                  ? 'Connecting...'
+                  : 'Offline'}
+              </span>
+            </div>
+            <span className="font-mono text-[10px] text-[#71717a] truncate max-w-[170px]">
+              {peerManager.getRelayBaseUrl() || 'local origin'}
+            </span>
+          </div>
         </div>
       </div>
     </div>
