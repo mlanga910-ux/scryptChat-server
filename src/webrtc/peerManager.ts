@@ -109,9 +109,6 @@ export class PeerManager {
   private relayCheckInterval: any = null;
   private lastPingSentTime = 0;
 
-  private fallbackRelayUrl = 'https://scryptchat.onrender.com';
-  private useFallback = false;
-
   constructor(identity: IdentityRecord, events: PeerManagerEvents) {
     this.identity = identity;
     this.events = events;
@@ -125,21 +122,18 @@ export class PeerManager {
   }
 
   public getRelayBaseUrl(): string {
-    if (this.customRelayUrl) return this.customRelayUrl;
-    if (this.useFallback) return this.fallbackRelayUrl;
-    return '';
+    return this.customRelayUrl || '';
   }
 
-  public setRelayBaseUrl(_url: string) {
-    this.customRelayUrl = '';
-    this.useFallback = false;
+  public setRelayBaseUrl(url: string) {
+    this.customRelayUrl = url?.trim() || '';
     this.checkRelayHealth();
   }
 
-  public async fetchRelay(endpoint: string, options: RequestInit = {}, timeoutMs = 8000): Promise<Response> {
+  public async fetchRelay(endpoint: string, options: RequestInit = {}, timeoutMs = 12000): Promise<Response> {
     const baseUrl = this.getRelayBaseUrl();
     const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-    // Add anti-caching query parameter to prevent browser & CDN false-positive cache hits
+    // Anti-caching parameter
     const cacheBuster = `_cb=${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const separator = cleanEndpoint.includes('?') ? '&' : '?';
     const finalEndpoint = `${cleanEndpoint}${separator}${cacheBuster}`;
@@ -163,32 +157,6 @@ export class PeerManager {
       return response;
     } catch (err: any) {
       clearTimeout(timer);
-      // If relative fetch failed and not already using fallback, try Render production fallback
-      if (
-        !this.useFallback &&
-        !baseUrl &&
-        typeof window !== 'undefined' &&
-        window.location.hostname !== 'scryptchat.onrender.com'
-      ) {
-        try {
-          const fallbackUrl = `${this.fallbackRelayUrl}${finalEndpoint}`;
-          const fallbackRes = await fetch(fallbackUrl, {
-            ...options,
-            cache: 'no-store',
-            headers: {
-              'Cache-Control': 'no-cache, no-store, must-revalidate',
-              'Pragma': 'no-cache',
-              ...(options.headers || {}),
-            },
-          });
-          if (fallbackRes.ok) {
-            this.useFallback = true;
-            return fallbackRes;
-          }
-        } catch {
-          // Keep original error
-        }
-      }
       throw err;
     }
   }
@@ -842,8 +810,7 @@ export class PeerManager {
 
   public async checkRelayHealth(): Promise<RelayStatus> {
     const startTime = performance.now();
-    // Allow up to 15s when cold-starting or waking up from sleep, 6s for routine checks
-    const timeout = (this.relayStatus === 'CONNECTING' || this.relayStatus === 'RESTARTING') ? 15000 : 6000;
+    const timeout = (this.relayStatus === 'CONNECTING' || this.relayStatus === 'RESTARTING') ? 10000 : 7000;
     try {
       const res = await this.fetchRelay('/api/signaling/status', {
         method: 'GET',
@@ -863,33 +830,24 @@ export class PeerManager {
         this.events.onRelayStatusChange?.('ONLINE', stats, elapsed, undefined);
         return 'ONLINE';
       } else {
-        const isRestarting = res.status === 502 || res.status === 503 || res.status === 504;
-        const status: RelayStatus = isRestarting ? 'RESTARTING' : 'OFFLINE';
-        const reason = isRestarting
-          ? `Server instance waking up on Render (HTTP ${res.status})`
-          : `Signaling server returned HTTP ${res.status}`;
+        const status: RelayStatus = 'OFFLINE';
+        const reason = `Signaling server returned HTTP ${res.status}`;
         this.relayStatus = status;
         this.relayPingMs = null;
         this.relayErrorReason = reason;
         this.events.onRelayStatusChange?.(status, undefined, null, reason);
-        if (isRestarting) {
-          setTimeout(() => this.checkRelayHealth(), 2500);
-        }
         return status;
       }
     } catch (err: any) {
       const isTimeout = err?.name === 'AbortError';
-      const status: RelayStatus = isTimeout ? 'RESTARTING' : 'OFFLINE';
+      const status: RelayStatus = 'OFFLINE';
       const reason = isTimeout
-        ? 'Signaling connection timed out (Server waking up on Render free tier)'
-        : (err?.message || 'Network error connecting to signaling server');
+        ? 'Signaling connection timed out'
+        : (err?.message || 'Signaling server unreachable');
       this.relayStatus = status;
       this.relayPingMs = null;
       this.relayErrorReason = reason;
       this.events.onRelayStatusChange?.(status, undefined, null, reason);
-      if (isTimeout) {
-        setTimeout(() => this.checkRelayHealth(), 3000);
-      }
       return status;
     }
   }
@@ -918,7 +876,7 @@ export class PeerManager {
     }
     this.relayCheckInterval = setInterval(() => {
       this.checkRelayHealth();
-    }, 5000);
+    }, 8000);
   }
 
   private startMailboxPolling() {

@@ -206,10 +206,10 @@ signalingRouter.post('/presence/query', (req: Request, res: Response) => {
 });
 
 /**
- * 1. Create a 60-second Rolling Dynamic Pairing Room & Token
+ * 1. Create a 5-minute Rolling Dynamic Pairing Room & Token
  */
 signalingRouter.post('/room/create', (req: Request, res: Response) => {
-  const { deviceId, offer, ttlSeconds = 120 } = req.body;
+  const { deviceId, offer, ttlSeconds = 300 } = req.body;
   
   // Generate friendly 6-character code (avoid confusing letters like 0/O, 1/I)
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -245,9 +245,9 @@ signalingRouter.post('/room/create', (req: Request, res: Response) => {
  * 2. Post Handshake Offer
  */
 signalingRouter.post('/room/:roomId/offer', (req: Request, res: Response) => {
-  const { roomId } = req.params;
+  const cleanId = (req.params.roomId || '').trim().toUpperCase();
   const { offer, deviceId } = req.body;
-  const room = rooms.get(roomId.toUpperCase());
+  const room = rooms.get(cleanId);
 
   if (!room) {
     res.status(404).json({ error: 'Pairing room expired or does not exist.' });
@@ -255,8 +255,8 @@ signalingRouter.post('/room/:roomId/offer', (req: Request, res: Response) => {
   }
 
   if (Date.now() > room.expiresAt) {
-    rooms.delete(roomId.toUpperCase());
-    res.status(410).json({ error: 'Pairing code expired (60s limit). Please generate a fresh code.' });
+    rooms.delete(cleanId);
+    res.status(410).json({ error: 'Pairing code expired. Please generate a fresh code.' });
     return;
   }
 
@@ -273,9 +273,9 @@ signalingRouter.post('/room/:roomId/offer', (req: Request, res: Response) => {
  * 3. Join Room & Fetch Offer
  */
 signalingRouter.post('/room/:roomId/join', (req: Request, res: Response) => {
-  const { roomId } = req.params;
+  const cleanId = (req.params.roomId || '').trim().toUpperCase();
   const { deviceId } = req.body;
-  const room = rooms.get(roomId.toUpperCase());
+  const room = rooms.get(cleanId);
 
   if (!room) {
     res.status(404).json({ error: 'Pairing code not found or expired.' });
@@ -283,8 +283,8 @@ signalingRouter.post('/room/:roomId/join', (req: Request, res: Response) => {
   }
 
   if (Date.now() > room.expiresAt) {
-    rooms.delete(roomId.toUpperCase());
-    res.status(410).json({ error: 'Pairing code has expired. Ask peer for a fresh 1-minute QR code.' });
+    rooms.delete(cleanId);
+    res.status(410).json({ error: 'Pairing code has expired. Please generate a fresh code.' });
     return;
   }
 
@@ -306,9 +306,9 @@ signalingRouter.post('/room/:roomId/join', (req: Request, res: Response) => {
  * 4. Post Answer
  */
 signalingRouter.post('/room/:roomId/answer', (req: Request, res: Response) => {
-  const { roomId } = req.params;
+  const cleanId = (req.params.roomId || '').trim().toUpperCase();
   const { answer } = req.body;
-  const room = rooms.get(roomId.toUpperCase());
+  const room = rooms.get(cleanId);
 
   if (!room) {
     res.status(404).json({ error: 'Pairing room not found or expired.' });
@@ -367,9 +367,9 @@ signalingRouter.get('/room/:roomId/ice/:deviceId', (req: Request, res: Response)
  * 4.2 Explicit Signaling Server Handshake & Pairing Confirmation
  */
 signalingRouter.post('/room/:roomId/confirm', (req: Request, res: Response) => {
-  const { roomId } = req.params;
+  const cleanId = (req.params.roomId || '').trim().toUpperCase();
   const { deviceId } = req.body;
-  const room = rooms.get(roomId.toUpperCase());
+  const room = rooms.get(cleanId);
 
   if (!room) {
     res.status(404).json({ error: 'Pairing room not found or expired.' });
@@ -382,8 +382,6 @@ signalingRouter.post('/room/:roomId/confirm', (req: Request, res: Response) => {
   if (deviceId && !room.confirmedBy.includes(deviceId)) {
     room.confirmedBy.push(deviceId);
   }
-
-  console.log(`[Signaling] Pairing room ${roomId} confirmed by device ${deviceId} (Signaling handshake certified)`);
 
   res.json({
     success: true,
@@ -399,8 +397,8 @@ signalingRouter.post('/room/:roomId/confirm', (req: Request, res: Response) => {
  * 5. Poll Room Status
  */
 signalingRouter.get('/room/:roomId/status', (req: Request, res: Response) => {
-  const { roomId } = req.params;
-  const room = rooms.get(roomId.toUpperCase());
+  const cleanId = (req.params.roomId || '').trim().toUpperCase();
+  const room = rooms.get(cleanId);
 
   if (!room) {
     res.status(404).json({ error: 'Room expired or closed.' });
