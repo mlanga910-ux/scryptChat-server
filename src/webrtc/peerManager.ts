@@ -18,6 +18,7 @@ import {
   arrayBufferToBase64,
   arrayBufferToHex,
   base64ToArrayBuffer,
+  bigEndianBytesToUint64,
   generateRandomBytes,
   generateRandomHexId,
   sha256,
@@ -68,6 +69,7 @@ export interface PeerManagerEvents {
   onMessageReceived: (message: MessageRecord) => void;
   onFileProgress: (progress: FileTransferProgress) => void;
   onFileCompleted: (fileRecord: FileRecord, blob: Blob) => void;
+  onMediaSignal?: (signal: any) => void;
   onPeerInfo: (contact: ContactRecord) => void;
   onError: (error: string) => void;
   onLatencyUpdate: (ms: number) => void;
@@ -85,6 +87,7 @@ export class PeerManager {
   public dataChannel: RTCDataChannel | null = null;
   public cryptoSession: CryptoSession | null = null;
   public activeContact: ContactRecord | null = null;
+  public latencyMs: number = 0;
 
   public identity: IdentityRecord;
   private events: PeerManagerEvents;
@@ -168,6 +171,11 @@ export class PeerManager {
   private setState(newState: ConnectionState) {
     this.state = newState;
     this.events.onStateChange(newState);
+    if (newState === 'CONNECTED' && this.remoteDeviceId) {
+      setTimeout(() => {
+        this.flushOutboxForPeer(this.remoteDeviceId);
+      }, 300);
+    }
   }
 
   public isConnected(): boolean {
@@ -293,7 +301,7 @@ export class PeerManager {
     );
 
     const safetyNumber = await computeSafetyNumber(ourIdentityRaw, this.remoteIdentityPublicKeyRaw);
-    const sessionId = new DataView(transcriptHash.buffer, transcriptHash.byteOffset, 8).getBigUint64(0, false);
+    const sessionId = bigEndianBytesToUint64(transcriptHash, 0);
 
     // Responder: sendKey is B2A, recvKey is A2B
     this.cryptoSession = new CryptoSession({
@@ -391,7 +399,7 @@ export class PeerManager {
     );
 
     const safetyNumber = await computeSafetyNumber(ourIdentityRaw, this.remoteIdentityPublicKeyRaw);
-    const sessionId = new DataView(transcriptHash.buffer, transcriptHash.byteOffset, 8).getBigUint64(0, false);
+    const sessionId = bigEndianBytesToUint64(transcriptHash, 0);
 
     // Initiator: sendKey is A2B, recvKey is B2A
     this.cryptoSession = new CryptoSession({
@@ -603,14 +611,22 @@ export class PeerManager {
               new Uint8Array(0)
             );
             this.dataChannel.send(encryptedPong);
-          } else {
+          } else if (header.flags === 0x01) {
             // Pong received
             const now = Date.now();
             if (this.lastPingSentTime > 0) {
               const rtt = now - this.lastPingSentTime;
+              this.latencyMs = rtt;
               this.events.onLatencyUpdate(rtt);
             }
           }
+          break;
+        }
+
+        case PacketType.MEDIA_SIGNAL: {
+          const jsonStr = new TextDecoder().decode(decryptedPayload);
+          const signal = JSON.parse(jsonStr);
+          this.handleMediaSignal(signal);
           break;
         }
       }
@@ -619,8 +635,94 @@ export class PeerManager {
     }
   }
 
+  private handleMediaSignal(signal: any) {
+    if (this.events.onMediaSignal) {
+      this.events.onMediaSignal(signal);
+    }
+  }
+
+  public async sendMediaSignal(signal: any): Promise<void> {
+    if (!this.isConnected() || !this.cryptoSession || !this.dataChannel) {
+      console.warn('Cannot send media signal, not connected');
+      return;
+    }
+    const jsonStr = JSON.stringify(signal);
+    const payloadBytes = new TextEncoder().encode(jsonStr);
+    
+    const msgIdBigInt = BigInt('0x' + generateRandomHexId(8));
+    const headerBytes = buildPacketHeader(
+      PacketType.MEDIA_SIGNAL,
+      this.cryptoSession.sessionId,
+      msgIdBigInt,
+      0
+    );
+
+    const frame = await this.cryptoSession.encryptFrame(headerBytes, payloadBytes);
+    this.dataChannel.send(frame);
+  }
+
+  public async flushOutboxForPeer(peerDeviceId: string): Promise<void> {
+    if (!peerDeviceId || !this.isConnected() || !this.cryptoSession || !this.dataChannel) return;
+
+    try {
+      const queuedMessages = await db.messages
+        .where('chatDeviceId')
+        .equals(peerDeviceId)
+        .filter((m) => m.status === 'queued' && m.direction === 'OUTBOUND')
+        .toArray();
+
+      if (queuedMessages.length === 0) return;
+
+      for (const msg of queuedMessages) {
+        if (!this.isConnected() || !this.dataChannel || this.dataChannel.readyState !== 'open') break;
+
+        if (msg.fileId) {
+          const fileRec = await db.files.get(msg.fileId);
+          if (fileRec && fileRec.blobRef) {
+            const fileObj = fileRec.blobRef instanceof File
+              ? fileRec.blobRef
+              : new File([fileRec.blobRef], fileRec.name, { type: fileRec.mimeType });
+
+            await fileTransferManager.sendFile(
+              fileObj,
+              this.dataChannel,
+              this.cryptoSession,
+              {
+                onProgress: this.events.onFileProgress,
+                onCompleted: async () => {
+                  if (msg.id) {
+                    await db.messages.update(msg.id, { status: 'delivered' });
+                  }
+                },
+                onError: (fId, err) => {
+                  console.warn('Outbox file sync error:', err);
+                },
+              }
+            );
+          }
+        } else if (msg.payloadText) {
+          const payloadBytes = new TextEncoder().encode(msg.payloadText);
+          const msgIdBigInt = BigInt('0x' + generateRandomHexId(8));
+          const header = buildPacketHeader(
+            PacketType.TEXT_MESSAGE,
+            this.cryptoSession.sessionId,
+            msgIdBigInt,
+            Number(this.cryptoSession.getNextSendCounter())
+          );
+          const frame = await this.cryptoSession.encryptFrame(header, payloadBytes);
+          this.dataChannel.send(frame);
+          if (msg.id) {
+            await db.messages.update(msg.id, { status: 'delivered' });
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Error syncing outbox to peer:', err);
+    }
+  }
+
   /**
-   * Sends a message directly via WebRTC if connected, or queues into the Encrypted Mailbox if offline.
+   * Sends a message directly via WebRTC if connected, or queues into local outbox if offline.
    */
   public async sendTextMessage(text: string, targetDeviceId?: string): Promise<MessageRecord> {
     const recipientId = targetDeviceId || this.remoteDeviceId || this.activeContact?.deviceId;
@@ -655,29 +757,7 @@ export class PeerManager {
       msgRecord.id = id;
       return msgRecord;
     } else {
-      // Offline / Relay Mailbox Queueing
-      const envelope = JSON.stringify({
-        text,
-        senderDeviceId: this.identity.deviceId,
-        senderDisplayName: this.identity.displayName || 'Secure Peer',
-        timestamp: Date.now(),
-      });
-
-      // Post to relay mailbox buffer
-      try {
-        await this.fetchRelay('/api/signaling/mailbox/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            senderDeviceId: this.identity.deviceId,
-            recipientDeviceId: recipientId,
-            encryptedEnvelope: btoa(unescape(encodeURIComponent(envelope))),
-          }),
-        });
-      } catch (err) {
-        console.warn('Mailbox relay buffer write error:', err);
-      }
-
+      // Offline local outbox queueing (Zero relay storage bloat)
       const msgRecord: MessageRecord = {
         chatDeviceId: recipientId,
         direction: 'OUTBOUND',
@@ -690,15 +770,31 @@ export class PeerManager {
 
       const id = await db.messages.add(msgRecord);
       msgRecord.id = id;
+
+      // Optional lightweight presence poke to alert peer without storing bulk payload
+      try {
+        await this.fetchRelay('/api/signaling/mailbox/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            senderDeviceId: this.identity.deviceId,
+            recipientDeviceId: recipientId,
+            action: 'WAKEUP_PING',
+            timestamp: Date.now(),
+          }),
+        });
+      } catch {}
+
       return msgRecord;
     }
   }
 
   /**
-   * Sends a file across active WebRTC session or queues metadata for offline peer.
+   * Sends a file across active WebRTC session or queues in local outbox for offline peer.
    */
   public async sendFile(file: File, targetDeviceId?: string): Promise<FileRecord> {
     const recipientId = targetDeviceId || this.remoteDeviceId || this.activeContact?.deviceId;
+    if (!recipientId) throw new Error('No recipient device specified');
 
     if (this.isConnected() && this.cryptoSession && this.dataChannel && recipientId === this.remoteDeviceId) {
       return await fileTransferManager.sendFile(
@@ -736,7 +832,7 @@ export class PeerManager {
         }
       );
     } else {
-      // Offline file queueing
+      // Offline local file queueing (Stored locally in IndexedDB; zero storage bloat on signaling server)
       const arrayBuf = await file.arrayBuffer();
       const fileBytes = new Uint8Array(arrayBuf);
       const hashBytes = await sha256(fileBytes);
@@ -761,32 +857,6 @@ export class PeerManager {
 
       await db.files.put(fileRecord);
 
-      // If under 4MB, send as offline base64 envelope
-      if (file.size <= 4 * 1024 * 1024) {
-        const base64Content = arrayBufferToBase64(fileBytes);
-        try {
-          await this.fetchRelay('/api/signaling/mailbox/send', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              senderDeviceId: this.identity.deviceId,
-              recipientDeviceId: recipientId,
-              encryptedEnvelope: btoa(JSON.stringify({ fileName: file.name, fileId, mimeType: mime })),
-              fileMetadata: {
-                fileId,
-                name: file.name,
-                size: file.size,
-                mimeType: mime,
-                hashSHA256: hashHex,
-              },
-              fileBase64Chunk: base64Content,
-            }),
-          });
-        } catch (mErr) {
-          console.warn('Mailbox file buffer error:', mErr);
-        }
-      }
-
       const mediaType = isImage ? 'image' : isAudio ? 'audio' : isVideo ? 'video' : 'file';
       const msgRecord: MessageRecord = {
         chatDeviceId: recipientId,
@@ -803,6 +873,20 @@ export class PeerManager {
       const id = await db.messages.add(msgRecord);
       msgRecord.id = id;
       this.events.onMessageReceived(msgRecord);
+
+      // Lightweight presence poke
+      try {
+        await this.fetchRelay('/api/signaling/mailbox/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            senderDeviceId: this.identity.deviceId,
+            recipientDeviceId: recipientId,
+            action: 'WAKEUP_PING',
+            timestamp: Date.now(),
+          }),
+        });
+      } catch {}
 
       return fileRecord;
     }
@@ -1019,6 +1103,14 @@ export class PeerManager {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
     }
+  }
+
+  public async getContact(deviceId: string): Promise<ContactRecord | undefined> {
+    return await db.contacts.get(deviceId);
+  }
+
+  public getCryptoSession(deviceId?: string): CryptoSession | null {
+    return this.cryptoSession;
   }
 
   public cleanup() {

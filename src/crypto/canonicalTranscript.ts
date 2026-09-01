@@ -22,7 +22,7 @@ export function buildCanonicalTranscriptBinary(params: CanonicalTranscriptParams
   // Exact byte length: 2 (version) + 65 (pubA) + 65 (ephA) + 16 (nonceA) + 65 (pubB) + 65 (ephB) + 16 (nonceB) + 32 (salt) + 32 (sdpHash) = 358 bytes
   const totalLength = 2 + 65 + 65 + 16 + 65 + 65 + 16 + 32 + 32;
   const buffer = new Uint8Array(totalLength);
-  const view = new DataView(buffer.buffer);
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 
   let offset = 0;
 
@@ -142,7 +142,7 @@ export async function computeSafetyNumber(
   }
 
   const hash = await sha256(combined);
-  const view = new DataView(hash.buffer);
+  const view = new DataView(hash.buffer, hash.byteOffset, hash.byteLength);
   const num1 = (view.getUint32(0, false) % 1000).toString().padStart(3, '0');
   const num2 = (view.getUint32(4, false) % 1000).toString().padStart(3, '0');
   return `${num1} ${num2}`;

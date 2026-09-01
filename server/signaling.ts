@@ -206,10 +206,10 @@ signalingRouter.post('/presence/query', (req: Request, res: Response) => {
 });
 
 /**
- * 1. Create a 5-minute Rolling Dynamic Pairing Room & Token
+ * 1. Create a 15-minute Rolling Dynamic Pairing Room & Token
  */
 signalingRouter.post('/room/create', (req: Request, res: Response) => {
-  const { deviceId, offer, ttlSeconds = 300 } = req.body;
+  const { deviceId, offer, ttlSeconds = 900 } = req.body;
   
   // Generate friendly 6-character code (avoid confusing letters like 0/O, 1/I)
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -254,11 +254,8 @@ signalingRouter.post('/room/:roomId/offer', (req: Request, res: Response) => {
     return;
   }
 
-  if (Date.now() > room.expiresAt) {
-    rooms.delete(cleanId);
-    res.status(410).json({ error: 'Pairing code expired. Please generate a fresh code.' });
-    return;
-  }
+  // Extend room expiry on activity
+  room.expiresAt = Math.max(room.expiresAt, Date.now() + 600000);
 
   if (!room.initiator) {
     room.initiator = { deviceId, role: 'initiator', iceCandidates: [], updatedAt: Date.now() };
@@ -282,11 +279,8 @@ signalingRouter.post('/room/:roomId/join', (req: Request, res: Response) => {
     return;
   }
 
-  if (Date.now() > room.expiresAt) {
-    rooms.delete(cleanId);
-    res.status(410).json({ error: 'Pairing code has expired. Please generate a fresh code.' });
-    return;
-  }
+  // Extend room expiry when peer joins
+  room.expiresAt = Math.max(room.expiresAt, Date.now() + 600000);
 
   room.responder = {
     deviceId: deviceId || 'responder',

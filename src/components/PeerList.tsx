@@ -6,8 +6,7 @@ import {
   Image as ImageIcon,
   Mic,
   FileText,
-  Trash2,
-  MessageSquare,
+  MoreVertical,
 } from 'lucide-react';
 
 interface PeerListProps {
@@ -17,7 +16,7 @@ interface PeerListProps {
   lastMessages?: Map<string, MessageRecord>;
   onSelectPeer: (peer: ContactRecord) => void;
   onOpenPairing: () => void;
-  onDeleteContact: (deviceId: string) => void;
+  onOpenContactDetails: (contact: ContactRecord) => void;
 }
 
 export const PeerList: React.FC<PeerListProps> = ({
@@ -27,7 +26,7 @@ export const PeerList: React.FC<PeerListProps> = ({
   lastMessages,
   onSelectPeer,
   onOpenPairing,
-  onDeleteContact,
+  onOpenContactDetails,
 }) => {
   const [filter, setFilter] = useState('');
 
@@ -39,8 +38,24 @@ export const PeerList: React.FC<PeerListProps> = ({
 
   return (
     <aside className="relative w-full md:w-80 h-full flex flex-col border-r border-[#27272a] bg-[#09090b] font-sans select-none">
-      {/* Top Search Input */}
-      <div className="p-3 pb-2">
+      {/* Top Header: Contacts & Single Add Button */}
+      <div className="px-4 pt-3.5 pb-2 flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-white tracking-tight">
+          Contacts
+        </h2>
+        <button
+          id="add-contact-btn"
+          onClick={onOpenPairing}
+          className="p-1.5 bg-[#18181b] hover:bg-[#27272a] text-white rounded-lg border border-[#27272a] transition-all hover:scale-105 active:scale-95 flex items-center gap-1 text-xs font-medium"
+          title="Add Contact / Pair Device"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          <span className="text-[11px] pr-0.5">New</span>
+        </button>
+      </div>
+
+      {/* Search Bar */}
+      <div className="px-3 pb-2">
         <div className="relative">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#71717a]">
             <Search className="w-3.5 h-3.5" />
@@ -50,41 +65,23 @@ export const PeerList: React.FC<PeerListProps> = ({
             type="text"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="Search chats"
-            className="w-full pl-9 pr-3 py-2 bg-[#18181b] border border-[#27272a] rounded-lg text-white placeholder-[#71717a] focus:outline-none focus:border-white transition-colors text-xs"
+            placeholder="Search contacts..."
+            className="w-full pl-9 pr-3 py-1.5 bg-[#141418] border border-[#222226] rounded-lg text-white placeholder-[#71717a] focus:outline-none focus:border-[#3f3f46] transition-colors text-xs"
           />
         </div>
       </div>
 
-      {/* Section Header */}
-      <div className="px-4 py-1.5 flex items-center justify-between">
-        <span className="text-[11px] font-medium text-[#71717a] uppercase tracking-wider">
-          Conversations
-        </span>
-        <span className="text-[11px] text-[#71717a]">
-          {contacts.length}
-        </span>
-      </div>
-
       {/* Contacts List */}
-      <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
+      <div className="flex-1 overflow-y-auto px-2 pt-1 space-y-0.5">
         {filtered.length === 0 ? (
-          <div className="p-6 text-center text-[#71717a] space-y-3 mt-6">
-            <div className="w-10 h-10 rounded-full bg-[#18181b] border border-[#27272a] flex items-center justify-center mx-auto text-white">
-              <MessageSquare className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-xs font-medium text-white">No chats yet</p>
-              <p className="text-[11px] text-[#71717a] mt-0.5">
-                Start a new conversation to begin.
-              </p>
-            </div>
+          <div className="p-6 text-center mt-6">
+            <p className="text-xs text-[#71717a] mb-3">No contacts yet</p>
             <button
               onClick={onOpenPairing}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-white hover:bg-neutral-200 text-black font-semibold rounded-lg text-xs transition-colors shadow-sm"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-neutral-200 text-black font-semibold rounded-lg text-xs transition-colors shadow-sm"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>New Chat</span>
+              <span>Pair Device</span>
             </button>
           </div>
         ) : (
@@ -112,16 +109,23 @@ export const PeerList: React.FC<PeerListProps> = ({
                 key={contact.deviceId}
                 id={`peer-item-${contact.deviceId}`}
                 onClick={() => onSelectPeer(contact)}
-                className={`p-2 rounded-xl cursor-pointer transition-all flex items-center justify-between gap-3 group ${
+                className={`p-2 rounded-xl cursor-pointer transition-all flex items-center justify-between gap-2.5 group ${
                   isSelected
                     ? 'bg-[#18181b] border border-[#27272a]'
                     : 'hover:bg-[#121215]'
                 }`}
               >
-                {/* Avatar & Online Dot */}
-                <div className="relative flex-shrink-0">
+                {/* Avatar with click to open profile */}
+                <div
+                  className="relative flex-shrink-0 cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenContactDetails(contact);
+                  }}
+                  title="View contact profile"
+                >
                   <div
-                    className="w-9 h-9 rounded-full flex items-center justify-center text-white font-medium text-xs shadow-sm"
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-white font-medium text-xs shadow-sm hover:ring-2 hover:ring-[#3f3f46] transition-all"
                     style={{ backgroundColor: avatarColor }}
                   >
                     {initial}
@@ -172,39 +176,26 @@ export const PeerList: React.FC<PeerListProps> = ({
                   </div>
                 </div>
 
-                {/* Delete Hover Action */}
+                {/* Options Menu Button for Contact */}
                 <button
-                  id={`delete-peer-${contact.deviceId}`}
+                  id={`contact-menu-${contact.deviceId}`}
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (confirm(`Remove ${contact.alias} from contacts?`)) {
-                      onDeleteContact(contact.deviceId);
-                    }
+                    onOpenContactDetails(contact);
                   }}
-                  className="opacity-0 group-hover:opacity-100 p-1 text-[#71717a] hover:text-red-400 hover:bg-[#27272a] rounded-md transition-all"
-                  title="Remove contact"
+                  className="opacity-40 group-hover:opacity-100 p-1 text-[#a1a1aa] hover:text-white hover:bg-[#27272a] rounded-md transition-all"
+                  title="Contact options"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
+                  <MoreVertical className="w-3.5 h-3.5" />
                 </button>
               </div>
             );
           })
         )}
       </div>
-
-      {/* Floating Action Button */}
-      <div className="absolute bottom-4 right-4 z-10">
-        <button
-          id="fab-add-contact-btn"
-          onClick={onOpenPairing}
-          className="w-10 h-10 rounded-full bg-white hover:bg-neutral-200 text-black shadow-lg flex items-center justify-center transition-all active:scale-95"
-          title="New Chat"
-        >
-          <Plus className="w-4 h-4" />
-        </button>
-      </div>
     </aside>
   );
 };
+
 
 

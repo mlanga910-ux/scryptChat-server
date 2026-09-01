@@ -7,32 +7,96 @@ import {
   sha256,
 } from './utils';
 
+const STORAGE_KEY_PUB = 'scryptchat_permanent_pub_raw';
+const STORAGE_KEY_PRIV_JWK = 'scryptchat_permanent_priv_jwk';
+const STORAGE_KEY_DEV_ID = 'scryptchat_permanent_device_id';
+const STORAGE_KEY_NAME = 'scryptchat_display_name';
+const STORAGE_KEY_COLOR = 'scryptchat_avatar_color';
+
 export async function generateDeviceId(rawPublicKey: Uint8Array): Promise<string> {
   const hash = await sha256(rawPublicKey);
   const hex = arrayBufferToHex(hash);
-  // Format: DEV-XXXX-XXXX-XXXX-XXXX
+  // Format: DEV-XXXX-XXXX-XXXX-XXXX (Deterministic cryptographic fingerprint)
   return `DEV-${hex.slice(0, 4)}-${hex.slice(4, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}`;
 }
 
 export async function getOrCreateIdentity(customDisplayName?: string, customAvatarColor?: string): Promise<IdentityRecord> {
-  const existingList = await db.identity.toArray();
-  if (existingList.length > 0) {
-    const current = existingList[0];
-    if (customDisplayName && !current.displayName) {
-      current.displayName = customDisplayName;
-      if (customAvatarColor) current.avatarColor = customAvatarColor;
-      await db.identity.put(current);
+  // 1. Check IndexedDB first
+  try {
+    const existingList = await db.identity.toArray();
+    if (existingList.length > 0) {
+      const current = existingList[0];
+      if (current && current.deviceId && current.publicKeyECDSA && current.privateKeyECDSA) {
+        if (customDisplayName && !current.displayName) {
+          current.displayName = customDisplayName;
+          if (customAvatarColor) current.avatarColor = customAvatarColor;
+          await db.identity.put(current);
+        }
+        // Sync backup to localStorage
+        try {
+          localStorage.setItem(STORAGE_KEY_DEV_ID, current.deviceId);
+          localStorage.setItem(STORAGE_KEY_PUB, current.publicKeyRaw);
+          if (current.displayName) localStorage.setItem(STORAGE_KEY_NAME, current.displayName);
+          if (current.avatarColor) localStorage.setItem(STORAGE_KEY_COLOR, current.avatarColor);
+        } catch {}
+        return current;
+      }
     }
-    return current;
+  } catch (e) {
+    console.warn('IndexedDB identity lookup warning:', e);
   }
 
-  // Generate new long-term ECDSA P-256 key pair (extractable: false for private key)
+  // 2. Check localStorage permanent backup if IndexedDB was cleared or fresh
+  try {
+    const savedPrivJwk = localStorage.getItem(STORAGE_KEY_PRIV_JWK);
+    const savedPubRaw = localStorage.getItem(STORAGE_KEY_PUB);
+    const savedDevId = localStorage.getItem(STORAGE_KEY_DEV_ID);
+    const savedName = localStorage.getItem(STORAGE_KEY_NAME);
+    const savedColor = localStorage.getItem(STORAGE_KEY_COLOR);
+
+    if (savedPrivJwk && savedPubRaw && savedDevId) {
+      const jwk = JSON.parse(savedPrivJwk);
+      const privateKey = await crypto.subtle.importKey(
+        'jwk',
+        jwk,
+        { name: 'ECDSA', namedCurve: 'P-256' },
+        true,
+        ['sign']
+      );
+      const rawPubBytes = base64ToArrayBuffer(savedPubRaw);
+      const publicKey = await crypto.subtle.importKey(
+        'raw',
+        rawPubBytes,
+        { name: 'ECDSA', namedCurve: 'P-256' },
+        true,
+        ['verify']
+      );
+
+      const identity: IdentityRecord = {
+        deviceId: savedDevId,
+        publicKeyECDSA: publicKey,
+        privateKeyECDSA: privateKey,
+        publicKeyRaw: savedPubRaw,
+        displayName: customDisplayName || savedName || 'Secure Node',
+        avatarColor: customAvatarColor || savedColor || '#3b82f6',
+        statusBio: 'E2EE Sovereign Node',
+        createdAt: Date.now(),
+      };
+
+      await db.identity.put(identity);
+      return identity;
+    }
+  } catch (e) {
+    console.warn('LocalStorage backup recovery warning:', e);
+  }
+
+  // 3. Generate new permanent ECDSA keypair (extractable for deterministic durability)
   const keyPair = (await crypto.subtle.generateKey(
     {
       name: 'ECDSA',
       namedCurve: 'P-256',
     },
-    false, // non-extractable private key
+    true,
     ['sign', 'verify']
   )) as CryptoKeyPair;
 
@@ -41,18 +105,30 @@ export async function getOrCreateIdentity(customDisplayName?: string, customAvat
   const publicKeyRaw = arrayBufferToBase64(rawPubBytes);
   const deviceId = await generateDeviceId(rawPubBytes);
 
+  const privJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey);
+
   const identity: IdentityRecord = {
     deviceId,
     publicKeyECDSA: keyPair.publicKey,
     privateKeyECDSA: keyPair.privateKey,
     publicKeyRaw,
-    displayName: customDisplayName || '',
+    displayName: customDisplayName || 'Secure Node',
     avatarColor: customAvatarColor || '#3b82f6',
     statusBio: 'E2EE Sovereign Node',
     createdAt: Date.now(),
   };
 
   await db.identity.put(identity);
+
+  // Permanently save to localStorage as fail-safe
+  try {
+    localStorage.setItem(STORAGE_KEY_DEV_ID, deviceId);
+    localStorage.setItem(STORAGE_KEY_PUB, publicKeyRaw);
+    localStorage.setItem(STORAGE_KEY_PRIV_JWK, JSON.stringify(privJwk));
+    if (identity.displayName) localStorage.setItem(STORAGE_KEY_NAME, identity.displayName);
+    if (identity.avatarColor) localStorage.setItem(STORAGE_KEY_COLOR, identity.avatarColor);
+  } catch {}
+
   return identity;
 }
 
@@ -64,6 +140,12 @@ export async function updateIdentityProfile(displayName: string, avatarColor?: s
   if (avatarColor) current.avatarColor = avatarColor;
   if (statusBio !== undefined) current.statusBio = statusBio;
   await db.identity.put(current);
+
+  try {
+    localStorage.setItem(STORAGE_KEY_NAME, displayName);
+    if (avatarColor) localStorage.setItem(STORAGE_KEY_COLOR, avatarColor);
+  } catch {}
+
   return current;
 }
 

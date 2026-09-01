@@ -3,9 +3,10 @@ import { IdentityRecord } from '../types/index';
 import {
   X,
   User,
-  Key,
   Copy,
   Check,
+  Save,
+  Fingerprint,
 } from 'lucide-react';
 import { updateIdentityProfile } from '../crypto/keys';
 
@@ -17,14 +18,15 @@ interface ProfileModalProps {
 }
 
 const AVATAR_COLORS = [
-  '#27272a', // Dark Zinc
+  '#27272a', // Zinc Dark
   '#3f3f46', // Zinc
-  '#52525b', // Neutral
-  '#2563eb', // Blue
+  '#2563eb', // Royal Blue
   '#059669', // Emerald
   '#d97706', // Amber
   '#dc2626', // Red
   '#0891b2', // Cyan
+  '#7c3aed', // Purple
+  '#db2777', // Pink
 ];
 
 export const ProfileModal: React.FC<ProfileModalProps> = ({
@@ -36,12 +38,12 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   if (!isOpen || !identity) return null;
 
   const [displayName, setDisplayName] = useState(identity.displayName || '');
-  const [avatarColor, setAvatarColor] = useState(identity.avatarColor || '#27272a');
+  const [avatarColor, setAvatarColor] = useState(identity.avatarColor || '#2563eb');
   const [statusBio, setStatusBio] = useState(identity.statusBio || 'Online');
   const [copied, setCopied] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
 
-  const handleSave = async (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!displayName.trim()) return;
     const updated = await updateIdentityProfile(displayName.trim(), avatarColor, statusBio.trim());
@@ -51,7 +53,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       setTimeout(() => {
         setIsSaved(false);
         onClose();
-      }, 600);
+      }, 500);
     }
   };
 
@@ -61,120 +63,151 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const initial = (displayName || 'U').charAt(0).toUpperCase();
+
   return (
     <div
       id="profile-modal-backdrop"
       className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 select-none font-sans"
     >
-      <div className="w-full max-w-md bg-[#18181b] border border-[#27272a] rounded-2xl shadow-xl overflow-hidden text-xs">
+      <div className="w-full max-w-md bg-[#18181b] border border-[#27272a] rounded-2xl shadow-2xl overflow-hidden text-xs flex flex-col">
         {/* Header */}
-        <div className="px-5 py-3.5 border-b border-[#27272a] flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-[#27272a] flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-lg bg-[#09090b] border border-[#27272a] flex items-center justify-center text-white">
-              <User className="w-3.5 h-3.5" />
+            <div className="w-7 h-7 rounded-lg bg-[#27272a] flex items-center justify-center text-white">
+              <User className="w-4 h-4" />
             </div>
-            <h2 className="text-xs font-semibold text-white">Profile</h2>
+            <div>
+              <h2 className="text-sm font-semibold text-white">Profile &amp; Identity</h2>
+              <p className="text-[11px] text-[#a1a1aa]">Manage your display name and cryptographic avatar</p>
+            </div>
           </div>
           <button
-            id="close-profile-modal-btn"
             onClick={onClose}
-            className="p-1.5 text-[#71717a] hover:text-white hover:bg-[#27272a] rounded-lg transition-colors"
+            className="p-1.5 text-[#a1a1aa] hover:text-white hover:bg-[#27272a] rounded-lg transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Body */}
-        <form onSubmit={handleSave} className="p-5 space-y-3.5">
-          {/* Avatar Preview */}
-          <div className="flex items-center gap-3 p-3 bg-[#09090b] border border-[#27272a] rounded-xl">
+        {/* Content */}
+        <form onSubmit={handleSaveProfile} className="p-5 space-y-5">
+          {/* Avatar Preview & Color Selection */}
+          <div className="flex flex-col items-center gap-3 p-4 bg-[#09090b] border border-[#27272a] rounded-xl">
             <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-semibold text-sm shadow-sm flex-shrink-0"
+              className="w-16 h-16 rounded-full flex items-center justify-center text-white font-bold text-2xl shadow-lg ring-4 ring-[#27272a]"
               style={{ backgroundColor: avatarColor }}
             >
-              {(displayName.trim() || 'U').charAt(0).toUpperCase()}
+              {initial}
             </div>
-            <div className="min-w-0">
-              <div className="text-xs font-semibold text-white truncate">{displayName || 'User'}</div>
-              <div className="text-[11px] text-[#71717a] truncate">{statusBio}</div>
-            </div>
-          </div>
 
-          {/* Display Name Input */}
-          <div className="space-y-1">
-            <label className="block text-[11px] font-medium text-[#a1a1aa]">Display Name</label>
-            <input
-              type="text"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="Your name"
-              maxLength={32}
-              className="w-full px-3 py-2 bg-[#09090b] border border-[#27272a] rounded-lg text-white placeholder-[#71717a] focus:outline-none focus:border-white transition-colors text-xs"
-            />
-          </div>
-
-          {/* Status Bio */}
-          <div className="space-y-1">
-            <label className="block text-[11px] font-medium text-[#a1a1aa]">Status</label>
-            <input
-              type="text"
-              value={statusBio}
-              onChange={(e) => setStatusBio(e.target.value)}
-              placeholder="Status message"
-              maxLength={64}
-              className="w-full px-3 py-2 bg-[#09090b] border border-[#27272a] rounded-lg text-white placeholder-[#71717a] focus:outline-none focus:border-white transition-colors text-xs"
-            />
-          </div>
-
-          {/* Avatar Color */}
-          <div className="space-y-1.5">
-            <label className="block text-[11px] font-medium text-[#a1a1aa]">Color</label>
-            <div className="flex items-center gap-2">
-              {AVATAR_COLORS.map((col) => (
+            <div className="flex items-center gap-1.5 flex-wrap justify-center pt-1">
+              {AVATAR_COLORS.map((color) => (
                 <button
-                  key={col}
+                  key={color}
                   type="button"
-                  onClick={() => setAvatarColor(col)}
-                  className={`w-5 h-5 rounded-full transition-transform ${
-                    avatarColor === col ? 'scale-110 ring-2 ring-white ring-offset-2 ring-offset-[#18181b]' : 'opacity-70 hover:opacity-100'
+                  onClick={() => setAvatarColor(color)}
+                  className={`w-6 h-6 rounded-full transition-transform ${
+                    avatarColor === color ? 'scale-125 ring-2 ring-white shadow-md' : 'hover:scale-110 opacity-80 hover:opacity-100'
                   }`}
-                  style={{ backgroundColor: col }}
+                  style={{ backgroundColor: color }}
+                  title={color}
                 />
               ))}
             </div>
           </div>
 
-          {/* Permanent Sovereign ID */}
-          <div className="p-3 bg-[#09090b] border border-[#27272a] rounded-xl space-y-1.5 font-mono">
-            <div className="flex items-center justify-between text-xs text-[#71717a]">
-              <span className="flex items-center gap-1.5 font-sans font-medium text-white text-xs">
-                <Key className="w-3.5 h-3.5 text-white" />
-                <span>Device ID</span>
-              </span>
-              <button
-                type="button"
-                onClick={copyDeviceId}
-                className="flex items-center gap-1 text-[11px] text-[#a1a1aa] hover:text-white bg-[#27272a] px-2 py-0.5 rounded"
-              >
-                {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                <span>{copied ? 'Copied' : 'Copy'}</span>
-              </button>
+          {/* Form Fields */}
+          <div className="space-y-3.5">
+            <div>
+              <label className="block text-[#a1a1aa] mb-1 font-medium">Display Name</label>
+              <input
+                type="text"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                maxLength={32}
+                placeholder="e.g. Alice, Bob..."
+                className="w-full bg-[#09090b] border border-[#27272a] rounded-xl px-3.5 py-2.5 text-white placeholder-[#52525b] focus:outline-none focus:border-white transition-colors"
+                required
+              />
             </div>
-            <div className="text-[11px] text-[#a1a1aa] select-all bg-[#18181b] p-2 rounded border border-[#27272a] truncate">
-              {identity.deviceId}
+
+            <div>
+              <label className="block text-[#a1a1aa] mb-1 font-medium">Status / Bio</label>
+              <input
+                type="text"
+                value={statusBio}
+                onChange={(e) => setStatusBio(e.target.value)}
+                maxLength={64}
+                placeholder="e.g. Available, Encrypted P2P..."
+                className="w-full bg-[#09090b] border border-[#27272a] rounded-xl px-3.5 py-2.5 text-white placeholder-[#52525b] focus:outline-none focus:border-white transition-colors"
+              />
+            </div>
+
+            {/* Device ID Box */}
+            <div className="p-3 bg-[#09090b] border border-[#27272a] rounded-xl space-y-1.5">
+              <div className="flex items-center justify-between text-[#a1a1aa]">
+                <span className="flex items-center gap-1.5 font-medium">
+                  <Fingerprint className="w-3.5 h-3.5 text-white" />
+                  Your Device ID
+                </span>
+                <button
+                  type="button"
+                  onClick={copyDeviceId}
+                  className="flex items-center gap-1 text-white hover:text-emerald-400 font-medium transition-colors"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="text-emerald-400">Copied</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy</span>
+                    </>
+                  )}
+                </button>
+              </div>
+              <div className="font-mono text-[11px] text-[#71717a] break-all select-all">
+                {identity.deviceId}
+              </div>
             </div>
           </div>
 
-          {/* Save Button */}
-          <button
-            type="submit"
-            className="w-full py-2 bg-white hover:bg-neutral-200 text-black font-semibold rounded-lg transition-colors text-xs"
-          >
-            {isSaved ? 'Saved' : 'Save Changes'}
-          </button>
+          {/* Footer Actions */}
+          <div className="pt-2 flex items-center justify-end gap-2 border-t border-[#27272a]">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-[#a1a1aa] hover:text-white hover:bg-[#27272a] rounded-xl transition-colors font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSaved}
+              className={`px-5 py-2 rounded-xl font-medium transition-all flex items-center gap-1.5 ${
+                isSaved
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-white text-black hover:bg-neutral-200'
+              }`}
+            >
+              {isSaved ? (
+                <>
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Saved!</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Save Changes</span>
+                </>
+              )}
+            </button>
+          </div>
         </form>
       </div>
     </div>
   );
 };
-

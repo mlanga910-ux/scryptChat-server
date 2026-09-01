@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getOrCreateIdentity } from './crypto/keys';
 import { db } from './db/index';
+import { soundEngine } from './utils/cyberSoundEngine';
 import {
+  CallSessionInfo,
+  CallType,
   ContactRecord,
   FileRecord,
   FileTransferProgress,
@@ -11,6 +14,8 @@ import {
   RelayStatus,
 } from './types/index';
 import { ConnectionState, PeerManager } from './webrtc/peerManager';
+import { CallManager } from './webrtc/callManager';
+import { CallModal } from './components/CallModal';
 import { TerminalHeader } from './components/TerminalHeader';
 import { PeerList } from './components/PeerList';
 import { ChatView } from './components/ChatView';
@@ -19,11 +24,14 @@ import { SecurityModal } from './components/SecurityModal';
 import { DataWipeDialog } from './components/DataWipeDialog';
 import { OnboardingModal } from './components/OnboardingModal';
 import { ProfileModal } from './components/ProfileModal';
+import { SettingsModal } from './components/SettingsModal';
+import { ContactDetailsModal } from './components/ContactDetailsModal';
 
 export default function App() {
   const [identity, setIdentity] = useState<IdentityRecord | null>(null);
   const [contacts, setContacts] = useState<ContactRecord[]>([]);
   const [activeContact, setActiveContact] = useState<ContactRecord | null>(null);
+  const [selectedContactForDetails, setSelectedContactForDetails] = useState<ContactRecord | null>(null);
   const [messages, setMessages] = useState<MessageRecord[]>([]);
   const [lastMessagesMap, setLastMessagesMap] = useState<Map<string, MessageRecord>>(new Map());
   const [activeTransfers, setActiveTransfers] = useState<FileTransferProgress[]>([]);
@@ -34,6 +42,10 @@ export default function App() {
   const [relayErrorReason, setRelayErrorReason] = useState<string | null>(null);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
 
+  // Call state
+  const [callSession, setCallSession] = useState<CallSessionInfo | null>(null);
+  const callManagerRef = useRef<CallManager | null>(null);
+
   // Mobile View Switcher Tab ('peers' vs 'chat')
   const [mobileTab, setMobileTab] = useState<'peers' | 'chat'>('peers');
 
@@ -42,6 +54,7 @@ export default function App() {
   const [initialPairCode, setInitialPairCode] = useState<string | undefined>(undefined);
   const [isSecurityOpen, setIsSecurityOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isWipeOpen, setIsWipeOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
@@ -110,6 +123,7 @@ export default function App() {
             });
           },
           onMessageReceived: async (msg) => {
+            soundEngine.playMessageReceived();
             setMessages((prev) => {
               if (activeContact && msg.chatDeviceId === activeContact.deviceId) {
                 return [...prev, msg];
@@ -133,6 +147,9 @@ export default function App() {
             await refreshContacts();
             await reloadLastMessages();
           },
+          onMediaSignal: (signal) => {
+            callManagerRef.current?.handleCallSignal(signal);
+          },
           onPeerInfo: (contact) => {
             setActiveContact(contact);
             refreshContacts();
@@ -146,6 +163,19 @@ export default function App() {
         });
 
         peerManagerRef.current = pm;
+
+        // Initialize Call Manager
+        const cm = new CallManager(pm, idRecord, {
+          onCallStateChange: (session) => {
+            setCallSession(session ? { ...session } : null);
+          },
+          onLocalStream: () => {},
+          onRemoteStream: () => {},
+          onError: (errMsg) => {
+            console.warn('Call error:', errMsg);
+          },
+        });
+        callManagerRef.current = cm;
       } catch (err) {
         console.error('Initialization error:', err);
       }
@@ -155,6 +185,7 @@ export default function App() {
 
     return () => {
       isMounted = false;
+      callManagerRef.current?.destroy();
       peerManagerRef.current?.destroy();
     };
   }, []);
@@ -203,18 +234,54 @@ export default function App() {
     if (activeContact?.deviceId === deviceId) {
       setActiveContact(updated[0] || null);
     }
+    if (selectedContactForDetails?.deviceId === deviceId) {
+      setSelectedContactForDetails(null);
+    }
     await reloadLastMessages();
+  };
+
+  const handleClearHistory = async (deviceId: string) => {
+    await db.messages.where('chatDeviceId').equals(deviceId).delete();
+    if (activeContact?.deviceId === deviceId) {
+      setMessages([]);
+    }
+    await reloadLastMessages();
+  };
+
+  const handleUpdateContactAlias = async (deviceId: string, newAlias: string) => {
+    await db.contacts.update(deviceId, { alias: newAlias });
+    await refreshContacts();
+    if (activeContact?.deviceId === deviceId) {
+      setActiveContact((prev) => (prev ? { ...prev, alias: newAlias } : null));
+    }
+    if (selectedContactForDetails?.deviceId === deviceId) {
+      setSelectedContactForDetails((prev) => (prev ? { ...prev, alias: newAlias } : null));
+    }
+  };
+
+  const handleToggleVerifyContact = async (deviceId: string, verified: boolean) => {
+    const status = verified ? 'VERIFIED' : 'UNVERIFIED';
+    await db.contacts.update(deviceId, { verificationStatus: status });
+    await refreshContacts();
+    if (activeContact?.deviceId === deviceId) {
+      setActiveContact((prev) => (prev ? { ...prev, verificationStatus: status } : null));
+    }
+    if (selectedContactForDetails?.deviceId === deviceId) {
+      setSelectedContactForDetails((prev) => (prev ? { ...prev, verificationStatus: status } : null));
+    }
   };
 
   const handleSendMessage = async (text: string) => {
     if (!peerManagerRef.current || !activeContact) return;
     const msg = await peerManagerRef.current.sendTextMessage(text, activeContact.deviceId);
+    soundEngine.playMessageSent();
     setMessages((prev) => [...prev, msg]);
     await reloadLastMessages();
   };
 
   const handleSendFile = async (file: File) => {
     if (!peerManagerRef.current || !activeContact) return;
+    soundEngine.playActionPing();
     await peerManagerRef.current.sendFile(file, activeContact.deviceId);
     await reloadLastMessages();
   };
@@ -234,6 +301,19 @@ export default function App() {
     }
   };
 
+  const handleStartCall = async (
+    peerDeviceId: string,
+    peerDisplayName: string,
+    callType: CallType
+  ) => {
+    if (!callManagerRef.current) return;
+    try {
+      await callManagerRef.current.startCall(peerDeviceId, peerDisplayName, callType);
+    } catch (err: any) {
+      console.error('Failed to start call:', err);
+    }
+  };
+
   return (
     <div className="h-screen w-screen flex flex-col bg-[#09090b] text-[#f4f4f5] overflow-hidden select-none font-sans">
       {/* Top Header Bar */}
@@ -250,6 +330,7 @@ export default function App() {
         onOpenPairing={() => setIsPairingOpen(true)}
         onOpenSecurity={() => setIsSecurityOpen(true)}
         onOpenProfile={() => setIsProfileOpen(true)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenWipe={() => setIsWipeOpen(true)}
       />
 
@@ -266,7 +347,7 @@ export default function App() {
             lastMessages={lastMessagesMap}
             onSelectPeer={handleSelectPeer}
             onOpenPairing={() => setIsPairingOpen(true)}
-            onDeleteContact={handleDeleteContact}
+            onOpenContactDetails={(contact) => setSelectedContactForDetails(contact)}
           />
           <ChatView
             activeContact={activeContact}
@@ -274,8 +355,10 @@ export default function App() {
             activeTransfers={activeTransfers}
             isConnected={connectionState === 'CONNECTED'}
             latencyMs={latencyMs || undefined}
+            peerManager={peerManagerRef.current}
             onSendMessage={handleSendMessage}
             onSendFile={handleSendFile}
+            onStartCall={handleStartCall}
             onVerifyContact={() => setIsSecurityOpen(true)}
           />
         </div>
@@ -292,7 +375,7 @@ export default function App() {
               lastMessages={lastMessagesMap}
               onSelectPeer={handleSelectPeer}
               onOpenPairing={() => setIsPairingOpen(true)}
-              onDeleteContact={handleDeleteContact}
+              onOpenContactDetails={(contact) => setSelectedContactForDetails(contact)}
             />
           ) : (
             <ChatView
@@ -301,14 +384,49 @@ export default function App() {
               activeTransfers={activeTransfers}
               isConnected={connectionState === 'CONNECTED'}
               latencyMs={latencyMs || undefined}
+              peerManager={peerManagerRef.current}
               onSendMessage={handleSendMessage}
               onSendFile={handleSendFile}
+              onStartCall={handleStartCall}
               onBackToPeers={() => setMobileTab('peers')}
               onVerifyContact={() => setIsSecurityOpen(true)}
             />
           )}
         </div>
       </div>
+
+      {/* Contact Details & Options Modal */}
+      {selectedContactForDetails && (
+        <ContactDetailsModal
+          isOpen={!!selectedContactForDetails}
+          contact={selectedContactForDetails}
+          isConnected={
+            connectionState === 'CONNECTED' &&
+            activeContact?.deviceId === selectedContactForDetails.deviceId
+          }
+          onClose={() => setSelectedContactForDetails(null)}
+          onStartChat={(contact) => {
+            handleSelectPeer(contact);
+            setSelectedContactForDetails(null);
+          }}
+          onDeleteContact={handleDeleteContact}
+          onClearHistory={handleClearHistory}
+          onUpdateAlias={handleUpdateContactAlias}
+          onToggleVerify={handleToggleVerifyContact}
+          onStartCall={(deviceId, alias, type) => {
+            handleStartCall(deviceId, alias, type);
+            setSelectedContactForDetails(null);
+          }}
+        />
+      )}
+
+      {/* Call Modal (Audio & Video E2EE) */}
+      {callSession && callManagerRef.current && (
+        <CallModal
+          session={callSession}
+          callManager={callManagerRef.current}
+        />
+      )}
 
       {/* Onboarding Welcome Screen (Only on first visit) */}
       {showOnboarding && identity && (
@@ -335,12 +453,20 @@ export default function App() {
         />
       )}
 
-      {/* Profile Settings Modal */}
+      {/* Profile Modal */}
       <ProfileModal
         isOpen={isProfileOpen}
         identity={identity}
         onClose={() => setIsProfileOpen(false)}
         onUpdate={handleProfileUpdate}
+      />
+
+      {/* Global Application Settings Modal */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        relayStatus={relayStatus}
+        relayPingMs={relayPingMs}
       />
 
       {/* Cryptographic Security Modal */}

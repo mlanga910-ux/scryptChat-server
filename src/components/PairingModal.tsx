@@ -1,12 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { PeerManager } from '../webrtc/peerManager';
 import {
-  HandshakeAnswerData,
-  HandshakeOfferData,
-} from '../types/index';
-import {
-  encodeToQrChunks,
-  QrChunkCollector,
   generateQrDataUrl,
   scanCanvasForQr,
   extractRoomCodeFromScannedText,
@@ -20,17 +14,11 @@ import {
   Check,
   RefreshCw,
   Clock,
-  Layers,
-  Sparkles,
   Wifi,
   Radio,
-  Eye,
-  EyeOff,
-  ShieldCheck,
-  Laptop,
-  CheckCircle2,
+  Shield,
+  ArrowRight,
   AlertCircle,
-  Link,
 } from 'lucide-react';
 import {
   LanDiscoveryService,
@@ -46,7 +34,7 @@ interface PairingModalProps {
   onPairSuccess: () => void;
 }
 
-type TabType = 'my_code' | 'scan' | 'enter' | 'lan' | 'manual';
+type TabType = 'my_code' | 'enter' | 'scan' | 'lan';
 
 export const PairingModal: React.FC<PairingModalProps> = ({
   isOpen,
@@ -57,14 +45,14 @@ export const PairingModal: React.FC<PairingModalProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>(initialCode ? 'enter' : 'my_code');
 
-  // Active host room state
+  // Host code state (MANUAL ONLY)
   const [roomCode, setRoomCode] = useState('');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
-  const [remainingSeconds, setRemainingSeconds] = useState(120);
+  const [remainingSeconds, setRemainingSeconds] = useState(0);
   const [isGeneratingRoom, setIsGeneratingRoom] = useState(false);
 
-  // Join input state
+  // Join state
   const [joinInput, setJoinInput] = useState(initialCode || '');
   const [isConnecting, setIsConnecting] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
@@ -80,7 +68,6 @@ export const PairingModal: React.FC<PairingModalProps> = ({
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const isScanningRef = useRef(false);
   const scanAnimFrameRef = useRef<number | null>(null);
-  const collectorRef = useRef<QrChunkCollector>(new QrChunkCollector());
 
   // Local Network (LAN) state
   const [isLanScanning, setIsLanScanning] = useState(false);
@@ -90,16 +77,10 @@ export const PairingModal: React.FC<PairingModalProps> = ({
   const [lanConnectingPeerId, setLanConnectingPeerId] = useState<string | null>(null);
   const lanDiscoveryRef = useRef<LanDiscoveryService | null>(null);
 
-  // Manual SDP state
-  const [offerData, setOfferData] = useState<HandshakeOfferData | null>(null);
-  const [answerData, setAnswerData] = useState<HandshakeAnswerData | null>(null);
-  const [manualInputJson, setManualInputJson] = useState('');
-
   // Polling ref
   const pollIntervalRef = useRef<any>(null);
   const countdownIntervalRef = useRef<any>(null);
 
-  // When initialCode changes or modal opens with one
   useEffect(() => {
     if (initialCode) {
       setJoinInput(initialCode.toUpperCase());
@@ -107,14 +88,12 @@ export const PairingModal: React.FC<PairingModalProps> = ({
     }
   }, [initialCode]);
 
-  // When modal opens/closes
   useEffect(() => {
     if (isOpen) {
       setErrorMsg('');
       setIsSuccess(false);
       setStatusMessage('');
 
-      // Initialize LAN discovery service instance
       lanDiscoveryRef.current = new LanDiscoveryService(
         peerManager,
         peerManager.identity,
@@ -123,26 +102,15 @@ export const PairingModal: React.FC<PairingModalProps> = ({
           onIncomingInvite: (invite) => setIncomingInvite(invite),
           onPairSuccess: () => {
             setIsSuccess(true);
-            setStatusMessage('Direct P2P channel established over local network.');
+            setStatusMessage('Connected via local network.');
             setTimeout(() => {
               onPairSuccess();
               onClose();
-            }, 800);
+            }, 700);
           },
           onError: (errText) => setErrorMsg(errText),
         }
       );
-
-      if (initialCode) {
-        setJoinInput(initialCode.toUpperCase());
-        setActiveTab('enter');
-      } else {
-        const now = Date.now();
-        if (roomCode && expiresAt && expiresAt - now > 5000) {
-          startCountdown(expiresAt);
-          startHostPolling(roomCode);
-        }
-      }
     } else {
       stopCamera();
       stopPolling();
@@ -156,7 +124,6 @@ export const PairingModal: React.FC<PairingModalProps> = ({
     }
   }, [isOpen]);
 
-  // Handle Tab Switch
   useEffect(() => {
     setErrorMsg('');
     setStatusMessage('');
@@ -165,17 +132,8 @@ export const PairingModal: React.FC<PairingModalProps> = ({
     } else {
       stopCamera();
     }
-
-    if (activeTab === 'my_code') {
-      const now = Date.now();
-      if (roomCode && expiresAt && expiresAt - now > 5000) {
-        startHostPolling(roomCode);
-        startCountdown(expiresAt);
-      }
-    }
   }, [activeTab]);
 
-  // Clean intervals on unmount
   useEffect(() => {
     return () => {
       stopCamera();
@@ -206,60 +164,59 @@ export const PairingModal: React.FC<PairingModalProps> = ({
       if (diff <= 0) {
         stopCountdown();
         stopPolling();
-        setStatusMessage('Pairing code has expired');
+        setStatusMessage('Pairing code expired.');
       }
     };
     updateTime();
     countdownIntervalRef.current = setInterval(updateTime, 1000);
   };
 
-  // Host: Generate room and render QR
+  // 1. MANUAL ROOM GENERATION (User-triggered only)
   const handleGenerateRoom = async () => {
     if (isGeneratingRoom) return;
     try {
       setIsGeneratingRoom(true);
       setErrorMsg('');
-      setStatusMessage('Creating pairing room...');
+      setStatusMessage('Generating keys and pairing code...');
 
-      // 1. Create WebRTC offer
+      // Create ECDH/ECDSA offer
       const offer = await peerManager.createOffer();
-      setOfferData(offer);
 
-      // 2. Register room on signaling server with offer included (300s TTL)
+      // Register room on signaling (15 min TTL)
       const res = await peerManager.fetchRelay('/api/signaling/room/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           deviceId: offer.deviceId,
           offer,
-          ttlSeconds: 300,
+          ttlSeconds: 900,
         }),
-      }, 7000);
+      }, 8000);
 
       const data = await res.json();
       if (!data.success || !data.roomId) {
-        throw new Error(data.error || 'Failed to create pairing room');
+        throw new Error(data.error || 'Failed to create pairing session');
       }
 
       const newCode = data.roomId.toUpperCase();
-      const newExpiry = data.expiresAt || (Date.now() + 300000);
+      const newExpiry = data.expiresAt || (Date.now() + 900000);
 
       setRoomCode(newCode);
       setExpiresAt(newExpiry);
       setRemainingSeconds(Math.max(0, Math.floor((newExpiry - Date.now()) / 1000)));
 
-      // 3. Generate QR code as stable data URL
+      // Generate clean QR code
       const origin = typeof window !== 'undefined' ? window.location.origin : '';
       const pairingUrl = `${origin}/?room=${newCode}`;
       const dataUrl = await generateQrDataUrl(pairingUrl);
       setQrDataUrl(dataUrl);
 
-      setStatusMessage('Scan QR code or enter code on your other device');
+      setStatusMessage('Pairing code generated. Waiting for peer...');
       startCountdown(newExpiry);
       startHostPolling(newCode);
     } catch (err: any) {
-      console.error('Failed to generate pairing room:', err);
-      setErrorMsg(err.message || 'Could not connect to signaling server');
+      console.error('Failed to generate pairing code:', err);
+      setErrorMsg(err.message || 'Signaling server connection error');
       setStatusMessage('');
     } finally {
       setIsGeneratingRoom(false);
@@ -278,142 +235,143 @@ export const PairingModal: React.FC<PairingModalProps> = ({
         if (data.hasAnswer && data.answer) {
           stopPolling();
           stopCountdown();
-          setStatusMessage('Peer connected. Verifying cryptographic key...');
+          setStatusMessage('Peer connected. Verifying cryptographic signatures...');
 
           await peerManager.acceptAnswer(data.answer);
-
-          // Confirm handshake
           await peerManager.confirmPairingOnRelay(code);
 
           setIsSuccess(true);
-          setStatusMessage('Direct connection established');
+          setStatusMessage('Secure E2EE connection established.');
           setTimeout(() => {
             onPairSuccess();
             onClose();
           }, 800);
         }
-      } catch (pollErr) {
-        // Silently retry on next poll tick
+      } catch {
+        // Retry silently
       }
-    }, 1200);
+    }, 1500);
   };
 
-  // Join: Connect with room code
-  const handleJoinSignalRoom = async (codeToUse?: string) => {
-    const raw = (codeToUse || joinInput).trim().toUpperCase();
-    const code = extractRoomCodeFromScannedText(raw) || raw;
+  // 2. JOIN ROOM WITH CODE
+  const handleJoinRoom = async (codeToJoin?: string) => {
+    const rawCode = codeToJoin || joinInput;
+    const cleanCode = extractRoomCodeFromScannedText(rawCode).trim().toUpperCase();
 
-    if (!code || code.length !== 6) {
-      setErrorMsg('Please enter a 6-character code');
+    if (!cleanCode) {
+      setErrorMsg('Please enter a valid 6-character code.');
       return;
     }
 
     try {
       setIsConnecting(true);
       setErrorMsg('');
-      setStatusMessage(`Connecting to ${code}...`);
+      setStatusMessage('Connecting to pairing session...');
 
-      const joinRes = await peerManager.fetchRelay(`/api/signaling/room/${code}/join`, {
+      const res = await peerManager.fetchRelay(`/api/signaling/room/${cleanCode}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deviceId: peerManager.getIdentity().deviceId }),
-      }, 7000);
+        body: JSON.stringify({
+          deviceId: peerManager.identity.deviceId,
+        }),
+      }, 9000);
 
-      const joinData = await joinRes.json();
-      if (!joinData.success || !joinData.offer) {
-        throw new Error(joinData.error || 'Pairing code not found or expired. Generate a fresh code.');
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Connection error (Code: ${res.status})`);
       }
 
-      setStatusMessage('Verifying keys...');
-      const answer = await peerManager.acceptOffer(joinData.offer);
-      setAnswerData(answer);
+      const data = await res.json();
+      if (!data.success || !data.offer) {
+        throw new Error('Key exchange offer was not found.');
+      }
 
-      setStatusMessage('Sending response...');
-      await peerManager.fetchRelay(`/api/signaling/room/${code}/answer`, {
+      setStatusMessage('Generating answer and safety keys...');
+      const answer = await peerManager.acceptOffer(data.offer);
+
+      await peerManager.fetchRelay(`/api/signaling/room/${cleanCode}/answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ answer }),
-      }, 6000);
+      }, 9000);
 
-      // Confirm match on signaling server
-      await peerManager.confirmPairingOnRelay(code);
-
-      setIsSuccess(true);
-      setStatusMessage('Direct connection established');
-      setTimeout(() => {
-        onPairSuccess();
-        onClose();
-      }, 800);
+      setStatusMessage('Finalizing verification...');
+      await pollForHandshakeFinalize(cleanCode);
     } catch (err: any) {
-      console.error('Join signal room error:', err);
-      setErrorMsg(err.message || 'Connection failed. Please check the code.');
+      console.error('Join error:', err);
+      setErrorMsg(err.message || 'Pairing code not found or expired.');
       setStatusMessage('');
     } finally {
       setIsConnecting(false);
     }
   };
 
-  // Local Network (LAN) Handlers
-  const handleToggleLanScan = () => {
-    const next = !isLanScanning;
-    setIsLanScanning(next);
-    lanDiscoveryRef.current?.setScanning(next);
-    if (!next) {
-      setLanPeers([]);
-    }
+  const pollForHandshakeFinalize = async (code: string) => {
+    let attempts = 0;
+    const maxAttempts = 15;
+    return new Promise<void>((resolve, reject) => {
+      const timer = setInterval(async () => {
+        attempts++;
+        try {
+          const res = await peerManager.fetchRelay(`/api/signaling/room/${code}/status`, {
+            method: 'GET',
+          }, 3000);
+          const data = await res.json();
+          if (data.isConfirmed || peerManager.isConnected()) {
+            clearInterval(timer);
+            setIsSuccess(true);
+            setStatusMessage('Pairing successful!');
+            setTimeout(() => {
+              onPairSuccess();
+              onClose();
+              resolve();
+            }, 600);
+            return;
+          }
+        } catch {}
+
+        if (attempts >= maxAttempts) {
+          clearInterval(timer);
+          if (peerManager.isConnected()) {
+            setIsSuccess(true);
+            setTimeout(() => {
+              onPairSuccess();
+              onClose();
+              resolve();
+            }, 600);
+          } else {
+            reject(new Error('Verification timeout.'));
+          }
+        }
+      }, 1000);
+    });
   };
 
-  const handleToggleLanVisible = () => {
-    const next = !isLanVisible;
-    setIsLanVisible(next);
-    lanDiscoveryRef.current?.setVisibility(next);
-  };
-
-  const handleConnectLanPeer = async (peer: LanDiscoveredPeer) => {
-    try {
-      setLanConnectingPeerId(peer.deviceId);
-      setErrorMsg('');
-      setStatusMessage(`Requesting local P2P pairing with ${peer.displayName}...`);
-      await lanDiscoveryRef.current?.connectToPeer(peer);
-    } catch (err: any) {
-      setErrorMsg(err?.message || 'Local connection request failed');
-      setStatusMessage('');
-    } finally {
-      setLanConnectingPeerId(null);
-    }
-  };
-
-  // Camera Management
+  // 3. QR CAMERA SCANNER
   const startCamera = async () => {
+    stopCamera();
+    setCameraError('');
     try {
-      setCameraError('');
-      setErrorMsg('');
-      isScanningRef.current = true;
-      collectorRef.current.reset();
-
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Camera is not supported in this browser.');
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
+        video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false,
       });
-
       cameraStreamRef.current = stream;
-      setIsCameraRunning(true);
-
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.setAttribute('playsinline', 'true');
-        videoRef.current.muted = true;
-        await videoRef.current.play().catch(() => {});
-        runScanLoop();
+        await videoRef.current.play();
+        setIsCameraRunning(true);
+        isScanningRef.current = true;
+        scanLoop();
       }
     } catch (err: any) {
-      console.warn('Camera access error:', err);
-      isScanningRef.current = false;
+      console.error('Camera error:', err);
+      setCameraError(err.message || 'Failed to start camera.');
       setIsCameraRunning(false);
-      setCameraError('Camera access is unavailable. You can enter the 6-character code manually.');
     }
   };
 
@@ -424,604 +382,446 @@ export const PairingModal: React.FC<PairingModalProps> = ({
       scanAnimFrameRef.current = null;
     }
     if (cameraStreamRef.current) {
-      cameraStreamRef.current.getTracks().forEach((track) => {
-        try {
-          track.stop();
-        } catch {}
-      });
+      cameraStreamRef.current.getTracks().forEach((t) => t.stop());
       cameraStreamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
     }
     setIsCameraRunning(false);
   };
 
-  // Continuous Camera Scan Loop
-  const runScanLoop = () => {
+  const scanLoop = () => {
     if (!isScanningRef.current) return;
     const video = videoRef.current;
     const canvas = scanCanvasRef.current;
-
-    if (video && canvas && video.readyState >= video.HAVE_CURRENT_DATA) {
-      // Scale down to max 640px for instant scanning performance
-      const MAX_DIM = 640;
-      let w = video.videoWidth;
-      let h = video.videoHeight;
-      if (w > MAX_DIM || h > MAX_DIM) {
-        if (w > h) {
-          h = Math.round((h * MAX_DIM) / w);
-          w = MAX_DIM;
-        } else {
-          w = Math.round((w * MAX_DIM) / h);
-          h = MAX_DIM;
-        }
-      }
-
-      canvas.width = w;
-      canvas.height = h;
+    if (video && canvas && video.readyState === video.HAVE_ENOUGH_DATA) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       if (ctx) {
-        ctx.drawImage(video, 0, 0, w, h);
-        const scannedText = scanCanvasForQr(canvas);
-
-        if (scannedText) {
-          const matchedCode = extractRoomCodeFromScannedText(scannedText);
-          if (matchedCode) {
-            stopCamera();
-            setStatusMessage(`Scanned code: ${matchedCode}. Connecting...`);
-            handleJoinSignalRoom(matchedCode);
-            return;
-          }
-
-          // Chunked fallback for offline SDP
-          const chunkRes = collectorRef.current.processScannedText(scannedText);
-          if (chunkRes.completed && chunkRes.fullPayload) {
-            stopCamera();
-            try {
-              const parsed = JSON.parse(chunkRes.fullPayload);
-              if (parsed.role === 'initiator') {
-                peerManager.acceptOffer(parsed).then(() => {
-                  onPairSuccess();
-                  onClose();
-                });
-              } else if (parsed.role === 'responder') {
-                peerManager.acceptAnswer(parsed).then(() => {
-                  onPairSuccess();
-                  onClose();
-                });
-              }
-            } catch (err: any) {
-              setErrorMsg('Invalid QR payload');
-            }
-            return;
-          }
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const code = scanCanvasForQr(canvas);
+        if (code) {
+          stopCamera();
+          const cleanCode = extractRoomCodeFromScannedText(code);
+          setJoinInput(cleanCode);
+          setActiveTab('enter');
+          handleJoinRoom(cleanCode);
+          return;
         }
       }
     }
-
-    if (isScanningRef.current) {
-      scanAnimFrameRef.current = requestAnimationFrame(runScanLoop);
-    }
+    scanAnimFrameRef.current = requestAnimationFrame(scanLoop);
   };
 
-  // Manual SDP Processing
-  const handleProcessManualInput = async () => {
+  // 4. LAN DISCOVERY
+  const handleToggleLanScan = () => {
+    if (!lanDiscoveryRef.current) return;
+    const next = !isLanScanning;
+    setIsLanScanning(next);
+    lanDiscoveryRef.current.setScanning(next);
+  };
+
+  const handleToggleLanVisibility = () => {
+    if (!lanDiscoveryRef.current) return;
+    const next = !isLanVisible;
+    setIsLanVisible(next);
+    lanDiscoveryRef.current.setVisibility(next);
+  };
+
+  const handleConnectLanPeer = async (peer: LanDiscoveredPeer) => {
+    if (!lanDiscoveryRef.current) return;
     try {
+      setLanConnectingPeerId(peer.deviceId);
       setErrorMsg('');
-      const parsed = JSON.parse(manualInputJson.trim());
-      if (parsed.role === 'initiator') {
-        const ans = await peerManager.acceptOffer(parsed);
-        setAnswerData(ans);
-      } else if (parsed.role === 'responder') {
-        await peerManager.acceptAnswer(parsed);
-        setIsSuccess(true);
-        setTimeout(() => {
-          onPairSuccess();
-          onClose();
-        }, 700);
-      }
+      setStatusMessage(`Connecting to ${peer.displayName}...`);
+      await lanDiscoveryRef.current.connectToPeer(peer);
     } catch (err: any) {
-      setErrorMsg(`Manual handshake error: ${err.message}`);
+      setErrorMsg(err.message || 'Failed to connect to LAN device');
+      setStatusMessage('');
+    } finally {
+      setLanConnectingPeerId(null);
     }
   };
 
-  const copyRoomCode = () => {
-    if (!roomCode) return;
-    navigator.clipboard.writeText(roomCode);
+  const handleAcceptIncomingInvite = async (invite: LanIncomingInvite) => {
+    if (!lanDiscoveryRef.current) return;
+    try {
+      setStatusMessage('Accepting LAN invite...');
+      await lanDiscoveryRef.current.acceptInvite(invite);
+      setIncomingInvite(null);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to accept LAN invite');
+    }
+  };
+
+  const handleCopy = (text: string) => {
+    navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
   if (!isOpen) return null;
 
-  const formattedCode = roomCode
-    ? `${roomCode.slice(0, 3)} • ${roomCode.slice(3)}`
-    : '------';
-
   return (
-    <div
-      id="pairing-modal-backdrop"
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 select-none font-sans"
-    >
-      <div className="w-full max-w-md bg-[#18181b] border border-[#27272a] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-150 font-sans select-none">
+      <div
+        id="pairing-modal-container"
+        className="w-full max-w-md bg-[#09090b] border border-[#27272a] rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden"
+      >
         {/* Top Header */}
-        <div className="px-5 py-3.5 flex items-center justify-between border-b border-[#27272a]">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-white tracking-tight">
-              Connect Device
-            </span>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#1f1f23] bg-[#0c0c0e]">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-[#18181b] border border-[#27272a] flex items-center justify-center text-white">
+              <Shield className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-white tracking-tight">
+                Pair New Device
+              </h3>
+              <p className="text-[11px] text-[#71717a]">
+                Direct end-to-end encrypted P2P pairing
+              </p>
+            </div>
           </div>
           <button
+            id="close-pairing-modal-btn"
             onClick={onClose}
-            className="p-1 text-[#71717a] hover:text-white hover:bg-[#27272a] rounded-lg transition-colors"
+            className="p-1.5 rounded-lg text-[#a1a1aa] hover:text-white hover:bg-[#18181b] transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="grid grid-cols-4 p-1.5 mx-4 mt-3 bg-[#09090b] border border-[#27272a] rounded-xl text-xs font-medium">
-          <button
-            onClick={() => setActiveTab('my_code')}
-            className={`py-1.5 px-1 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-              activeTab === 'my_code'
-                ? 'bg-[#27272a] text-white font-semibold shadow-sm'
-                : 'text-[#71717a] hover:text-white'
-            }`}
-          >
-            <QrCode className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">My QR</span>
-            <span className="sm:hidden">QR</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('scan')}
-            className={`py-1.5 px-1 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-              activeTab === 'scan'
-                ? 'bg-[#27272a] text-white font-semibold shadow-sm'
-                : 'text-[#71717a] hover:text-white'
-            }`}
-          >
-            <Camera className="w-3.5 h-3.5" />
-            <span>Scan</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('enter')}
-            className={`py-1.5 px-1 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-              activeTab === 'enter'
-                ? 'bg-[#27272a] text-white font-semibold shadow-sm'
-                : 'text-[#71717a] hover:text-white'
-            }`}
-          >
-            <Key className="w-3.5 h-3.5" />
-            <span>Code</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('lan')}
-            className={`py-1.5 px-1 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-              activeTab === 'lan'
-                ? 'bg-[#27272a] text-white font-semibold shadow-sm'
-                : 'text-[#71717a] hover:text-white'
-            }`}
-          >
-            <Wifi className="w-3.5 h-3.5" />
-            <span>LAN</span>
-          </button>
+        {/* Minimalist Segmented Tabs */}
+        <div className="p-2 border-b border-[#1f1f23] bg-[#09090b]">
+          <div className="flex p-1 bg-[#141418] border border-[#222226] rounded-xl gap-1">
+            <button
+              id="tab-my-code-btn"
+              onClick={() => setActiveTab('my_code')}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'my_code'
+                  ? 'bg-white text-black font-semibold shadow-sm'
+                  : 'text-[#a1a1aa] hover:text-white'
+              }`}
+            >
+              <QrCode className="w-3.5 h-3.5" />
+              <span>My Code</span>
+            </button>
+
+            <button
+              id="tab-enter-code-btn"
+              onClick={() => setActiveTab('enter')}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'enter'
+                  ? 'bg-white text-black font-semibold shadow-sm'
+                  : 'text-[#a1a1aa] hover:text-white'
+              }`}
+            >
+              <Key className="w-3.5 h-3.5" />
+              <span>Enter Code</span>
+            </button>
+
+            <button
+              id="tab-scan-qr-btn"
+              onClick={() => setActiveTab('scan')}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'scan'
+                  ? 'bg-white text-black font-semibold shadow-sm'
+                  : 'text-[#a1a1aa] hover:text-white'
+              }`}
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>Scan QR</span>
+            </button>
+
+            <button
+              id="tab-lan-btn"
+              onClick={() => setActiveTab('lan')}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'lan'
+                  ? 'bg-white text-black font-semibold shadow-sm'
+                  : 'text-[#a1a1aa] hover:text-white'
+              }`}
+            >
+              <Wifi className="w-3.5 h-3.5" />
+              <span>LAN</span>
+            </button>
+          </div>
         </div>
 
-        {/* Body Content */}
-        <div className="p-5 overflow-y-auto space-y-4">
-          {errorMsg && (
-            <div className="p-2.5 bg-red-950/40 border border-red-900/60 text-red-300 rounded-xl text-xs">
-              {errorMsg}
-            </div>
-          )}
+        {/* Status / Alert Banners */}
+        {errorMsg && (
+          <div className="mx-4 mt-3 p-2.5 rounded-xl bg-red-950/40 border border-red-900/50 flex items-center gap-2 text-red-300 text-xs animate-in fade-in">
+            <AlertCircle className="w-4 h-4 flex-shrink-0 text-red-400" />
+            <div className="flex-1 font-medium">{errorMsg}</div>
+          </div>
+        )}
 
-          {/* INCOMING LAN INVITATION */}
-          {incomingInvite && (
-            <div className="p-4 bg-[#141416] border border-emerald-500/60 rounded-xl space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-emerald-400">Connection Request</span>
-                <span className="text-[10px] font-mono px-1.5 py-0.5 bg-[#27272a] text-[#a1a1aa] rounded">LAN</span>
-              </div>
-              <p className="text-xs text-[#d4d4d8]">
-                Device <strong className="text-white">{incomingInvite.fromDisplayName}</strong> wants to connect.
-              </p>
-              <div className="flex items-center gap-2 pt-1">
-                <button
-                  onClick={() => {
-                    incomingInvite.decline();
-                    setIncomingInvite(null);
-                  }}
-                  className="flex-1 py-2 px-3 bg-[#27272a] hover:bg-[#3f3f46] text-[#d4d4d8] hover:text-white rounded-lg text-xs font-medium transition-colors"
-                >
-                  Decline
-                </button>
-                <button
-                  onClick={async () => {
-                    try {
-                      setStatusMessage('Connecting...');
-                      await incomingInvite.accept();
-                      setIncomingInvite(null);
-                    } catch (e: any) {
-                      setErrorMsg(e?.message || 'Failed to accept invitation');
-                    }
-                  }}
-                  className="flex-1 py-2 px-3 bg-emerald-500 hover:bg-emerald-400 text-black rounded-lg text-xs font-bold transition-colors shadow-sm"
-                >
-                  Accept
-                </button>
-              </div>
-            </div>
-          )}
+        {statusMessage && !errorMsg && (
+          <div className="mx-4 mt-3 p-2.5 rounded-xl bg-[#141418] border border-[#27272a] flex items-center gap-2 text-[#e4e4e7] text-xs">
+            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span>{statusMessage}</span>
+          </div>
+        )}
 
-          {/* TAB 1: MY QR CODE & PAIRING CODE */}
+        {/* Modal Body */}
+        <div className="p-4 overflow-y-auto flex-1 space-y-4">
+          {/* TAB 1: MANUAL CODE GENERATION */}
           {activeTab === 'my_code' && (
-            <div>
+            <div className="space-y-4">
               {!roomCode ? (
-                <div className="py-6 px-4 text-center space-y-4">
-                  <div className="w-12 h-12 rounded-xl bg-[#09090b] border border-[#27272a] flex items-center justify-center mx-auto text-[#a1a1aa]">
-                    <QrCode className="w-6 h-6" />
+                <div className="text-center py-8 px-4 bg-[#121215] rounded-xl border border-[#222226] space-y-4">
+                  <div className="w-12 h-12 rounded-xl bg-[#1a1a20] border border-[#2e2e38] text-white flex items-center justify-center mx-auto shadow-inner">
+                    <Key className="w-6 h-6 text-[#a1a1aa]" />
                   </div>
                   <div className="space-y-1">
-                    <h3 className="text-sm font-semibold text-white">Pairing Code &amp; QR</h3>
+                    <h4 className="text-sm font-semibold text-white">Generate Pairing Code</h4>
                     <p className="text-xs text-[#71717a] max-w-xs mx-auto">
-                      Generate a 5-minute single-use code to connect your devices.
+                      A code and QR token are generated on-demand with fresh ephemeral keys.
                     </p>
                   </div>
                   <button
+                    id="generate-code-submit-btn"
                     onClick={handleGenerateRoom}
                     disabled={isGeneratingRoom}
-                    className="w-full py-2.5 px-4 bg-white hover:bg-neutral-200 disabled:opacity-50 text-black font-semibold rounded-xl text-xs transition-colors flex items-center justify-center gap-2 shadow-sm"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white hover:bg-neutral-200 text-black font-semibold text-xs shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
                   >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingRoom ? 'animate-spin' : ''}`} />
+                    {isGeneratingRoom ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <QrCode className="w-3.5 h-3.5" />
+                    )}
                     <span>{isGeneratingRoom ? 'Generating...' : 'Generate Code & QR'}</span>
                   </button>
                 </div>
               ) : (
-                <div className="space-y-4 text-center">
-                  {/* QR Image Display */}
-                  <div className="p-3 bg-white rounded-2xl inline-block mx-auto shadow-md">
-                    {qrDataUrl ? (
-                      <img
-                        src={qrDataUrl}
-                        alt="Pairing QR Code"
-                        className="w-44 h-44 sm:w-48 sm:h-48 block mx-auto rounded bg-white"
-                      />
-                    ) : (
-                      <div className="w-44 h-44 sm:w-48 sm:h-48 flex items-center justify-center text-black text-xs">
-                        <RefreshCw className="w-5 h-5 animate-spin" />
+                <div className="space-y-3 animate-in fade-in">
+                  {/* Code Card */}
+                  <div className="p-4 bg-[#121215] rounded-xl border border-[#222226] flex flex-col items-center text-center space-y-3">
+                    <div className="flex items-center justify-between w-full text-xs text-[#a1a1aa]">
+                      <span>One-Time Pairing Code</span>
+                      <div className="flex items-center gap-1 font-mono text-emerald-400 text-[11px]">
+                        <Clock className="w-3 h-3" />
+                        <span>{Math.floor(remainingSeconds / 60)}:{(remainingSeconds % 60).toString().padStart(2, '0')}</span>
                       </div>
-                    )}
+                    </div>
+
+                    <div className="text-3xl font-black font-mono tracking-widest text-white bg-[#09090b] px-6 py-2.5 rounded-xl border border-[#27272a] shadow-inner select-all">
+                      {roomCode}
+                    </div>
+
+                    <div className="flex items-center gap-2 w-full pt-1">
+                      <button
+                        id="copy-room-code-btn"
+                        onClick={() => handleCopy(roomCode)}
+                        className="flex-1 py-2 px-3 rounded-lg bg-[#1c1c22] hover:bg-[#27272a] text-white text-xs font-medium flex items-center justify-center gap-1.5 transition-colors border border-[#2c2c36] cursor-pointer"
+                      >
+                        {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-[#a1a1aa]" />}
+                        <span>{copied ? 'Copied' : 'Copy Code'}</span>
+                      </button>
+
+                      <button
+                        onClick={handleGenerateRoom}
+                        disabled={isGeneratingRoom}
+                        title="Generate new code"
+                        className="p-2 rounded-lg bg-[#1c1c22] hover:bg-[#27272a] text-[#a1a1aa] hover:text-white transition-colors border border-[#2c2c36] cursor-pointer"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingRoom ? 'animate-spin' : ''}`} />
+                      </button>
+                    </div>
                   </div>
 
-                  {/* 6-Character Code Card */}
-                  <div className="p-3 bg-[#09090b] border border-[#27272a] rounded-xl space-y-1">
-                    <div className="text-2xl font-bold tracking-widest text-white font-mono">
-                      {formattedCode}
-                    </div>
-                    <div className="flex items-center justify-center gap-1.5 text-[11px] text-[#71717a]">
-                      <Clock className="w-3.5 h-3.5 text-amber-400" />
-                      <span>
-                        {remainingSeconds > 0
-                          ? `Valid for ${Math.floor(remainingSeconds / 60)}:${(remainingSeconds % 60).toString().padStart(2, '0')}`
-                          : 'Code expired'}
-                      </span>
-                    </div>
-                    {remainingSeconds > 0 && (
-                      <div className="w-full h-1 bg-[#27272a] rounded-full overflow-hidden mt-2">
-                        <div
-                          className="h-full bg-white transition-all duration-1000 ease-linear rounded-full"
-                          style={{ width: `${(remainingSeconds / 300) * 100}%` }}
-                        />
+                  {/* QR Code */}
+                  {qrDataUrl && (
+                    <div className="p-4 bg-[#121215] rounded-xl border border-[#222226] flex flex-col items-center text-center space-y-2">
+                      <div className="p-3 bg-white rounded-xl shadow-md">
+                        <img src={qrDataUrl} alt="Pairing QR Code" className="w-40 h-40 object-contain" />
                       </div>
-                    )}
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={copyRoomCode}
-                      disabled={!roomCode || remainingSeconds <= 0}
-                      className="py-2.5 px-3 bg-[#27272a] hover:bg-[#3f3f46] disabled:opacity-40 text-white rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-1.5"
-                    >
-                      {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copied ? 'Copied' : 'Copy Code'}</span>
-                    </button>
-
-                    <button
-                      onClick={handleGenerateRoom}
-                      disabled={isGeneratingRoom}
-                      className="py-2.5 px-3 bg-white hover:bg-neutral-200 disabled:opacity-50 text-black rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingRoom ? 'animate-spin' : ''}`} />
-                      <span>New Code</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* TAB 2: SCAN CAMERA */}
-          {activeTab === 'scan' && (
-            <div className="space-y-4 text-center">
-              <div className="relative w-full aspect-square max-w-[240px] sm:max-w-[260px] mx-auto bg-black rounded-2xl overflow-hidden border border-[#27272a] flex items-center justify-center">
-                <video
-                  ref={videoRef}
-                  className="w-full h-full object-cover"
-                  playsInline
-                  muted
-                />
-                <canvas ref={scanCanvasRef} className="hidden" />
-
-                {/* Viewfinder Target */}
-                <div className="absolute inset-0 p-6 pointer-events-none flex flex-col justify-between">
-                  <div className="flex justify-between">
-                    <div className="w-5 h-5 border-t-2 border-l-2 border-white rounded-tl" />
-                    <div className="w-5 h-5 border-t-2 border-r-2 border-white rounded-tr" />
-                  </div>
-                  <div className="flex justify-between">
-                    <div className="w-5 h-5 border-b-2 border-l-2 border-white rounded-bl" />
-                    <div className="w-5 h-5 border-b-2 border-r-2 border-white rounded-br" />
-                  </div>
-                </div>
-              </div>
-
-              {cameraError ? (
-                <div className="p-3 bg-amber-950/40 border border-amber-900/60 text-amber-200 rounded-xl text-xs space-y-2">
-                  <p>{cameraError}</p>
-                  <button
-                    onClick={() => setActiveTab('enter')}
-                    className="px-3 py-1.5 bg-white text-black font-semibold rounded-lg text-xs"
-                  >
-                    Enter Code Instead
-                  </button>
-                </div>
-              ) : (
-                <p className="text-xs text-[#71717a]">
-                  Point camera at the QR code on your other device
-                </p>
-              )}
-
-              <div className="flex justify-center gap-2">
-                <button
-                  onClick={() => (isCameraRunning ? stopCamera() : startCamera())}
-                  className="px-3.5 py-2 bg-[#27272a] hover:bg-[#3f3f46] text-white rounded-xl text-xs font-medium transition-colors"
-                >
-                  {isCameraRunning ? 'Pause Camera' : 'Start Camera'}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: ENTER CODE */}
-          {activeTab === 'enter' && (
-            <div className="space-y-4">
-              <div className="p-4 bg-[#09090b] border border-[#27272a] rounded-xl text-center space-y-3">
-                <label htmlFor="pair-code-input" className="text-xs text-[#71717a] block">
-                  Enter 6-character pairing code
-                </label>
-                <input
-                  id="pair-code-input"
-                  type="text"
-                  maxLength={6}
-                  value={joinInput}
-                  onChange={(e) => setJoinInput(e.target.value.toUpperCase())}
-                  placeholder="ABCDEF"
-                  autoFocus
-                  className="w-full bg-[#18181b] border border-[#27272a] rounded-xl py-3 text-center text-2xl font-bold tracking-widest text-white uppercase focus:outline-none focus:border-white font-mono transition-colors"
-                />
-
-                <button
-                  onClick={() => handleJoinSignalRoom()}
-                  disabled={isConnecting || joinInput.trim().length !== 6}
-                  className="w-full py-2.5 bg-white hover:bg-neutral-200 disabled:opacity-30 text-black font-semibold rounded-xl text-xs transition-colors"
-                >
-                  {isConnecting ? 'Connecting...' : 'Connect'}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 4: LOCAL LAN DISCOVERY */}
-          {activeTab === 'lan' && (
-            <div className="space-y-3 text-xs">
-              {/* Toggles Card */}
-              <div className="p-3 bg-[#09090b] border border-[#27272a] rounded-xl space-y-3">
-                {/* Toggle 1: Scan for local devices */}
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <span className="font-medium text-white block">Discovery Scan</span>
-                    <span className="text-[11px] text-[#71717a]">Search for peers on your Wi-Fi</span>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={isLanScanning}
-                    onClick={handleToggleLanScan}
-                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      isLanScanning ? 'bg-white' : 'bg-[#27272a]'
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full shadow ring-0 transition duration-200 ease-in-out ${
-                        isLanScanning ? 'translate-x-4 bg-black' : 'translate-x-0 bg-[#71717a]'
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                <div className="border-t border-[#1e1e24]" />
-
-                {/* Toggle 2: Device visibility */}
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <span className="font-medium text-white block">Device Visibility</span>
-                    <span className="text-[11px] text-[#71717a]">Allow local peers to find this device</span>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={isLanVisible}
-                    onClick={handleToggleLanVisible}
-                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      isLanVisible ? 'bg-white' : 'bg-[#27272a]'
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full shadow ring-0 transition duration-200 ease-in-out ${
-                        isLanVisible ? 'translate-x-4 bg-black' : 'translate-x-0 bg-[#71717a]'
-                      }`}
-                    />
-                  </button>
-                </div>
-              </div>
-
-              {/* Discovered Devices List */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between px-1">
-                  <span className="text-xs font-medium text-[#a1a1aa]">
-                    Discovered Devices {isLanScanning ? `(${lanPeers.length})` : ''}
-                  </span>
-                  {isLanScanning && (
-                    <span className="text-[10px] text-emerald-400 flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                      Scanning
-                    </span>
+                      <p className="text-[11px] text-[#71717a]">
+                        Scan this QR code using the camera on your other device
+                      </p>
+                    </div>
                   )}
                 </div>
+              )}
+            </div>
+          )}
 
-                {!isLanScanning ? (
-                  <div className="p-4 text-center bg-[#09090b] border border-[#27272a] rounded-xl space-y-1">
-                    <Radio className="w-5 h-5 text-[#52525b] mx-auto" />
-                    <p className="text-xs text-[#a1a1aa] font-medium">Scanning is off</p>
-                    <p className="text-[11px] text-[#71717a]">
-                      Turn on Discovery Scan to search for peers on local Wi-Fi.
-                    </p>
-                  </div>
-                ) : lanPeers.length === 0 ? (
-                  <div className="p-5 text-center bg-[#09090b] border border-[#27272a] rounded-xl space-y-1">
-                    <Wifi className="w-5 h-5 text-emerald-400 mx-auto" />
-                    <p className="text-xs text-white font-medium">Searching local network</p>
-                    <p className="text-[11px] text-[#71717a]">
-                      Ensure the other device is on this Wi-Fi and has Device Visibility on.
-                    </p>
+          {/* TAB 2: ENTER CODE */}
+          {activeTab === 'enter' && (
+            <div className="space-y-4">
+              <div className="p-4 bg-[#121215] rounded-xl border border-[#222226] space-y-3">
+                <label className="block text-xs font-medium text-[#e4e4e7]">
+                  Enter Peer's 6-character Code
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="join-code-input"
+                    type="text"
+                    value={joinInput}
+                    onChange={(e) => setJoinInput(e.target.value.toUpperCase())}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !isConnecting) handleJoinRoom();
+                    }}
+                    placeholder="e.g. 7K9N2P"
+                    maxLength={32}
+                    className="flex-1 bg-[#09090b] border border-[#27272a] rounded-lg px-3.5 py-2 text-sm font-mono tracking-widest text-white placeholder:text-[#52525b] focus:outline-none focus:border-white uppercase"
+                  />
+                  <button
+                    id="join-code-submit-btn"
+                    onClick={() => handleJoinRoom()}
+                    disabled={isConnecting || !joinInput.trim()}
+                    className="px-4 py-2 bg-white hover:bg-neutral-200 disabled:opacity-40 text-black font-semibold rounded-lg text-xs flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
+                  >
+                    {isConnecting ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    )}
+                    <span>{isConnecting ? 'Connecting...' : 'Connect'}</span>
+                  </button>
+                </div>
+                <p className="text-[11px] text-[#71717a]">
+                  Generate this code on the other device in the "My Code" tab.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: CAMERA SCANNER */}
+          {activeTab === 'scan' && (
+            <div className="space-y-3">
+              <div className="relative aspect-square max-h-[260px] w-full mx-auto rounded-xl overflow-hidden bg-black border border-[#27272a] flex items-center justify-center">
+                {cameraError ? (
+                  <div className="p-4 text-center space-y-2 text-red-400 text-xs">
+                    <AlertCircle className="w-6 h-6 mx-auto opacity-80" />
+                    <p>{cameraError}</p>
+                    <button
+                      onClick={startCamera}
+                      className="px-3 py-1.5 rounded-lg bg-[#18181b] text-white text-xs font-medium hover:bg-[#27272a] border border-[#27272a] cursor-pointer"
+                    >
+                      Try Again
+                    </button>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    {lanPeers.map((peer) => {
-                      const isTargetConnecting = lanConnectingPeerId === peer.deviceId;
-                      return (
-                        <div
-                          key={peer.deviceId}
-                          className="p-3 bg-[#09090b] border border-[#27272a] hover:border-[#3f3f46] rounded-xl flex items-center justify-between gap-3 transition-colors"
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="w-8 h-8 rounded-lg bg-[#18181b] border border-[#27272a] flex items-center justify-center text-white shrink-0">
-                              <Laptop className="w-4 h-4 text-[#a1a1aa]" />
-                            </div>
-                            <div className="min-w-0">
-                              <span className="font-semibold text-white truncate text-xs block">
-                                {peer.displayName || 'Unnamed Device'}
-                              </span>
-                              <span className="text-[10px] text-[#71717a] font-mono">
-                                {peer.source === 'local-channel' ? 'Local Tab' : 'Wi-Fi'}
-                              </span>
-                            </div>
-                          </div>
+                  <>
+                    <video ref={videoRef} className="w-full h-full object-cover" />
+                    <canvas ref={scanCanvasRef} className="hidden" />
+                    {/* Minimalist target frame */}
+                    <div className="absolute inset-8 border border-white/40 rounded-xl pointer-events-none">
+                      <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-white" />
+                      <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-white" />
+                      <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-white" />
+                      <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-white" />
+                    </div>
+                  </>
+                )}
+              </div>
+              <p className="text-center text-xs text-[#71717a]">
+                Point camera at partner's QR code
+              </p>
+            </div>
+          )}
 
-                          <button
-                            onClick={() => handleConnectLanPeer(peer)}
-                            disabled={isTargetConnecting || !!lanConnectingPeerId}
-                            className="py-1.5 px-3 bg-white hover:bg-neutral-200 disabled:opacity-40 text-black font-semibold rounded-lg text-xs transition-colors shrink-0 flex items-center gap-1.5 shadow-sm"
-                          >
-                            {isTargetConnecting ? (
-                              <>
-                                <RefreshCw className="w-3 h-3 animate-spin" />
-                                <span>Connecting</span>
-                              </>
-                            ) : (
-                              <>
-                                <Link className="w-3 h-3" />
-                                <span>Connect</span>
-                              </>
-                            )}
-                          </button>
+          {/* TAB 4: LOCAL NETWORK (LAN) */}
+          {activeTab === 'lan' && (
+            <div className="space-y-3">
+              <div className="p-3.5 bg-[#121215] rounded-xl border border-[#222226] flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <div className="text-xs font-semibold text-white">Local Network Visibility</div>
+                  <div className="text-[11px] text-[#71717a]">
+                    {isLanVisible ? 'Your device is visible on the LAN' : 'Your device is hidden on the LAN'}
+                  </div>
+                </div>
+                <button
+                  id="lan-visibility-toggle-btn"
+                  onClick={handleToggleLanVisibility}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                    isLanVisible
+                      ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/60'
+                      : 'bg-[#1c1c22] text-[#a1a1aa] hover:text-white border border-[#2c2c36]'
+                  }`}
+                >
+                  {isLanVisible ? 'Visible' : 'Hidden'}
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs text-[#71717a] px-1">
+                  <span>Nearby Devices ({lanPeers.length})</span>
+                  <button
+                    onClick={handleToggleLanScan}
+                    className="text-white hover:text-neutral-300 font-medium flex items-center gap-1 text-[11px] cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isLanScanning ? 'animate-spin' : ''}`} />
+                    <span>{isLanScanning ? 'Scanning...' : 'Scan'}</span>
+                  </button>
+                </div>
+
+                {lanPeers.length === 0 ? (
+                  <div className="p-5 text-center bg-[#121215] rounded-xl border border-[#222226] text-xs text-[#71717a]">
+                    No devices found on local network. Ensure visibility is enabled on both devices.
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {lanPeers.map((peer) => (
+                      <div
+                        key={peer.deviceId}
+                        className="p-3 bg-[#121215] rounded-xl border border-[#222226] flex items-center justify-between hover:border-[#33333b] transition-colors"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-full bg-[#1c1c22] border border-[#2e2e38] flex items-center justify-center font-bold text-white text-xs">
+                            {peer.displayName.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="text-xs font-medium text-white">{peer.displayName}</div>
+                            <div className="text-[10px] text-[#71717a] font-mono">{peer.deviceId.slice(0, 16)}...</div>
+                          </div>
                         </div>
-                      );
-                    })}
+
+                        <button
+                          onClick={() => handleConnectLanPeer(peer)}
+                          disabled={lanConnectingPeerId === peer.deviceId}
+                          className="px-3 py-1.5 bg-white hover:bg-neutral-200 disabled:opacity-50 text-black rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                        >
+                          {lanConnectingPeerId === peer.deviceId ? 'Connecting...' : 'Connect'}
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
-            </div>
-          )}
 
-          {/* TAB 5: MANUAL SDP */}
-          {activeTab === 'manual' && (
-            <div className="space-y-3 text-xs">
-              <div className="p-3 bg-[#09090b] border border-[#27272a] rounded-xl space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-white">Your Handshake JSON</span>
-                  <button
-                    onClick={() => {
-                      const text = JSON.stringify(offerData || answerData || '');
-                      navigator.clipboard.writeText(text);
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 2000);
-                    }}
-                    className="flex items-center gap-1 text-[#a1a1aa] hover:text-white px-2 py-0.5 bg-[#27272a] rounded text-[11px]"
-                  >
-                    {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                    <span>{copied ? 'Copied' : 'Copy'}</span>
-                  </button>
+              {/* Incoming LAN Invite Alert */}
+              {incomingInvite && (
+                <div className="p-3.5 bg-[#141418] border border-emerald-500/30 rounded-xl space-y-2.5 animate-in zoom-in-95">
+                  <div className="flex items-center gap-2 text-emerald-400 text-xs font-medium">
+                    <Radio className="w-3.5 h-3.5 animate-pulse" />
+                    <span>Incoming LAN Pairing Request</span>
+                  </div>
+                  <p className="text-xs text-[#e4e4e7]">
+                    Device <strong className="text-white">{incomingInvite.fromDisplayName}</strong> wants to pair.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleAcceptIncomingInvite(incomingInvite)}
+                      className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                    >
+                      Accept
+                    </button>
+                    <button
+                      onClick={() => setIncomingInvite(null)}
+                      className="px-3 py-1.5 bg-[#1f1f26] hover:bg-[#282832] text-[#a1a1aa] hover:text-white rounded-lg text-xs transition-colors cursor-pointer"
+                    >
+                      Decline
+                    </button>
+                  </div>
                 </div>
-                <textarea
-                  readOnly
-                  rows={3}
-                  value={JSON.stringify(offerData || answerData || {}, null, 2)}
-                  className="w-full bg-[#18181b] border border-[#27272a] rounded p-2 text-[10px] text-[#a1a1aa] font-mono focus:outline-none"
-                />
-              </div>
-
-              <div className="p-3 bg-[#09090b] border border-[#27272a] rounded-xl space-y-2">
-                <span className="font-medium text-white block">Paste Peer Handshake JSON</span>
-                <textarea
-                  rows={3}
-                  value={manualInputJson}
-                  onChange={(e) => setManualInputJson(e.target.value)}
-                  placeholder="Paste peer JSON..."
-                  className="w-full bg-[#18181b] border border-[#27272a] rounded p-2 text-[10px] text-white font-mono focus:outline-none focus:border-white"
-                />
-                <button
-                  onClick={handleProcessManualInput}
-                  disabled={!manualInputJson.trim()}
-                  className="w-full py-2 bg-white hover:bg-neutral-200 disabled:opacity-30 text-black font-semibold rounded-lg transition-colors text-xs"
-                >
-                  Establish Channel
-                </button>
-              </div>
+              )}
             </div>
           )}
-
-          {/* Status notification banner */}
-          {statusMessage && (
-            <div className="p-2.5 bg-[#09090b] border border-[#27272a] text-[#a1a1aa] rounded-xl text-xs flex items-center justify-center gap-2">
-              <div
-                className={`w-2 h-2 rounded-full ${
-                  isSuccess ? 'bg-emerald-400' : 'bg-emerald-400 animate-pulse'
-                }`}
-              />
-              <span>{statusMessage}</span>
-            </div>
-          )}
-
-          {/* Toggle Manual SDP */}
-          <div className="text-center pt-1">
-            <button
-              onClick={() => setActiveTab(activeTab === 'manual' ? 'my_code' : 'manual')}
-              className="text-[11px] text-[#71717a] hover:text-[#a1a1aa] transition-colors"
-            >
-              {activeTab === 'manual' ? 'Show QR & Code' : 'Manual SDP exchange'}
-            </button>
-          </div>
         </div>
       </div>
     </div>

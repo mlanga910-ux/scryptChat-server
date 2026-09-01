@@ -42,6 +42,7 @@ export class FileTransferManager {
     }
   > = new Map();
   private outgoingAckResolvers: Map<string, Map<number, () => void>> = new Map();
+  private receivedAcks: Map<string, Set<number>> = new Map();
   private isCancelled = new Set<string>();
 
   public getTransfer(fileId: string): FileTransferProgress | undefined {
@@ -124,96 +125,122 @@ export class FileTransferManager {
 
     this.activeTransfers.set(fileId, progress);
     this.outgoingAckResolvers.set(fileId, new Map());
+    this.receivedAcks.set(fileId, new Set());
     events?.onProgress?.({ ...progress });
 
     // 1. Send FILE_HEADER packet (0x20)
-    const encodedHeaderPayload = encodeFileHeaderPayload(fileHeader);
-    const headerBytes = buildPacketHeader(
-      PacketType.FILE_HEADER,
-      session.sessionId,
-      fileIdBigInt,
-      0
-    );
-
-    const encryptedHeaderFrame = await session.encryptFrame(
-      headerBytes,
-      encodedHeaderPayload
-    );
-    dataChannel.send(encryptedHeaderFrame);
-
-    const startTime = Date.now();
-
-    // 2. Stream CHUNKS with backpressure
-    for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
-      if (this.isCancelled.has(fileId)) {
-        throw new Error('File transfer cancelled by user');
-      }
-
-      const start = chunkIdx * CHUNK_SIZE;
-      const end = Math.min(start + CHUNK_SIZE, fileBytes.byteLength);
-      const chunkBytes = fileBytes.slice(start, end);
-
-      const chunkPacketHeader = buildPacketHeader(
-        PacketType.FILE_CHUNK,
+    try {
+      const encodedHeaderPayload = encodeFileHeaderPayload(fileHeader);
+      const headerBytes = buildPacketHeader(
+        PacketType.FILE_HEADER,
         session.sessionId,
         fileIdBigInt,
-        chunkIdx
+        0
       );
 
-      const encryptedChunkFrame = await session.encryptFrame(
-        chunkPacketHeader,
-        chunkBytes
+      const encryptedHeaderFrame = await session.encryptFrame(
+        headerBytes,
+        encodedHeaderPayload
       );
+      dataChannel.send(encryptedHeaderFrame);
 
-      // Backpressure check
-      if (dataChannel.bufferedAmount > MAX_BUFFERED_AMOUNT) {
+      const startTime = Date.now();
+
+      // 2. Stream CHUNKS with backpressure
+      for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
+        if (this.isCancelled.has(fileId)) {
+          throw new Error('File transfer cancelled by user');
+        }
+
+        const start = chunkIdx * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, fileBytes.byteLength);
+        const chunkBytes = fileBytes.slice(start, end);
+
+        const chunkPacketHeader = buildPacketHeader(
+          PacketType.FILE_CHUNK,
+          session.sessionId,
+          fileIdBigInt,
+          chunkIdx
+        );
+
+        const encryptedChunkFrame = await session.encryptFrame(
+          chunkPacketHeader,
+          chunkBytes
+        );
+
+        // Backpressure check
+        if (dataChannel.bufferedAmount > MAX_BUFFERED_AMOUNT) {
+          await new Promise<void>((resolve) => {
+            const checkBuffer = () => {
+              if (dataChannel.bufferedAmount < MAX_BUFFERED_AMOUNT / 2) {
+                resolve();
+              } else {
+                setTimeout(checkBuffer, 15);
+              }
+            };
+            checkBuffer();
+          });
+        }
+
+        dataChannel.send(encryptedChunkFrame);
+
+        // Update progress
+        const transferred = chunkIdx + 1;
+        const pct = Math.round((transferred / totalChunks) * 100);
+        const elapsed = (Date.now() - startTime) / 1000;
+        const speed = elapsed > 0 ? (end / elapsed) : 0;
+
+        progress.transferredChunks = transferred;
+        progress.progressPercent = pct;
+        progress.speedBps = speed;
+        events?.onProgress?.({ ...progress });
+      }
+
+      // Check if last chunk was already acknowledged, or wait with a safe timeout
+      const lastChunkIdx = totalChunks - 1;
+      const isAlreadyAcked = this.receivedAcks.get(fileId)?.has(lastChunkIdx);
+
+      if (!isAlreadyAcked) {
         await new Promise<void>((resolve) => {
-          const checkBuffer = () => {
-            if (dataChannel.bufferedAmount < MAX_BUFFERED_AMOUNT / 2) {
-              resolve();
-            } else {
-              setTimeout(checkBuffer, 15);
-            }
-          };
-          checkBuffer();
+          const resolvers = this.outgoingAckResolvers.get(fileId);
+          if (resolvers) {
+            resolvers.set(lastChunkIdx, resolve);
+          }
+          // Safe timeout: don't freeze indefinitely if peer completed silently
+          setTimeout(() => resolve(), 8000);
         });
       }
 
-      dataChannel.send(encryptedChunkFrame);
-
-      // Update progress
-      const transferred = chunkIdx + 1;
-      const pct = Math.round((transferred / totalChunks) * 100);
-      const elapsed = (Date.now() - startTime) / 1000;
-      const speed = elapsed > 0 ? (end / elapsed) : 0;
-
-      progress.transferredChunks = transferred;
-      progress.progressPercent = pct;
-      progress.speedBps = speed;
+      progress.status = 'completed';
+      progress.progressPercent = 100;
       events?.onProgress?.({ ...progress });
+
+      const fileRecord: FileRecord = {
+        fileId,
+        name: file.name,
+        size: file.size,
+        mimeType: mime,
+        hashSHA256: hashHex,
+        blobRef: file,
+        isImage,
+        isAudio,
+        isVideo,
+        exifData,
+      };
+
+      await db.files.put(fileRecord);
+      events?.onCompleted?.(fileRecord, file);
+
+      return fileRecord;
+    } catch (err: any) {
+      const progress = this.activeTransfers.get(fileId);
+      if (progress) {
+        progress.status = 'error';
+        events?.onProgress?.({ ...progress });
+      }
+      events?.onError?.(fileId, err.message);
+      throw err;
     }
-
-    progress.status = 'completed';
-    progress.progressPercent = 100;
-    events?.onProgress?.({ ...progress });
-
-    const fileRecord: FileRecord = {
-      fileId,
-      name: file.name,
-      size: file.size,
-      mimeType: mime,
-      hashSHA256: hashHex,
-      blobRef: file,
-      isImage,
-      isAudio,
-      isVideo,
-      exifData,
-    };
-
-    await db.files.put(fileRecord);
-    events?.onCompleted?.(fileRecord, file);
-
-    return fileRecord;
   }
 
   /**
@@ -383,6 +410,11 @@ export class FileTransferManager {
     // C. 0x22: CHUNK_ACK
     if (packetType === PacketType.CHUNK_ACK) {
       const ack = decodeChunkAckPayload(payload);
+      if (!this.receivedAcks.has(fileIdHex)) {
+        this.receivedAcks.set(fileIdHex, new Set());
+      }
+      this.receivedAcks.get(fileIdHex)!.add(ack.chunkIndex);
+
       const fileResolvers = this.outgoingAckResolvers.get(fileIdHex);
       if (fileResolvers) {
         const resolver = fileResolvers.get(ack.chunkIndex);

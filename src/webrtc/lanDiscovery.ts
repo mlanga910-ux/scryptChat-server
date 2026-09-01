@@ -88,6 +88,20 @@ export class LanDiscoveryService {
     }
   }
 
+  public startAdvertising() {
+    this.setVisibility(true);
+  }
+
+  public stopAdvertising() {
+    this.setVisibility(false);
+  }
+
+  public async acceptInvite(invite: LanIncomingInvite) {
+    if (invite && typeof invite.accept === 'function') {
+      await invite.accept();
+    }
+  }
+
   public getIsScanning(): boolean {
     return this.isScanning;
   }
@@ -186,7 +200,8 @@ export class LanDiscoveryService {
   /**
    * 2. Start / Stop Scanning Loop
    */
-  private startScanning() {
+  public startScanning() {
+    this.isScanning = true;
     this.announcePresence();
     this.pollNetworkPeers();
 
@@ -201,7 +216,8 @@ export class LanDiscoveryService {
     }, 3500);
   }
 
-  private stopScanning() {
+  public stopScanning() {
+    this.isScanning = false;
     if (this.networkPollTimer) {
       clearInterval(this.networkPollTimer);
       this.networkPollTimer = null;

@@ -45,15 +45,30 @@ export function generateRandomHexId(bytesCount = 8): string {
   return arrayBufferToHex(bytes);
 }
 
+export function safeDataView(bytes: Uint8Array, offset = 0, length?: number): DataView {
+  const reqLen = length !== undefined ? length : (bytes.byteLength - offset);
+  if (reqLen <= 0) {
+    return new DataView(new ArrayBuffer(0));
+  }
+  // Check if slice fits within underlying buffer bounds
+  const startOffset = bytes.byteOffset + offset;
+  if (startOffset >= 0 && startOffset + reqLen <= bytes.buffer.byteLength) {
+    return new DataView(bytes.buffer, startOffset, reqLen);
+  }
+  // Fallback: Copy to a contiguous buffer
+  const copy = bytes.slice(offset, offset + reqLen);
+  return new DataView(copy.buffer, copy.byteOffset, copy.byteLength);
+}
+
 export function uint64ToBigEndianBytes(value: bigint): Uint8Array {
   const bytes = new Uint8Array(8);
-  const view = new DataView(bytes.buffer);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, 8);
   view.setBigUint64(0, value, false);
   return bytes;
 }
 
 export function bigEndianBytesToUint64(bytes: Uint8Array, offset = 0): bigint {
-  const view = new DataView(bytes.buffer, bytes.byteOffset + offset, 8);
+  const view = safeDataView(bytes, offset, 8);
   return view.getBigUint64(0, false);
 }
 

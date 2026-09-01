@@ -24,6 +24,7 @@ export enum PacketType {
   HEARTBEAT_PING_PONG = 0x30,
   TYPING_INDICATOR = 0x35,
   READ_RECEIPT = 0x36,
+  MEDIA_SIGNAL = 0x40,
 }
 
 export enum AckStatus {
@@ -158,3 +159,37 @@ export interface HandshakeFinalizeData {
   role: 'initiator';
   signature: string; // Base64 ECDSA signature over CanonicalTranscriptHash
 }
+
+export type CallState = 'IDLE' | 'CALLING' | 'INCOMING' | 'CONNECTED' | 'ENDED';
+export type CallType = 'audio' | 'video';
+
+export interface CallSessionInfo {
+  callId: string;
+  peerDeviceId: string;
+  peerDisplayName: string;
+  callType: CallType;
+  direction: 'OUTBOUND' | 'INBOUND';
+  state: CallState;
+  startTime?: number;
+  durationSeconds: number;
+  isAudioMuted: boolean;
+  isVideoMuted: boolean;
+  isScreenSharing: boolean;
+  isRemoteAudioMuted: boolean;
+  isRemoteVideoMuted: boolean;
+  safetyNumber?: string;
+}
+
+export interface CallSignalPayload {
+  action: 'CALL_OFFER' | 'CALL_ANSWER' | 'CALL_REJECT' | 'CALL_END' | 'CALL_MUTE_STATE' | 'CALL_ICE';
+  callId: string;
+  callType?: CallType;
+  callerDeviceId?: string;
+  callerDisplayName?: string;
+  sdp?: RTCSessionDescriptionInit;
+  candidate?: RTCIceCandidateInit;
+  reason?: string;
+  isAudioMuted?: boolean;
+  isVideoMuted?: boolean;
+}
+

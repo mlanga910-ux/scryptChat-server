@@ -28,7 +28,7 @@ export function buildPacketHeader(
   protocolVer: number = PROTOCOL_VERSION
 ): Uint8Array {
   const buffer = new Uint8Array(24);
-  const view = new DataView(buffer.buffer);
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 
   // [0..1] Protocol Ver
   view.setUint16(0, protocolVer, false);
@@ -46,16 +46,14 @@ export function buildPacketHeader(
   return buffer;
 }
 
+import { safeDataView } from '../crypto/utils';
+
 export function parsePacketHeader(raw24Bytes: Uint8Array): PacketHeader {
   if (raw24Bytes.byteLength < 24) {
     throw new Error(`Packet header too short: ${raw24Bytes.byteLength} bytes (expected 24)`);
   }
 
-  const view = new DataView(
-    raw24Bytes.buffer,
-    raw24Bytes.byteOffset,
-    24
-  );
+  const view = safeDataView(raw24Bytes, 0, 24);
 
   return {
     protocolVer: view.getUint16(0, false),
@@ -94,7 +92,7 @@ export interface ChunkAckPayload {
 
 export function encodeChunkAckPayload(ack: ChunkAckPayload): Uint8Array {
   const buffer = new Uint8Array(5);
-  const view = new DataView(buffer.buffer);
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
   view.setUint32(0, ack.chunkIndex, false);
   view.setUint8(4, ack.status);
   return buffer;
@@ -104,11 +102,7 @@ export function decodeChunkAckPayload(payloadBytes: Uint8Array): ChunkAckPayload
   if (payloadBytes.byteLength < 5) {
     throw new Error(`Chunk ACK payload too short: ${payloadBytes.byteLength} bytes`);
   }
-  const view = new DataView(
-    payloadBytes.buffer,
-    payloadBytes.byteOffset,
-    5
-  );
+  const view = safeDataView(payloadBytes, 0, 5);
   return {
     chunkIndex: view.getUint32(0, false),
     status: view.getUint8(4) as AckStatus,
