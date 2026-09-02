@@ -1,9 +1,11 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   ContactRecord,
   FileRecord,
   FileTransferProgress,
+  GroupRecord,
   MessageRecord,
+  CodeSnippet,
 } from '../types/index';
 import {
   Send,
@@ -30,28 +32,58 @@ import {
   Sliders,
   RotateCw,
   FileText,
+  Code2,
+  Maximize2,
+  ChevronDown,
+  Users,
+  Copy,
+  Plus,
 } from 'lucide-react';
 import { db } from '../db/index';
 import { ImageExifModal } from './ImageExifModal';
 import { ChatSettingsModal } from './ChatSettingsModal';
+import { CodeViewerModal } from './CodeViewerModal';
 import { getChatSettings, ChatCustomSettings } from '../utils/chatSettings';
+import { detectCodeLanguage, parseMarkdownCodeBlock } from '../utils/codeHelper';
 
 interface ChatViewProps {
   activeContact: ContactRecord | null;
+  activeGroup?: GroupRecord | null;
   messages: MessageRecord[];
   activeTransfers: FileTransferProgress[];
   isConnected: boolean;
   latencyMs?: number;
   peerManager?: any;
-  onSendMessage: (text: string) => Promise<void>;
-  onSendFile: (file: File) => Promise<void>;
+  onSendMessage: (
+    text: string,
+    options?: { codeSnippet?: CodeSnippet; isGroup?: boolean; groupId?: string }
+  ) => Promise<void>;
+  onSendFile: (file: File, options?: { isGroup?: boolean; groupId?: string }) => Promise<void>;
   onStartCall?: (peerDeviceId: string, peerDisplayName: string, callType: 'audio' | 'video') => void;
+  onStartGroupCall?: (group: GroupRecord, callType: 'audio' | 'video') => void;
   onBackToPeers?: () => void;
   onVerifyContact?: (contact: ContactRecord) => void;
+  onOpenGroupDetails?: (group: GroupRecord) => void;
 }
+
+const SUPPORTED_LANGUAGES = [
+  'typescript',
+  'javascript',
+  'python',
+  'rust',
+  'go',
+  'cpp',
+  'html',
+  'css',
+  'json',
+  'sql',
+  'bash',
+  'text',
+];
 
 export const ChatView: React.FC<ChatViewProps> = ({
   activeContact,
+  activeGroup,
   messages,
   activeTransfers,
   isConnected,
@@ -60,12 +92,33 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onSendMessage,
   onSendFile,
   onStartCall,
+  onStartGroupCall,
   onBackToPeers,
   onVerifyContact,
+  onOpenGroupDetails,
 }) => {
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [copiedSnippetId, setCopiedSnippetId] = useState<string | number | null>(null);
+
+  // Staged text/code snippet attachment (like Claude.ai)
+  const [stagedSnippet, setStagedSnippet] = useState<CodeSnippet | null>(null);
+  const [showCodeComposer, setShowCodeComposer] = useState(false);
+  const [composerCode, setComposerCode] = useState('');
+  const [composerLang, setComposerLang] = useState('typescript');
+  const [composerTitle, setComposerTitle] = useState('');
+
+  // Code Viewer Modal State
+  const [selectedSnippetForModal, setSelectedSnippetForModal] = useState<CodeSnippet | null>(null);
+  const [isCodeModalOpen, setIsCodeModalOpen] = useState(false);
+
+  // Scroll management: prevent unwanted jump to bottom when scrolling up
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
+  const [newMessagesWhileScrolled, setNewMessagesWhileScrolled] = useState(0);
+  const isNearBottomRef = useRef(true);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // File cache for downloads & previews
@@ -85,14 +138,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
   // Set of media IDs revealed by the user
   const [revealedMediaIds, setRevealedMediaIds] = useState<Set<string>>(new Set());
 
-  // Reload chat settings when active contact changes
-  useEffect(() => {
-    if (activeContact) {
-      setChatSettings(getChatSettings(activeContact.deviceId));
-      setRevealedMediaIds(new Set());
-    }
-  }, [activeContact?.deviceId]);
-
   // Voice recording
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
@@ -102,9 +147,45 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const isRecordingCancelledRef = useRef<boolean>(false);
   const audioStreamRef = useRef<MediaStream | null>(null);
 
+  // Reload chat settings when active contact changes
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, activeTransfers]);
+    if (activeContact) {
+      setChatSettings(getChatSettings(activeContact.deviceId));
+      setRevealedMediaIds(new Set());
+    }
+  }, [activeContact?.deviceId]);
+
+  // Handle Scroll events to track if user is reading previous messages
+  const handleScroll = () => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const nearBottom = distanceToBottom < 100;
+    isNearBottomRef.current = nearBottom;
+    if (nearBottom) {
+      setIsUserScrolledUp(false);
+      setNewMessagesWhileScrolled(0);
+    } else {
+      setIsUserScrolledUp(true);
+    }
+  };
+
+  const scrollToBottom = useCallback((smooth = true) => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+      setIsUserScrolledUp(false);
+      setNewMessagesWhileScrolled(0);
+    }
+  }, []);
+
+  // Auto-scroll ONLY if user is already at the bottom when new message arrives
+  useEffect(() => {
+    if (isNearBottomRef.current) {
+      scrollToBottom(false);
+    } else {
+      setNewMessagesWhileScrolled((prev) => prev + 1);
+    }
+  }, [messages.length, activeTransfers.length, scrollToBottom]);
 
   // Cleanup audio tracks on unmount
   useEffect(() => {
@@ -123,13 +204,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
     };
   }, []);
 
-  // Load blobs and file records for files in messages
+  // Load blobs and file records for files in messages (Fixed dependency loop)
   useEffect(() => {
+    let isCancelled = false;
     const loadBlobs = async () => {
       for (const msg of messages) {
-        if (msg.fileId && !downloadUrls.has(msg.fileId)) {
+        if (msg.fileId && !fileRecordsMap.has(msg.fileId)) {
           const rec = await db.files.get(msg.fileId);
-          if (rec) {
+          if (rec && !isCancelled) {
             setFileRecordsMap((prev) => new Map(prev).set(msg.fileId!, rec));
             if (rec.blobRef) {
               const url = URL.createObjectURL(rec.blobRef);
@@ -140,17 +222,48 @@ export const ChatView: React.FC<ChatViewProps> = ({
       }
     };
     loadBlobs();
-  }, [messages, downloadUrls]);
+    return () => {
+      isCancelled = true;
+    };
+  }, [messages]);
 
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Large Text Paste detection (Claude.ai style staged snippet)
+  const handleInputPaste = (e: React.ClipboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const text = e.clipboardData.getData('text');
+    if (text && text.length > 400) {
+      e.preventDefault();
+      const lineCount = text.split('\n').length;
+      const detectedLang = detectCodeLanguage(text);
+      const title = detectedLang !== 'text' ? `snippet.${detectedLang}` : `pasted_document_${Date.now().toString().slice(-4)}.txt`;
+
+      setStagedSnippet({
+        code: text,
+        language: detectedLang,
+        title,
+        lineCount,
+      });
+    }
+  };
+
+  const handleSend = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     const text = inputText.trim();
-    if (!text || isSending) return;
+    if ((!text && !stagedSnippet) || isSending) return;
 
     try {
       setIsSending(true);
-      await onSendMessage(text);
+
+      const options = {
+        codeSnippet: stagedSnippet || undefined,
+        isGroup: !!activeGroup,
+        groupId: activeGroup?.groupId,
+      };
+
+      await onSendMessage(text, options);
+
       setInputText('');
+      setStagedSnippet(null);
+      setTimeout(() => scrollToBottom(true), 50);
     } catch (err) {
       console.error('Send error:', err);
     } finally {
@@ -158,11 +271,29 @@ export const ChatView: React.FC<ChatViewProps> = ({
     }
   };
 
+  const handleAttachCodeModalSave = () => {
+    if (!composerCode.trim()) return;
+    const lines = composerCode.split('\n').length;
+    setStagedSnippet({
+      code: composerCode.trim(),
+      language: composerLang,
+      title: composerTitle.trim() || `snippet.${composerLang}`,
+      lineCount: lines,
+    });
+    setComposerCode('');
+    setComposerTitle('');
+    setShowCodeComposer(false);
+  };
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      await onSendFile(file);
+      await onSendFile(file, {
+        isGroup: !!activeGroup,
+        groupId: activeGroup?.groupId,
+      });
+      setTimeout(() => scrollToBottom(true), 50);
     } catch (err) {
       console.error('File send error:', err);
     } finally {
@@ -204,7 +335,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
             { type: mimeType }
           );
           try {
-            await onSendFile(audioFile);
+            await onSendFile(audioFile, {
+              isGroup: !!activeGroup,
+              groupId: activeGroup?.groupId,
+            });
+            setTimeout(() => scrollToBottom(true), 50);
           } catch (err) {
             console.error('Voice send error:', err);
           }
@@ -252,6 +387,18 @@ export const ChatView: React.FC<ChatViewProps> = ({
     setIsExifModalOpen(true);
   };
 
+  const openCodeModal = (snippet: CodeSnippet) => {
+    setSelectedSnippetForModal(snippet);
+    setIsCodeModalOpen(true);
+  };
+
+  const copyCodeSnippet = (snippet: CodeSnippet, messageId?: number | string) => {
+    navigator.clipboard.writeText(snippet.code);
+    const key = messageId || snippet.title || 'snippet';
+    setCopiedSnippetId(key);
+    setTimeout(() => setCopiedSnippetId(null), 2000);
+  };
+
   const toggleRevealMedia = (fileId: string) => {
     setRevealedMediaIds((prev) => {
       const next = new Set(prev);
@@ -294,358 +441,343 @@ export const ChatView: React.FC<ChatViewProps> = ({
     return <FileText className="w-4 h-4 text-white" />;
   };
 
-  if (!activeContact) {
+  if (!activeContact && !activeGroup) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-[#71717a] font-sans">
+      <div className="flex-1 h-full flex flex-col items-center justify-center p-6 text-center text-[#71717a] font-sans select-none">
         <div className="w-14 h-14 rounded-2xl bg-[#18181b] border border-[#27272a] flex items-center justify-center text-white mb-3 shadow-inner">
-          <Lock className="w-6 h-6" />
+          <Lock className="w-6 h-6 text-emerald-400" />
         </div>
-        <h2 className="text-sm font-semibold text-white mb-1">
-          No Contact Selected
-        </h2>
-        <p className="text-xs max-w-sm text-[#a1a1aa] leading-relaxed">
-          Select an encrypted contact from the left list or pair a new device using Safety Numbers.
+        <h3 className="text-sm font-semibold text-white mb-1">Direct Encrypted Messenger</h3>
+        <p className="text-xs max-w-sm text-[#71717a]">
+          Select a contact or group to start chatting. All messages and transfers are directly end-to-end encrypted.
         </p>
       </div>
     );
   }
 
-  const peerInitial = (activeContact.alias || 'P').charAt(0).toUpperCase();
+  const isGroup = !!activeGroup;
+  const isVerified = activeContact?.verificationStatus === 'VERIFIED';
+  const headerInitial = isGroup
+    ? activeGroup!.name.charAt(0).toUpperCase()
+    : (activeContact!.alias || activeContact!.deviceId.slice(4, 6)).charAt(0).toUpperCase();
+  const headerAvatarColor = isGroup
+    ? activeGroup!.avatarColor || '#2563eb'
+    : activeContact!.avatarColor || '#2563eb';
 
   return (
-    <div className="flex-1 flex flex-col bg-[#09090b] h-full overflow-hidden font-sans select-none">
-      {/* Chat Header */}
-      <div className="border-b border-[#27272a] bg-[#18181b]/50 px-4 sm:px-6 py-3 flex items-center justify-between gap-3 z-10">
+    <div className="flex-1 h-[100dvh] flex flex-col bg-[#09090b] text-[#fafafa] font-sans select-none overflow-hidden relative">
+      {/* Top Header */}
+      <div className="px-4 py-3 border-b border-[#27272a] bg-[#101014] flex items-center justify-between shrink-0 z-10">
         <div className="flex items-center gap-3 min-w-0">
           {onBackToPeers && (
             <button
               onClick={onBackToPeers}
-              className="md:hidden p-1.5 -ml-1.5 text-[#a1a1aa] hover:text-white rounded-lg transition-colors"
+              className="lg:hidden p-1.5 -ml-1 text-[#a1a1aa] hover:text-white rounded-lg transition-colors"
             >
               <ArrowLeft className="w-4 h-4" />
             </button>
           )}
 
-          {/* Contact Avatar */}
-          <div className="relative flex-shrink-0">
+          <div className="relative shrink-0">
             <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-medium text-xs shadow-sm"
-              style={{ backgroundColor: activeContact.avatarColor || '#2563eb' }}
+              className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-md"
+              style={{ backgroundColor: headerAvatarColor }}
             >
-              {peerInitial}
+              {headerInitial}
             </div>
-            <span
-              className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-[#18181b] ${
-                isConnected || activeContact.isOnline ? 'bg-emerald-400' : 'bg-zinc-600'
-              }`}
-            />
+            {!isGroup && (
+              <div
+                className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#101014] ${
+                  isConnected
+                    ? 'bg-emerald-400'
+                    : activeContact?.isOnline
+                    ? 'bg-emerald-500'
+                    : 'bg-[#52525b]'
+                }`}
+              />
+            )}
           </div>
 
-          {/* Peer Name & Online Status */}
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <h2 className="text-xs font-semibold text-white truncate">
-                {activeContact.alias || `Peer-${activeContact.deviceId.slice(4, 8)}`}
+              <h2 className="font-semibold text-white text-sm truncate">
+                {isGroup ? activeGroup!.name : activeContact!.alias || activeContact!.deviceId}
               </h2>
-            </div>
-            <p className="text-[11px] flex items-center gap-1.5">
-              {isConnected ? (
-                <span className="text-emerald-400 font-medium flex items-center gap-1">
-                  Direct P2P
-                  {latencyMs !== undefined && (
-                    <span className="text-[#71717a] font-mono text-[10px]">
-                      ({latencyMs}ms)
-                    </span>
-                  )}
+              {!isGroup && isVerified && (
+                <span title="Cryptographically Verified" className="shrink-0 inline-flex items-center">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
                 </span>
-              ) : activeContact.isOnline ? (
-                <span className="text-emerald-400 font-medium">Online via Relay</span>
-              ) : (
-                <span className="text-[#71717a]">Offline • Outbox Queueing</span>
               )}
-            </p>
+            </div>
+
+            <div className="flex items-center gap-2 text-[11px] text-[#71717a] font-mono">
+              {isGroup ? (
+                <button
+                  onClick={() => onOpenGroupDetails?.(activeGroup!)}
+                  className="hover:text-blue-400 transition-colors flex items-center gap-1"
+                >
+                  <Users className="w-3 h-3" />
+                  <span>{activeGroup!.memberDeviceIds.length} members</span>
+                </button>
+              ) : (
+                <>
+                  <span className="truncate max-w-[140px] sm:max-w-[220px]">
+                    {activeContact!.deviceId}
+                  </span>
+                  {latencyMs !== undefined && isConnected && (
+                    <span className="text-emerald-400 font-semibold">{latencyMs}ms</span>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Action Controls */}
-        <div className="flex items-center gap-1 sm:gap-2">
-          {/* Voice Call Button */}
+        {/* Header Action Buttons */}
+        <div className="flex items-center gap-1 shrink-0">
+          {/* Audio Call */}
           <button
-            onClick={() => onStartCall?.(activeContact.deviceId, activeContact.alias, 'audio')}
-            className="p-2 text-[#a1a1aa] hover:text-emerald-400 hover:bg-[#27272a] rounded-xl transition-colors cursor-pointer"
-            title="Start P2P Voice Call (Ultra-HD Audio)"
+            onClick={() => {
+              if (isGroup) {
+                onStartGroupCall?.(activeGroup!, 'audio');
+              } else if (activeContact) {
+                onStartCall?.(activeContact.deviceId, activeContact.alias || activeContact.deviceId, 'audio');
+              }
+            }}
+            className="p-2 text-[#a1a1aa] hover:text-white hover:bg-[#18181b] rounded-lg transition-colors cursor-pointer"
+            title={isGroup ? 'Group Voice Call' : 'Encrypted Voice Call'}
           >
             <Phone className="w-4 h-4" />
           </button>
 
-          {/* Video Call Button */}
+          {/* Video Call */}
           <button
-            onClick={() => onStartCall?.(activeContact.deviceId, activeContact.alias, 'video')}
-            className="p-2 text-[#a1a1aa] hover:text-emerald-400 hover:bg-[#27272a] rounded-xl transition-colors cursor-pointer"
-            title="Start P2P Video Call (1080p Ultra-HD)"
+            onClick={() => {
+              if (isGroup) {
+                onStartGroupCall?.(activeGroup!, 'video');
+              } else if (activeContact) {
+                onStartCall?.(activeContact.deviceId, activeContact.alias || activeContact.deviceId, 'video');
+              }
+            }}
+            className="p-2 text-[#a1a1aa] hover:text-white hover:bg-[#18181b] rounded-lg transition-colors cursor-pointer"
+            title={isGroup ? 'Group Video Call' : 'Encrypted Video Call'}
           >
             <Video className="w-4 h-4" />
           </button>
 
-          {/* Per-Chat Advanced Settings */}
-          <button
-            id="chat-settings-btn"
-            onClick={() => setIsChatSettingsOpen(true)}
-            className="p-2 text-[#a1a1aa] hover:text-white hover:bg-[#27272a] rounded-xl transition-colors cursor-pointer"
-            title="Chat Preferences (Blur media, mute, notes)"
-          >
-            <Sliders className="w-4 h-4" />
-          </button>
-
-          {activeContact.verificationStatus === 'VERIFIED' ? (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-950/30 border border-emerald-800 text-emerald-400 rounded-xl text-xs">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline font-medium">Verified</span>
-            </div>
-          ) : (
+          {/* Group Details or Contact Verification */}
+          {isGroup ? (
             <button
-              id="verify-contact-btn"
-              onClick={() => onVerifyContact?.(activeContact)}
-              className="flex items-center gap-1.5 px-2.5 py-1 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] text-[#a1a1aa] hover:text-white rounded-xl transition-colors text-xs"
-              title="Inspect Safety Number"
+              onClick={() => onOpenGroupDetails?.(activeGroup!)}
+              className="p-2 text-[#a1a1aa] hover:text-white hover:bg-[#18181b] rounded-lg transition-colors cursor-pointer"
+              title="Group Details"
             >
-              <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline">Safety:</span>
-              <span className="font-mono text-white">{activeContact.safetyNumber}</span>
+              <Info className="w-4 h-4" />
             </button>
+          ) : (
+            <>
+              {onVerifyContact && activeContact && (
+                <button
+                  onClick={() => onVerifyContact(activeContact)}
+                  className="p-2 text-[#a1a1aa] hover:text-white hover:bg-[#18181b] rounded-lg transition-colors cursor-pointer"
+                  title="Security & Safety Number"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                </button>
+              )}
+              <button
+                onClick={() => setIsChatSettingsOpen(true)}
+                className="p-2 text-[#a1a1aa] hover:text-white hover:bg-[#18181b] rounded-lg transition-colors cursor-pointer"
+                title="Chat Preferences"
+              >
+                <Sliders className="w-4 h-4" />
+              </button>
+            </>
           )}
         </div>
       </div>
 
-      {/* Disconnection / Outbox Banner */}
-      {!isConnected && (
-        <div className="bg-[#18181b] border-b border-[#27272a] px-4 py-2 text-[#a1a1aa] flex items-center justify-between text-xs">
-          <span className="flex items-center gap-2">
-            <Clock className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
-            <span>Contact is offline. Messages and files are saved in your local outbox and delivered upon reconnection.</span>
-          </span>
-          {messages.some((m) => m.status === 'queued') && (
-            <button
-              onClick={handleManualSync}
-              className="px-2 py-1 bg-[#27272a] hover:bg-[#3f3f46] text-white rounded-lg text-[11px] font-medium flex items-center gap-1 transition-colors flex-shrink-0 ml-2"
-            >
-              <RotateCw className="w-3 h-3" />
-              <span>Sync Now</span>
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Active Chunked File Transfers Progress Bar */}
-      {activeTransfers.length > 0 && (
-        <div className="px-4 py-2 bg-[#18181b] border-b border-[#27272a] space-y-1.5">
-          {activeTransfers.map((t) => (
-            <div
-              key={t.fileId}
-              id={`transfer-card-${t.fileId}`}
-              className="p-2 bg-[#09090b] border border-[#27272a] rounded-xl flex flex-col gap-1 text-xs"
-            >
-              <div className="flex items-center justify-between text-white">
-                <span className="truncate max-w-xs font-medium">{t.name}</span>
-                <span className="text-[#71717a] text-[11px]">
-                  {(t.size / (1024 * 1024)).toFixed(2)} MB • {t.progressPercent}%
-                </span>
-              </div>
-              <div className="w-full h-1 bg-[#27272a] rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-white rounded-full transition-all duration-150"
-                  style={{ width: `${t.progressPercent}%` }}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Message Stream */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3">
+      {/* Messages Stream Body */}
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-4 space-y-4 select-text"
+      >
         {messages.length === 0 ? (
-          <div className="h-48 flex flex-col items-center justify-center text-[#71717a] text-center space-y-1">
-            <Lock className="w-6 h-6 text-[#3f3f46]" />
-            <p className="text-xs font-medium text-white">Encrypted Direct Session</p>
-            <p className="text-[11px] text-[#71717a]">
-              Messages and files sent here are end-to-end encrypted with zero intermediary storage.
+          <div className="h-full flex flex-col items-center justify-center text-center p-6 text-[#71717a]">
+            <div className="w-12 h-12 rounded-xl bg-[#141418] border border-[#1f1f23] flex items-center justify-center text-white mb-2">
+              <Lock className="w-5 h-5 text-emerald-400" />
+            </div>
+            <p className="text-xs font-semibold text-white">No messages yet</p>
+            <p className="text-[11px] text-[#71717a] max-w-xs mt-0.5">
+              Send a message, file, photo, or code snippet to start communicating securely.
             </p>
           </div>
         ) : (
           messages.map((msg, idx) => {
             const isYou = msg.direction === 'OUTBOUND';
+            const fileRec = msg.fileId ? fileRecordsMap.get(msg.fileId) || msg.fileRecord : undefined;
+            const downloadUrl = msg.fileId ? downloadUrls.get(msg.fileId) : undefined;
+            const isImage = fileRec?.isImage || msg.mediaType === 'image';
+            const isAudio = fileRec?.isAudio || msg.mediaType === 'audio';
+
+            // Markdown code block parsing fallback
+            const parsedMdCode = !msg.fileId && !msg.codeSnippet ? parseMarkdownCodeBlock(msg.payloadText) : null;
+            const codeSnippet = msg.codeSnippet || (parsedMdCode ? {
+              code: parsedMdCode.code,
+              language: parsedMdCode.language,
+              title: parsedMdCode.title,
+              lineCount: parsedMdCode.code.split('\n').length,
+            } : null);
+
+            const isCode = msg.mediaType === 'code' || !!codeSnippet;
+
             const timeStr = new Date(msg.timestamp).toLocaleTimeString([], {
               hour: '2-digit',
               minute: '2-digit',
             });
-            const fileRec = msg.fileId ? fileRecordsMap.get(msg.fileId) || msg.fileRecord : undefined;
-            const downloadUrl = msg.fileId ? downloadUrls.get(msg.fileId) : undefined;
-            const isImage = fileRec?.isImage || (fileRec?.mimeType && fileRec.mimeType.startsWith('image/'));
-            const isAudio = fileRec?.isAudio || (fileRec?.mimeType && fileRec.mimeType.startsWith('audio/'));
-
-            // Check if media should be blurred (if chatSettings.blurMedia is active, not sent by you, and not revealed)
-            const isMediaBlurred = Boolean(
-              isImage &&
-                chatSettings.blurMedia &&
-                !isYou &&
-                msg.fileId &&
-                !revealedMediaIds.has(msg.fileId)
-            );
 
             return (
               <div
                 key={msg.id || idx}
-                id={`message-row-${msg.id || idx}`}
-                className={`flex flex-col gap-1 ${isYou ? 'items-end' : 'items-start'}`}
+                className={`flex flex-col ${isYou ? 'items-end' : 'items-start'} space-y-1`}
               >
-                {/* Message Bubble */}
+                {/* Group Sender Tag */}
+                {isGroup && !isYou && msg.senderDisplayName && (
+                  <span className="text-[11px] font-semibold text-blue-400 px-1">
+                    {msg.senderDisplayName}
+                  </span>
+                )}
+
                 <div
-                  className={`rounded-2xl max-w-[85%] sm:max-w-md transition-all ${
+                  className={`max-w-[85%] sm:max-w-[70%] rounded-2xl overflow-hidden shadow-sm transition-all ${
                     isYou
                       ? 'bg-white text-black rounded-tr-sm'
-                      : 'bg-[#18181b] border border-[#27272a] text-[#f4f4f5] rounded-tl-sm'
+                      : 'bg-[#18181b] border border-[#27272a] text-white rounded-tl-sm'
                   }`}
                 >
-                  {/* Photo Card Preview */}
+                  {/* Photo / Image View */}
                   {isImage && (
-                    <div className="p-1.5 space-y-1.5">
-                      <div className="relative rounded-xl overflow-hidden bg-black/60 group">
-                        {downloadUrl ? (
-                          <div className="relative overflow-hidden">
-                            <img
-                              src={downloadUrl}
-                              alt={fileRec?.name || 'Image'}
-                              className={`max-h-72 w-full object-contain rounded-lg transition-all duration-300 ${
-                                isMediaBlurred
-                                  ? 'filter blur-xl scale-110 select-none pointer-events-none'
-                                  : 'cursor-pointer hover:opacity-95'
-                              }`}
-                              onClick={() => !isMediaBlurred && fileRec && openExifModal(fileRec)}
-                              referrerPolicy="no-referrer"
-                            />
-
-                            {/* Blurred Image Overlay */}
-                            {isMediaBlurred && (
-                              <div className="absolute inset-0 bg-black/60 backdrop-blur-md flex flex-col items-center justify-center p-4 text-center z-10">
-                                <div className="w-10 h-10 rounded-full bg-[#27272a] border border-[#3f3f46] flex items-center justify-center text-amber-400 mb-2 shadow-lg">
-                                  <EyeOff className="w-5 h-5" />
-                                </div>
-                                <span className="font-semibold text-white text-xs mb-0.5">
-                                  Photo Hidden
-                                </span>
-                                <span className="text-[10.5px] text-[#a1a1aa] mb-3">
-                                  Blurred by your chat privacy setting
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => msg.fileId && toggleRevealMedia(msg.fileId)}
-                                  className="px-3.5 py-1.5 bg-white hover:bg-neutral-200 text-black font-medium rounded-xl text-xs transition-colors flex items-center gap-1.5 shadow-md"
-                                >
-                                  <Eye className="w-3.5 h-3.5" />
-                                  <span>Reveal Photo</span>
-                                </button>
-                              </div>
-                            )}
-
-                            {/* Re-blur option when revealed */}
-                            {!isMediaBlurred && chatSettings.blurMedia && !isYou && msg.fileId && (
-                              <button
-                                type="button"
-                                onClick={() => toggleRevealMedia(msg.fileId!)}
-                                className="absolute top-2 left-2 px-2 py-1 bg-black/70 hover:bg-black text-[#a1a1aa] hover:text-white rounded-lg text-[10px] flex items-center gap-1 transition-all shadow-sm font-sans"
-                                title="Re-blur photo"
-                              >
-                                <EyeOff className="w-3 h-3 text-amber-400" />
-                                <span>Blur</span>
-                              </button>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="p-8 text-center text-xs text-[#71717a]">
-                            Loading image...
-                          </div>
-                        )}
-
-                        {/* Hover Overlay Button to open EXIF */}
-                        {!isMediaBlurred && fileRec && (
-                          <button
-                            onClick={() => openExifModal(fileRec)}
-                            className="absolute top-2 right-2 px-2 py-1 bg-black/70 hover:bg-black text-white rounded-lg text-[11px] flex items-center gap-1 transition-opacity opacity-90 group-hover:opacity-100 shadow-sm font-sans"
-                            title="Inspect EXIF Metadata"
+                    <div className="relative group">
+                      {downloadUrl ? (
+                        <img
+                          src={downloadUrl}
+                          alt={fileRec?.name || 'Encrypted Photo'}
+                          className="max-h-72 w-auto object-cover cursor-pointer"
+                          onClick={() => fileRec && openExifModal(fileRec)}
+                        />
+                      ) : (
+                        <div className="w-64 h-48 bg-[#18181b] flex items-center justify-center text-xs text-[#71717a]">
+                          Decrypting photo...
+                        </div>
+                      )}
+                      <div className="p-2.5 flex items-center justify-between gap-2 border-t border-black/10 dark:border-white/10 text-xs">
+                        <span className="truncate max-w-[150px] font-medium opacity-80">
+                          {fileRec?.name || 'Photo'}
+                        </span>
+                        {downloadUrl && (
+                          <a
+                            href={downloadUrl}
+                            download={fileRec?.name || 'photo.png'}
+                            className="p-1.5 rounded-lg bg-black/10 hover:bg-black/20 text-current transition-colors"
+                            title="Download Photo"
                           >
-                            <Info className="w-3.5 h-3.5 text-white" />
-                            <span>EXIF</span>
-                          </button>
+                            <Download className="w-3.5 h-3.5" />
+                          </a>
                         )}
-                      </div>
-
-                      {/* Photo Bottom Bar: Name, Size & Actions */}
-                      <div className="px-2 py-1 flex items-center justify-between gap-2 text-xs">
-                        <div className="truncate text-[11px] opacity-80">
-                          {fileRec?.name}
-                        </div>
-                        <div className="flex items-center gap-1.5 flex-shrink-0">
-                          {fileRec && !isMediaBlurred && (
-                            <button
-                              onClick={() => openExifModal(fileRec)}
-                              className={`px-2 py-0.5 rounded-lg text-[11px] font-medium flex items-center gap-1 transition-colors ${
-                                isYou ? 'bg-black/10 hover:bg-black/20 text-black' : 'bg-[#27272a] hover:bg-[#3f3f46] text-white'
-                              }`}
-                            >
-                              <Info className="w-3 h-3" />
-                              <span>Details</span>
-                            </button>
-                          )}
-                          {downloadUrl && (
-                            <a
-                              href={downloadUrl}
-                              download={fileRec?.name || 'photo.png'}
-                              className={`p-1.5 rounded-lg transition-colors ${
-                                isYou ? 'bg-black/10 hover:bg-black/20 text-black' : 'bg-[#27272a] hover:bg-[#3f3f46] text-white'
-                              }`}
-                              title="Download Photo"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                            </a>
-                          )}
-                        </div>
                       </div>
                     </div>
                   )}
 
-                  {/* Audio Message Player */}
+                  {/* Audio Voice Note Player */}
                   {isAudio && (
                     <div className="p-3 flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${isYou ? 'bg-black/10 text-black' : 'bg-[#27272a] text-white'}`}>
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isYou ? 'bg-black/10 text-black' : 'bg-[#27272a] text-white'}`}>
                         <Music className="w-4 h-4" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-xs font-medium">Voice Message</div>
+                        <div className="text-xs font-medium">Voice Note</div>
                         {downloadUrl && (
-                          <audio
-                            controls
-                            src={downloadUrl}
-                            className="mt-1 w-full h-8 max-w-[200px]"
-                          />
+                          <audio controls src={downloadUrl} className="mt-1 w-full h-8 max-w-[200px]" />
                         )}
                       </div>
                     </div>
                   )}
 
-                  {/* Generic File Attachment Card */}
-                  {msg.fileId && !isImage && !isAudio && (
+                  {/* Code Snippet Card */}
+                  {isCode && codeSnippet && (
+                    <div className="w-full min-w-[240px] sm:min-w-[320px] bg-[#070709] border border-[#1f1f23] rounded-2xl overflow-hidden font-mono text-xs">
+                      {/* Code Header */}
+                      <div className="px-3.5 py-2 bg-[#0d0d10] border-b border-[#1f1f23] flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileCode className="w-4 h-4 text-emerald-400 shrink-0" />
+                          <span className="text-white font-semibold truncate text-[11px]">
+                            {codeSnippet.title || 'Code Snippet'}
+                          </span>
+                          <span className="px-1.5 py-0.2 rounded text-[10px] uppercase bg-[#18181b] text-emerald-400 border border-[#27272a]">
+                            {codeSnippet.language}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => copyCodeSnippet(codeSnippet, msg.id || idx)}
+                            className="p-1 rounded text-[#a1a1aa] hover:text-white transition-colors"
+                            title="Copy code"
+                          >
+                            {copiedSnippetId === (msg.id || idx) ? (
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                          <button
+                            onClick={() => openCodeModal(codeSnippet)}
+                            className="p-1 rounded text-[#a1a1aa] hover:text-white transition-colors"
+                            title="Expand code viewer"
+                          >
+                            <Maximize2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Code Preview Content (first 5 lines) */}
+                      <div
+                        onClick={() => openCodeModal(codeSnippet)}
+                        className="p-3 bg-[#070709] text-[#d4d4d8] text-[11px] leading-relaxed overflow-x-auto cursor-pointer hover:bg-[#0c0c10] transition-colors"
+                      >
+                        <pre className="whitespace-pre">
+                          {codeSnippet.code.split('\n').slice(0, 5).join('\n')}
+                        </pre>
+                        {codeSnippet.lineCount > 5 && (
+                          <div className="mt-2 pt-1.5 border-t border-[#1f1f23] flex items-center justify-between text-[10px] text-[#71717a]">
+                            <span>+{codeSnippet.lineCount - 5} more lines</span>
+                            <span className="text-emerald-400 font-semibold hover:underline">Click to view full code →</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Accompanying text message if any */}
+                      {msg.payloadText && msg.payloadText !== codeSnippet.code && !parsedMdCode && (
+                        <div className="p-3 border-t border-[#1f1f23] text-white font-sans text-xs bg-[#0c0c0e]">
+                          {msg.payloadText}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Standard File Attachment Card */}
+                  {msg.fileId && !isImage && !isAudio && !isCode && (
                     <div className="p-3 flex items-center justify-between gap-3">
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <div className={`p-2 rounded-xl flex-shrink-0 ${isYou ? 'bg-black/10' : 'bg-[#27272a]'}`}>
+                        <div className={`p-2 rounded-xl shrink-0 ${isYou ? 'bg-black/10' : 'bg-[#27272a]'}`}>
                           {getFileIcon(fileRec?.mimeType, fileRec?.name)}
                         </div>
                         <div className="min-w-0">
                           <p className="font-medium text-xs truncate max-w-[160px]">
                             {fileRec?.name || msg.payloadText}
                           </p>
-                          <p className="text-[11px] opacity-70">
-                            {fileRec ? `${(fileRec.size / 1024).toFixed(1)} KB` : 'Encrypted File'}
+                          <p className="text-[11px] opacity-70 font-mono">
+                            {fileRec ? `${(fileRec.size / 1024).toFixed(1)} KB` : 'File'}
                           </p>
                         </div>
                       </div>
@@ -653,7 +785,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         <a
                           href={downloadUrl}
                           download={fileRec?.name || 'file.bin'}
-                          className={`p-2 rounded-xl transition-colors flex-shrink-0 ${
+                          className={`p-2 rounded-xl transition-colors shrink-0 ${
                             isYou ? 'bg-black/10 hover:bg-black/20 text-black' : 'bg-[#27272a] hover:bg-[#3f3f46] text-white'
                           }`}
                           title="Download File"
@@ -664,15 +796,15 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     </div>
                   )}
 
-                  {/* Text Message Content */}
-                  {!msg.fileId && (
+                  {/* Standard Text Message Content */}
+                  {!msg.fileId && !isCode && (
                     <div className="px-4 py-2.5 text-xs whitespace-pre-wrap break-words leading-relaxed">
                       {msg.payloadText}
                     </div>
                   )}
                 </div>
 
-                {/* Status Timestamp & Delivery Check */}
+                {/* Status Timestamp & Delivery Checkmarks */}
                 <div
                   className={`flex items-center gap-1 text-[10px] text-[#71717a] font-mono px-1 select-none ${
                     isYou ? 'justify-end' : 'justify-start'
@@ -687,7 +819,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         </span>
                       )}
                       {msg.status === 'queued' && (
-                        <span title="Queued in Outbox • Will deliver on P2P reconnect" className="flex items-center gap-0.5 text-amber-400">
+                        <span title="Queued in Outbox" className="flex items-center gap-0.5 text-amber-400">
                           <Clock className="w-3 h-3" />
                           <span className="text-[9px] font-sans">Queued</span>
                         </span>
@@ -707,9 +839,118 @@ export const ChatView: React.FC<ChatViewProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Recording Overlay Bar */}
+      {/* Floating Jump to Bottom Button when Scrolled Up */}
+      {isUserScrolledUp && (
+        <button
+          onClick={() => scrollToBottom(true)}
+          className="absolute right-6 bottom-20 z-20 flex items-center gap-1.5 px-3 py-1.5 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] text-white rounded-full text-xs font-medium shadow-xl transition-all animate-in fade-in cursor-pointer"
+        >
+          <ChevronDown className="w-3.5 h-3.5" />
+          <span>Latest</span>
+          {newMessagesWhileScrolled > 0 && (
+            <span className="px-1.5 py-0.2 bg-blue-600 rounded-full text-[10px] font-bold">
+              {newMessagesWhileScrolled}
+            </span>
+          )}
+        </button>
+      )}
+
+      {/* Staged Large Text / Code Snippet Attachment Pill (Claude style) */}
+      {stagedSnippet && (
+        <div className="px-4 py-2 bg-[#0e0e12] border-t border-[#1f1f23] flex items-center justify-between gap-3 text-xs shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="p-1.5 rounded-lg bg-emerald-950 border border-emerald-800/60 text-emerald-400 shrink-0">
+              <FileCode className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="font-semibold text-white truncate text-xs">
+                {stagedSnippet.title || 'Pasted Document.txt'}
+              </p>
+              <p className="text-[10px] text-[#71717a] font-mono">
+                {stagedSnippet.lineCount} lines • {stagedSnippet.code.length} chars • {stagedSnippet.language}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={() => openCodeModal(stagedSnippet)}
+              className="px-2 py-1 bg-[#18181b] hover:bg-[#27272a] text-white rounded-lg text-[11px] font-medium transition-colors"
+            >
+              Preview
+            </button>
+            <button
+              onClick={() => setStagedSnippet(null)}
+              className="p-1 text-[#71717a] hover:text-white rounded-lg transition-colors"
+              title="Remove attachment"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 rotate-45" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Inline Code Composer Modal / Dropdown */}
+      {showCodeComposer && (
+        <div className="p-3 bg-[#0c0c0e] border-t border-[#27272a] space-y-2 shrink-0">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Code2 className="w-4 h-4 text-emerald-400" />
+              <span className="font-semibold text-xs text-white">Insert Code Block</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                value={composerLang}
+                onChange={(e) => setComposerLang(e.target.value)}
+                className="px-2 py-1 bg-[#18181b] border border-[#27272a] rounded-lg text-xs text-white uppercase focus:outline-none"
+              >
+                {SUPPORTED_LANGUAGES.map((l) => (
+                  <option key={l} value={l}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => setShowCodeComposer(false)}
+                className="p-1 text-[#71717a] hover:text-white rounded-lg"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+          <input
+            type="text"
+            value={composerTitle}
+            onChange={(e) => setComposerTitle(e.target.value)}
+            placeholder="Filename / Title (optional, e.g. server.ts)"
+            className="w-full px-3 py-1 bg-[#141418] border border-[#27272a] rounded-lg text-xs text-white focus:outline-none"
+          />
+          <textarea
+            value={composerCode}
+            onChange={(e) => setComposerCode(e.target.value)}
+            placeholder="Paste or write code here..."
+            rows={4}
+            className="w-full px-3 py-2 bg-[#070709] border border-[#27272a] rounded-lg font-mono text-xs text-white focus:outline-none"
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => setShowCodeComposer(false)}
+              className="px-3 py-1 bg-[#18181b] text-[#a1a1aa] rounded-lg text-xs"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleAttachCodeModalSave}
+              className="px-3 py-1 bg-white text-black font-semibold rounded-lg text-xs hover:bg-neutral-200"
+            >
+              Attach Code Snippet
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Voice Recording Overlay Bar */}
       {isRecording && (
-        <div className="px-4 py-2.5 bg-red-950/40 border-t border-red-800/60 flex items-center justify-between gap-3 text-xs">
+        <div className="px-4 py-2.5 bg-red-950/40 border-t border-red-800/60 flex items-center justify-between gap-3 text-xs shrink-0">
           <div className="flex items-center gap-2 text-red-400">
             <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
             <span className="font-semibold">Recording Voice:</span>
@@ -735,10 +976,10 @@ export const ChatView: React.FC<ChatViewProps> = ({
         </div>
       )}
 
-      {/* Input Message Form Bar */}
+      {/* Message Composer Bar */}
       <form
         onSubmit={handleSend}
-        className="p-3 sm:p-4 bg-[#18181b]/60 border-t border-[#27272a] flex items-center gap-2"
+        className="p-3 sm:p-4 bg-[#101014] border-t border-[#27272a] flex items-center gap-2 shrink-0"
       >
         <input
           type="file"
@@ -750,7 +991,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="p-2.5 text-[#a1a1aa] hover:text-white hover:bg-[#27272a] rounded-xl transition-colors cursor-pointer flex-shrink-0"
+          className="p-2.5 text-[#a1a1aa] hover:text-white hover:bg-[#18181b] rounded-xl transition-colors cursor-pointer shrink-0"
           title="Attach File or Image"
         >
           <Paperclip className="w-4 h-4" />
@@ -758,11 +999,20 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
         <button
           type="button"
+          onClick={() => setShowCodeComposer(!showCodeComposer)}
+          className={`p-2.5 rounded-xl transition-colors cursor-pointer shrink-0 ${
+            showCodeComposer ? 'bg-emerald-600 text-white' : 'text-[#a1a1aa] hover:text-white hover:bg-[#18181b]'
+          }`}
+          title="Insert Code Snippet"
+        >
+          <Code2 className="w-4 h-4" />
+        </button>
+
+        <button
+          type="button"
           onClick={isRecording ? () => stopRecording(false) : startRecording}
-          className={`p-2.5 rounded-xl transition-colors flex-shrink-0 cursor-pointer ${
-            isRecording
-              ? 'bg-red-600 text-white'
-              : 'text-[#a1a1aa] hover:text-white hover:bg-[#27272a]'
+          className={`p-2.5 rounded-xl transition-colors shrink-0 cursor-pointer ${
+            isRecording ? 'bg-red-600 text-white' : 'text-[#a1a1aa] hover:text-white hover:bg-[#18181b]'
           }`}
           title={isRecording ? 'Stop Recording' : 'Record Voice Note'}
         >
@@ -772,24 +1022,37 @@ export const ChatView: React.FC<ChatViewProps> = ({
         <input
           type="text"
           value={inputText}
+          onPaste={handleInputPaste}
           onChange={(e) => setInputText(e.target.value)}
           placeholder={
-            isConnected
-              ? 'Write encrypted message...'
-              : 'Write message (queued for auto-delivery on reconnect)...'
+            stagedSnippet
+              ? 'Add an optional message with your attachment...'
+              : 'Write message (paste long text or code for auto-snippet)...'
           }
           className="flex-1 bg-[#09090b] border border-[#27272a] rounded-xl px-4 py-2.5 text-xs text-white placeholder-[#52525b] focus:outline-none focus:border-white transition-colors"
         />
 
         <button
           type="submit"
-          disabled={!inputText.trim() || isSending}
-          className="p-2.5 bg-white text-black hover:bg-neutral-200 disabled:opacity-30 disabled:hover:bg-white rounded-xl transition-colors flex-shrink-0 cursor-pointer shadow-sm"
+          disabled={(!inputText.trim() && !stagedSnippet) || isSending}
+          className="p-2.5 bg-white text-black hover:bg-neutral-200 disabled:opacity-30 disabled:hover:bg-white rounded-xl transition-colors shrink-0 cursor-pointer shadow-sm"
           title="Send Message"
         >
           <Send className="w-4 h-4" />
         </button>
       </form>
+
+      {/* Code Viewer Modal */}
+      {isCodeModalOpen && selectedSnippetForModal && (
+        <CodeViewerModal
+          isOpen={isCodeModalOpen}
+          snippet={selectedSnippetForModal}
+          onClose={() => {
+            setIsCodeModalOpen(false);
+            setSelectedSnippetForModal(null);
+          }}
+        />
+      )}
 
       {/* EXIF Details Modal */}
       {isExifModalOpen && selectedExifFile && (
@@ -804,7 +1067,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
       )}
 
       {/* Per-Chat Extended Settings Modal */}
-      {isChatSettingsOpen && (
+      {isChatSettingsOpen && activeContact && (
         <ChatSettingsModal
           isOpen={isChatSettingsOpen}
           contact={activeContact}

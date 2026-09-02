@@ -468,7 +468,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-150 font-sans select-none">
       <div
         id="pairing-modal-container"
-        className="w-full max-w-md bg-[#09090b] border border-[#27272a] rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden"
+        className="w-full max-w-md h-[580px] max-h-[92vh] bg-[#09090b] border border-[#27272a] rounded-2xl shadow-2xl flex flex-col overflow-hidden"
       >
         {/* Top Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[#1f1f23] bg-[#0c0c0e]">

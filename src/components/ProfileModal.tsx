@@ -68,126 +68,128 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   return (
     <div
       id="profile-modal-backdrop"
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 select-none font-sans"
+      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 select-none font-sans animate-in fade-in duration-150"
     >
-      <div className="w-full max-w-md bg-[#18181b] border border-[#27272a] rounded-2xl shadow-2xl overflow-hidden text-xs flex flex-col">
+      <div className="w-full max-w-md h-[560px] max-h-[92vh] bg-[#0c0c0e] border border-[#27272a] rounded-2xl shadow-2xl overflow-hidden text-xs flex flex-col">
         {/* Header */}
-        <div className="px-5 py-4 border-b border-[#27272a] flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-[#27272a] flex items-center justify-center text-white">
+        <div className="px-5 py-4 border-b border-[#1f1f23] bg-[#09090b] flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-[#18181b] border border-[#27272a] flex items-center justify-center text-white">
               <User className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-white">Profile &amp; Identity</h2>
-              <p className="text-[11px] text-[#a1a1aa]">Manage your display name and cryptographic avatar</p>
+              <h2 className="text-sm font-semibold text-white tracking-tight">Profile &amp; Identity</h2>
+              <p className="text-[11px] text-[#71717a]">Manage your display name and cryptographic avatar</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-[#a1a1aa] hover:text-white hover:bg-[#27272a] rounded-lg transition-colors"
+            className="p-1.5 text-[#71717a] hover:text-white hover:bg-[#18181b] rounded-lg transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Content */}
-        <form onSubmit={handleSaveProfile} className="p-5 space-y-5">
-          {/* Avatar Preview & Color Selection */}
-          <div className="flex flex-col items-center gap-3 p-4 bg-[#09090b] border border-[#27272a] rounded-xl">
-            <div
-              className="w-16 h-16 rounded-full flex items-center justify-center text-white font-bold text-2xl shadow-lg ring-4 ring-[#27272a]"
-              style={{ backgroundColor: avatarColor }}
-            >
-              {initial}
-            </div>
-
-            <div className="flex items-center gap-1.5 flex-wrap justify-center pt-1">
-              {AVATAR_COLORS.map((color) => (
-                <button
-                  key={color}
-                  type="button"
-                  onClick={() => setAvatarColor(color)}
-                  className={`w-6 h-6 rounded-full transition-transform ${
-                    avatarColor === color ? 'scale-125 ring-2 ring-white shadow-md' : 'hover:scale-110 opacity-80 hover:opacity-100'
-                  }`}
-                  style={{ backgroundColor: color }}
-                  title={color}
-                />
-              ))}
-            </div>
-          </div>
-
-          {/* Form Fields */}
-          <div className="space-y-3.5">
-            <div>
-              <label className="block text-[#a1a1aa] mb-1 font-medium">Display Name</label>
-              <input
-                type="text"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                maxLength={32}
-                placeholder="e.g. Alice, Bob..."
-                className="w-full bg-[#09090b] border border-[#27272a] rounded-xl px-3.5 py-2.5 text-white placeholder-[#52525b] focus:outline-none focus:border-white transition-colors"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-[#a1a1aa] mb-1 font-medium">Status / Bio</label>
-              <input
-                type="text"
-                value={statusBio}
-                onChange={(e) => setStatusBio(e.target.value)}
-                maxLength={64}
-                placeholder="e.g. Available, Encrypted P2P..."
-                className="w-full bg-[#09090b] border border-[#27272a] rounded-xl px-3.5 py-2.5 text-white placeholder-[#52525b] focus:outline-none focus:border-white transition-colors"
-              />
-            </div>
-
-            {/* Device ID Box */}
-            <div className="p-3 bg-[#09090b] border border-[#27272a] rounded-xl space-y-1.5">
-              <div className="flex items-center justify-between text-[#a1a1aa]">
-                <span className="flex items-center gap-1.5 font-medium">
-                  <Fingerprint className="w-3.5 h-3.5 text-white" />
-                  Your Device ID
-                </span>
-                <button
-                  type="button"
-                  onClick={copyDeviceId}
-                  className="flex items-center gap-1 text-white hover:text-emerald-400 font-medium transition-colors"
-                >
-                  {copied ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      <span className="text-emerald-400">Copied</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>Copy</span>
-                    </>
-                  )}
-                </button>
+        <form onSubmit={handleSaveProfile} className="flex-1 overflow-y-auto p-5 space-y-4 flex flex-col justify-between">
+          <div className="space-y-4">
+            {/* Avatar Preview & Color Selection */}
+            <div className="flex flex-col items-center gap-3 p-4 bg-[#09090b] border border-[#1f1f23] rounded-xl">
+              <div
+                className="w-16 h-16 rounded-2xl flex items-center justify-center text-white font-bold text-2xl shadow-lg ring-2 ring-[#27272a]"
+                style={{ backgroundColor: avatarColor }}
+              >
+                {initial}
               </div>
-              <div className="font-mono text-[11px] text-[#71717a] break-all select-all">
-                {identity.deviceId}
+
+              <div className="flex items-center gap-1.5 flex-wrap justify-center pt-1">
+                {AVATAR_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    onClick={() => setAvatarColor(color)}
+                    className={`w-6 h-6 rounded-full transition-transform ${
+                      avatarColor === color ? 'scale-125 ring-2 ring-white shadow-md' : 'hover:scale-110 opacity-80 hover:opacity-100'
+                    }`}
+                    style={{ backgroundColor: color }}
+                    title={color}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Form Fields */}
+            <div className="space-y-3.5">
+              <div>
+                <label className="block text-[#a1a1aa] mb-1 font-medium text-xs">Display Name</label>
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  maxLength={32}
+                  placeholder="e.g. Alice, Bob..."
+                  className="w-full bg-[#09090b] border border-[#27272a] rounded-xl px-3.5 py-2.5 text-white placeholder-[#52525b] focus:outline-none focus:border-white transition-colors text-xs"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-[#a1a1aa] mb-1 font-medium text-xs">Status / Bio</label>
+                <input
+                  type="text"
+                  value={statusBio}
+                  onChange={(e) => setStatusBio(e.target.value)}
+                  maxLength={64}
+                  placeholder="e.g. Available, Encrypted P2P..."
+                  className="w-full bg-[#09090b] border border-[#27272a] rounded-xl px-3.5 py-2.5 text-white placeholder-[#52525b] focus:outline-none focus:border-white transition-colors text-xs"
+                />
+              </div>
+
+              {/* Device ID Box */}
+              <div className="p-3 bg-[#09090b] border border-[#1f1f23] rounded-xl space-y-1.5">
+                <div className="flex items-center justify-between text-[#a1a1aa]">
+                  <span className="flex items-center gap-1.5 font-medium text-xs">
+                    <Fingerprint className="w-3.5 h-3.5 text-white" />
+                    Your Device ID
+                  </span>
+                  <button
+                    type="button"
+                    onClick={copyDeviceId}
+                    className="flex items-center gap-1 text-white hover:text-emerald-400 font-medium transition-colors text-xs"
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-emerald-400">Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                <div className="font-mono text-[11px] text-[#71717a] break-all select-all">
+                  {identity.deviceId}
+                </div>
               </div>
             </div>
           </div>
 
           {/* Footer Actions */}
-          <div className="pt-2 flex items-center justify-end gap-2 border-t border-[#27272a]">
+          <div className="pt-3 flex items-center justify-end gap-2 border-t border-[#1f1f23]">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-[#a1a1aa] hover:text-white hover:bg-[#27272a] rounded-xl transition-colors font-medium"
+              className="px-4 py-2 text-[#a1a1aa] hover:text-white hover:bg-[#18181b] rounded-xl transition-colors font-medium text-xs"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSaved}
-              className={`px-5 py-2 rounded-xl font-medium transition-all flex items-center gap-1.5 ${
+              className={`px-5 py-2 rounded-xl font-medium transition-all flex items-center gap-1.5 text-xs ${
                 isSaved
                   ? 'bg-emerald-600 text-white'
                   : 'bg-white text-black hover:bg-neutral-200'

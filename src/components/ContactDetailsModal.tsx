@@ -82,38 +82,41 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150 font-sans select-none">
+    <div
+      id="contact-details-modal-backdrop"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-150 font-sans select-none"
+    >
       <div
         id="contact-details-modal"
-        className="w-full max-w-md bg-[#0c0c0e] border border-[#27272a] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        className="w-full max-w-md h-[580px] max-h-[92vh] bg-[#0c0c0e] border border-[#27272a] rounded-2xl shadow-2xl overflow-hidden flex flex-col"
       >
         {/* Top Header */}
-        <div className="relative px-6 pt-5 pb-4 border-b border-[#1f1f23] flex items-center justify-between">
+        <div className="relative px-5 py-4 border-b border-[#1f1f23] bg-[#09090b] flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2 text-xs font-semibold text-[#a1a1aa] uppercase tracking-wider">
             <span>Contact Profile</span>
           </div>
           <button
             id="close-contact-modal-btn"
             onClick={onClose}
-            className="p-1 rounded-lg text-[#71717a] hover:text-white hover:bg-[#18181b] transition-colors"
+            className="p-1.5 text-[#71717a] hover:text-white hover:bg-[#18181b] rounded-lg transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Content Body */}
-        <div className="p-6 overflow-y-auto space-y-5">
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
           {/* Avatar & Identity Info */}
-          <div className="flex flex-col items-center text-center space-y-3">
+          <div className="flex flex-col items-center text-center space-y-2">
             <div className="relative">
               <div
-                className="w-16 h-16 rounded-full flex items-center justify-center text-white text-2xl font-bold shadow-lg"
+                className="w-16 h-16 rounded-2xl flex items-center justify-center text-white text-2xl font-bold shadow-lg"
                 style={{ backgroundColor: avatarColor }}
               >
                 {initial}
               </div>
               <div
-                className={`absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-[#0c0c0e] ${
+                className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-[#0c0c0e] ${
                   isConnected ? 'bg-emerald-400' : contact.isOnline ? 'bg-emerald-500' : 'bg-[#52525b]'
                 }`}
               />
@@ -139,93 +142,83 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
                     onClick={handleSaveAlias}
                     className="p-1.5 bg-white text-black rounded-lg text-xs font-semibold hover:bg-neutral-200"
                   >
-                    Save
+                    <Check className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setIsEditingAlias(false)}
+                    className="p-1.5 bg-[#18181b] text-[#a1a1aa] rounded-lg text-xs hover:text-white"
+                  >
+                    <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
               ) : (
                 <div className="flex items-center justify-center gap-1.5">
-                  <h3 className="text-base font-bold text-white tracking-tight">
-                    {contact.alias}
-                  </h3>
+                  <h3 className="text-base font-semibold text-white truncate">{contact.alias}</h3>
                   <button
                     onClick={() => {
                       setAliasInput(contact.alias);
                       setIsEditingAlias(true);
                     }}
                     className="p-1 text-[#71717a] hover:text-white transition-colors"
-                    title="Edit Name"
+                    title="Rename contact"
                   >
                     <Edit2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               )}
 
-              {contact.statusBio && (
-                <p className="text-xs text-[#a1a1aa] italic">"{contact.statusBio}"</p>
-              )}
-            </div>
-
-            {/* Status Pills */}
-            <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
-              <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                isConnected
-                  ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-800/60'
-                  : contact.isOnline
-                  ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-800/40'
-                  : 'bg-[#18181b] text-[#71717a] border border-[#27272a]'
-              }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-400 animate-pulse' : contact.isOnline ? 'bg-emerald-500' : 'bg-[#52525b]'}`} />
-                {isConnected ? 'Direct P2P Link' : contact.isOnline ? 'Online' : 'Offline'}
-              </span>
-
-              {isVerified && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-950/60 text-emerald-400 border border-emerald-800/40 text-xs font-medium">
-                  <CheckCircle className="w-3 h-3" />
-                  Verified Key
-                </span>
-              )}
+              <p className="font-mono text-[11px] text-[#71717a] truncate">{contact.deviceId}</p>
             </div>
           </div>
 
-          {/* Quick Actions Grid */}
+          {/* Quick Actions Row */}
           <div className="grid grid-cols-3 gap-2">
             <button
-              id="contact-open-chat-btn"
-              onClick={() => onStartChat(contact)}
-              className="flex flex-col items-center justify-center p-3 rounded-xl bg-[#141418] hover:bg-[#1c1c22] border border-[#27272a] text-white transition-all group"
+              id="contact-message-btn"
+              onClick={() => {
+                onStartChat(contact);
+                onClose();
+              }}
+              className="flex flex-col items-center justify-center p-3 rounded-xl bg-[#141418] hover:bg-[#1c1c22] border border-[#27272a] text-white transition-all"
             >
-              <MessageSquare className="w-4 h-4 mb-1.5 text-[#a1a1aa] group-hover:text-white transition-colors" />
-              <span className="text-xs font-medium">Open Chat</span>
+              <MessageSquare className="w-4 h-4 mb-1 text-blue-400" />
+              <span className="text-xs font-medium">Message</span>
             </button>
 
             <button
               id="contact-voice-call-btn"
-              onClick={() => onStartCall?.(contact.deviceId, contact.alias, 'audio')}
-              className="flex flex-col items-center justify-center p-3 rounded-xl bg-[#141418] hover:bg-[#1c1c22] border border-[#27272a] text-white transition-all group"
+              onClick={() => {
+                onStartCall?.(contact.deviceId, contact.alias, 'audio');
+                onClose();
+              }}
+              className="flex flex-col items-center justify-center p-3 rounded-xl bg-[#141418] hover:bg-[#1c1c22] border border-[#27272a] text-white transition-all"
             >
-              <Phone className="w-4 h-4 mb-1.5 text-[#a1a1aa] group-hover:text-white transition-colors" />
-              <span className="text-xs font-medium">Voice Call</span>
+              <Phone className="w-4 h-4 mb-1 text-emerald-400" />
+              <span className="text-xs font-medium">Voice</span>
             </button>
 
             <button
               id="contact-video-call-btn"
-              onClick={() => onStartCall?.(contact.deviceId, contact.alias, 'video')}
-              className="flex flex-col items-center justify-center p-3 rounded-xl bg-[#141418] hover:bg-[#1c1c22] border border-[#27272a] text-white transition-all group"
+              onClick={() => {
+                onStartCall?.(contact.deviceId, contact.alias, 'video');
+                onClose();
+              }}
+              className="flex flex-col items-center justify-center p-3 rounded-xl bg-[#141418] hover:bg-[#1c1c22] border border-[#27272a] text-white transition-all"
             >
-              <Video className="w-4 h-4 mb-1.5 text-[#a1a1aa] group-hover:text-white transition-colors" />
-              <span className="text-xs font-medium">Video Call</span>
+              <Video className="w-4 h-4 mb-1 text-blue-400" />
+              <span className="text-xs font-medium">Video</span>
             </button>
           </div>
 
-          {/* Security & Device Specs */}
-          <div className="space-y-2 bg-[#121215] border border-[#222226] rounded-xl p-3.5 text-xs">
+          {/* Security & Details */}
+          <div className="space-y-2 bg-[#121215] border border-[#1f1f23] rounded-xl p-3.5 text-xs">
             <div className="flex items-center justify-between py-1 border-b border-[#1f1f23]">
               <span className="text-[#a1a1aa] flex items-center gap-1.5">
                 <Key className="w-3.5 h-3.5 text-[#71717a]" />
                 Device ID
               </span>
               <div className="flex items-center gap-1.5 font-mono text-[11px] text-white">
-                <span>{contact.deviceId}</span>
+                <span className="truncate max-w-[140px]">{contact.deviceId}</span>
                 <button
                   onClick={copyDeviceId}
                   className="p-1 text-[#71717a] hover:text-white transition-colors"
@@ -239,7 +232,7 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
             <div className="flex items-center justify-between py-1 border-b border-[#1f1f23]">
               <span className="text-[#a1a1aa] flex items-center gap-1.5">
                 <ShieldCheck className="w-3.5 h-3.5 text-[#71717a]" />
-                Cryptographic Verification
+                Verification Status
               </span>
               <button
                 onClick={handleToggleVerification}
@@ -249,14 +242,14 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
                     : 'bg-[#1e1e24] text-[#a1a1aa] border border-[#33333b] hover:text-white'
                 }`}
               >
-                {isVerified ? 'Verified' : 'Mark as Verified'}
+                {isVerified ? 'Verified' : 'Unverified'}
               </button>
             </div>
 
             {contact.safetyNumber && (
               <div className="flex items-center justify-between py-1 border-b border-[#1f1f23]">
                 <span className="text-[#a1a1aa]">Safety Number</span>
-                <span className="font-mono text-white text-[11px] tracking-wider">
+                <span className="font-mono text-emerald-400 text-[11px] tracking-wider font-semibold">
                   {contact.safetyNumber}
                 </span>
               </div>
@@ -265,7 +258,7 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
             <div className="flex items-center justify-between py-1">
               <span className="text-[#a1a1aa] flex items-center gap-1.5">
                 <Calendar className="w-3.5 h-3.5 text-[#71717a]" />
-                Added
+                Connected Since
               </span>
               <span className="text-[#71717a]">
                 {contact.addedAt ? new Date(contact.addedAt).toLocaleDateString() : 'Recently'}
@@ -273,17 +266,17 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
             </div>
           </div>
 
-          {/* Danger Zone Actions */}
-          <div className="space-y-2 pt-1">
+          {/* Danger Zone */}
+          <div className="space-y-2 pt-1 border-t border-[#1f1f23]">
             {showClearConfirm ? (
               <div className="p-3 bg-red-950/30 border border-red-900/40 rounded-xl space-y-2">
-                <p className="text-xs text-red-200 font-medium">Are you sure you want to delete all message history with this contact?</p>
+                <p className="text-xs text-red-200 font-medium">Are you sure you want to clear message history?</p>
                 <div className="flex gap-2">
                   <button
                     onClick={handleExecuteClearHistory}
                     className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white text-xs font-semibold rounded-lg transition-colors"
                   >
-                    Yes, Clear History
+                    Yes, Clear
                   </button>
                   <button
                     onClick={() => setShowClearConfirm(false)}
@@ -296,7 +289,7 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
             ) : (
               <button
                 onClick={() => setShowClearConfirm(true)}
-                className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-[#141418] hover:bg-[#1b1b20] border border-[#222226] text-xs text-[#a1a1aa] hover:text-white transition-colors"
+                className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-[#141418] hover:bg-[#1b1b20] border border-[#1f1f23] text-xs text-[#a1a1aa] hover:text-white transition-colors"
               >
                 <span>Clear Chat History</span>
                 <Trash2 className="w-3.5 h-3.5 text-[#71717a]" />
@@ -305,13 +298,13 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
 
             {showDeleteConfirm ? (
               <div className="p-3 bg-red-950/40 border border-red-900/50 rounded-xl space-y-2">
-                <p className="text-xs text-red-200 font-medium">Are you sure you want to remove {contact.alias} from your contacts?</p>
+                <p className="text-xs text-red-200 font-medium">Are you sure you want to remove this contact?</p>
                 <div className="flex gap-2">
                   <button
                     onClick={handleExecuteDelete}
                     className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white text-xs font-semibold rounded-lg transition-colors"
                   >
-                    Yes, Delete Contact
+                    Yes, Delete
                   </button>
                   <button
                     onClick={() => setShowDeleteConfirm(false)}

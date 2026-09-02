@@ -620,3 +620,91 @@ signalingRouter.get('/lan/invite/:inviteId/status', (req: Request, res: Response
   });
 });
 
+// ==========================================
+// 8. REAL-TIME ULTRA-LOW-LATENCY CALL SIGNALING RELAY
+// ==========================================
+interface FastCallSignal {
+  id: string;
+  senderDeviceId: string;
+  recipientDeviceId: string;
+  signal: any;
+  timestamp: number;
+}
+
+const callSignalsQueue = new Map<string, FastCallSignal[]>(); // recipientDeviceId -> signals
+
+// 8.1 Push Call Signal (Offer, Answer, ICE Candidates, Mute state, End, Reject)
+signalingRouter.post('/call/signal', (req: Request, res: Response) => {
+  const { senderDeviceId, recipientDeviceId, signal } = req.body;
+  if (!senderDeviceId || !recipientDeviceId || !signal) {
+    res.status(400).json({ error: 'senderDeviceId, recipientDeviceId, and signal are required' });
+    return;
+  }
+
+  const signalObj: FastCallSignal = {
+    id: `cs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    senderDeviceId,
+    recipientDeviceId,
+    signal,
+    timestamp: Date.now(),
+  };
+
+  const current = callSignalsQueue.get(recipientDeviceId) || [];
+  current.push(signalObj);
+  callSignalsQueue.set(recipientDeviceId, current.slice(-20)); // keep last 20 max
+
+  res.json({ success: true, signalId: signalObj.id });
+});
+
+// 8.2 Poll Call Signals
+signalingRouter.get('/call/poll/:deviceId', (req: Request, res: Response) => {
+  const { deviceId } = req.params;
+  const signals = callSignalsQueue.get(deviceId) || [];
+  callSignalsQueue.delete(deviceId); // dequeue
+  res.json({ success: true, signals });
+});
+
+// ==========================================
+// 9. GROUP RELAY DISPATCH
+// ==========================================
+interface GroupBroadcastPacket {
+  id: string;
+  groupId: string;
+  senderDeviceId: string;
+  recipients: string[];
+  payload: any;
+  timestamp: number;
+}
+
+signalingRouter.post('/group/broadcast', (req: Request, res: Response) => {
+  const { groupId, senderDeviceId, recipients, payload } = req.body;
+  if (!groupId || !senderDeviceId || !Array.isArray(recipients) || !payload) {
+    res.status(400).json({ error: 'groupId, senderDeviceId, recipients, and payload are required' });
+    return;
+  }
+
+  const now = Date.now();
+  recipients.forEach((memberId: string) => {
+    if (memberId !== senderDeviceId) {
+      const envelope = {
+        id: `grp_${now}_${Math.random().toString(36).slice(2, 7)}`,
+        senderDeviceId,
+        recipientDeviceId: memberId,
+        packet: payload,
+        timestamp: now,
+      };
+      const list = mailboxes.get(memberId) || [];
+      list.push({
+        id: `grp_${now}_${Math.random().toString(36).slice(2, 7)}`,
+        senderDeviceId,
+        recipientDeviceId: memberId,
+        encryptedEnvelope: JSON.stringify(payload),
+        timestamp: now,
+      });
+      mailboxes.set(memberId, list.slice(-50));
+    }
+  });
+
+  res.json({ success: true, recipientCount: recipients.length });
+});
+

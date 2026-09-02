@@ -102,14 +102,39 @@ export interface FileRecord {
   exifData?: ImageExifData;
 }
 
+export interface CodeSnippet {
+  code: string;
+  language: string;
+  title?: string;
+  lineCount: number;
+}
+
+export interface GroupRecord {
+  groupId: string; // group_xxx
+  name: string;
+  description?: string;
+  avatarColor: string;
+  adminDeviceId: string;
+  memberDeviceIds: string[];
+  createdAt: number;
+  lastActivityAt: number;
+  unreadCount?: number;
+}
+
 export interface MessageRecord {
   id?: number;
-  chatDeviceId: string;
+  chatDeviceId: string; // Peer deviceId OR groupId
+  isGroup?: boolean;
+  groupId?: string;
+  senderDeviceId?: string;
+  senderDisplayName?: string;
+  senderAvatarColor?: string;
   direction: MessageDirection;
   payloadText: string;
   fileId?: string;
   fileRecord?: FileRecord;
-  mediaType?: 'text' | 'image' | 'audio' | 'video' | 'file';
+  mediaType?: 'text' | 'image' | 'audio' | 'video' | 'file' | 'code' | 'snippet';
+  codeSnippet?: CodeSnippet;
   timestamp: number;
   status?: MessageStatus;
   offlineEnvelope?: boolean;
@@ -178,6 +203,10 @@ export interface CallSessionInfo {
   isRemoteAudioMuted: boolean;
   isRemoteVideoMuted: boolean;
   safetyNumber?: string;
+  isGroupCall?: boolean;
+  groupId?: string;
+  groupName?: string;
+  groupMembers?: string[];
 }
 
 export interface CallSignalPayload {

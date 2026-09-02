@@ -112,160 +112,165 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   return (
     <div
       id="settings-modal-backdrop"
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 select-none font-sans"
+      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 select-none font-sans text-xs animate-in fade-in duration-150"
     >
-      <div className="w-full max-w-xl bg-[#18181b] border border-[#27272a] rounded-2xl shadow-2xl overflow-hidden text-xs flex flex-col max-h-[90vh]">
+      <div className="w-full max-w-xl h-[620px] max-h-[92vh] bg-[#0c0c0e] border border-[#27272a] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="px-5 py-3.5 border-b border-[#27272a] flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-[#27272a] flex items-center justify-center text-white">
-              <Sliders className="w-4 h-4" />
+        <div className="px-5 py-4 border-b border-[#1f1f23] bg-[#09090b] flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-[#18181b] border border-[#27272a] flex items-center justify-center text-white">
+              <Sliders className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-white">Settings</h2>
-              <p className="text-[11px] text-[#a1a1aa]">Configure audio, calls, and device preferences</p>
+              <h3 className="text-sm font-semibold text-white tracking-tight">
+                Settings
+              </h3>
+              <p className="text-[11px] text-[#71717a]">
+                Audio synthesis, call studio quality, and network preferences
+              </p>
             </div>
           </div>
           <button
+            id="close-settings-modal-btn"
             onClick={handleClose}
-            className="p-1.5 text-[#a1a1aa] hover:text-white hover:bg-[#27272a] rounded-lg transition-colors"
+            className="p-1.5 text-[#71717a] hover:text-white hover:bg-[#18181b] rounded-lg transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Tab Navigation */}
-        <div className="px-5 pt-3 border-b border-[#27272a] flex items-center gap-2 bg-[#09090b]">
+        <div className="grid grid-cols-3 border-b border-[#1f1f23] bg-[#09090b] p-1.5 gap-1.5 text-center shrink-0">
           <button
-            onClick={() => {
-              soundEngine.stopRingtone();
-              setIsPlayingRing(false);
-              setActiveTab('audio');
-            }}
-            className={`pb-2.5 px-2 font-medium border-b-2 transition-colors flex items-center gap-1.5 ${
+            id="tab-audio-settings"
+            onClick={() => setActiveTab('audio')}
+            className={`py-2 rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${
               activeTab === 'audio'
-                ? 'border-white text-white'
-                : 'border-transparent text-[#a1a1aa] hover:text-[#e4e4e7]'
+                ? 'bg-[#18181b] text-white border border-[#27272a] font-semibold'
+                : 'text-[#71717a] hover:text-white'
             }`}
           >
             <Volume2 className="w-3.5 h-3.5" />
             <span>Audio &amp; Sounds</span>
           </button>
-
           <button
-            onClick={() => {
-              soundEngine.stopRingtone();
-              setIsPlayingRing(false);
-              setActiveTab('calls');
-            }}
-            className={`pb-2.5 px-2 font-medium border-b-2 transition-colors flex items-center gap-1.5 ${
+            id="tab-calls-settings"
+            onClick={() => setActiveTab('calls')}
+            className={`py-2 rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${
               activeTab === 'calls'
-                ? 'border-white text-white'
-                : 'border-transparent text-[#a1a1aa] hover:text-[#e4e4e7]'
+                ? 'bg-[#18181b] text-white border border-[#27272a] font-semibold'
+                : 'text-[#71717a] hover:text-white'
             }`}
           >
             <Mic className="w-3.5 h-3.5" />
-            <span>Studio Voice &amp; Video</span>
+            <span>Call &amp; Media</span>
           </button>
-
           <button
-            onClick={() => {
-              soundEngine.stopRingtone();
-              setIsPlayingRing(false);
-              setActiveTab('privacy');
-            }}
-            className={`pb-2.5 px-2 font-medium border-b-2 transition-colors flex items-center gap-1.5 ${
+            id="tab-privacy-settings"
+            onClick={() => setActiveTab('privacy')}
+            className={`py-2 rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${
               activeTab === 'privacy'
-                ? 'border-white text-white'
-                : 'border-transparent text-[#a1a1aa] hover:text-[#e4e4e7]'
+                ? 'bg-[#18181b] text-white border border-[#27272a] font-semibold'
+                : 'text-[#71717a] hover:text-white'
             }`}
           >
-            <Shield className="w-3.5 h-3.5" />
-            <span>Queue &amp; Privacy</span>
+            <Radio className="w-3.5 h-3.5" />
+            <span>Network &amp; Status</span>
           </button>
         </div>
 
-        {/* Tab Contents */}
+        {/* Modal Body with Fixed Height & Smooth Scroll */}
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
           {/* TAB 1: AUDIO & SOUNDS */}
           {activeTab === 'audio' && (
             <div className="space-y-4">
-              {/* Master Volume & Sound Toggle */}
-              <div className="p-4 bg-[#09090b] border border-[#27272a] rounded-xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-semibold text-white">Synthesized Audio Effects</h3>
-                    <p className="text-[#a1a1aa] text-[11px]">Real-time zero-latency Web Audio sound synthesis</p>
+              {/* Master Volume Toggle */}
+              <div className="p-4 bg-[#09090b] border border-[#1f1f23] rounded-xl flex items-center justify-between">
+                <div>
+                  <div className="font-semibold text-white text-xs">Audio Feedback &amp; Synthesizer</div>
+                  <div className="text-[11px] text-[#71717a] mt-0.5">
+                    Real-time procedural audio synthesis without external files
                   </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={settings.soundEnabled}
-                      onChange={(e) => updateSetting('soundEnabled', e.target.checked)}
-                      className="sr-only peer"
-                    />
-                    <div className="w-9 h-5 bg-[#27272a] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[#27272a] after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600" />
-                  </label>
                 </div>
-
-                {settings.soundEnabled && (
-                  <div className="pt-2 border-t border-[#27272a] flex items-center gap-3">
-                    <Volume2 className="w-4 h-4 text-[#a1a1aa]" />
-                    <input
-                      type="range"
-                      min="0.1"
-                      max="1"
-                      step="0.05"
-                      value={settings.masterVolume}
-                      onChange={(e) => updateSetting('masterVolume', parseFloat(e.target.value))}
-                      className="flex-1 accent-white h-1.5 bg-[#27272a] rounded-lg cursor-pointer"
-                    />
-                    <span className="font-mono text-white w-10 text-right">
-                      {Math.round(settings.masterVolume * 100)}%
-                    </span>
-                  </div>
-                )}
+                <button
+                  id="toggle-sound-enabled-btn"
+                  onClick={() => updateSetting('soundEnabled', !settings.soundEnabled)}
+                  className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 ${
+                    settings.soundEnabled ? 'bg-white' : 'bg-[#27272a]'
+                  }`}
+                >
+                  <div
+                    className={`w-5 h-5 rounded-full bg-black shadow-md transition-transform ${
+                      settings.soundEnabled ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
               </div>
 
-              {/* Message Notification Tones */}
-              <div className="p-4 bg-[#09090b] border border-[#27272a] rounded-xl space-y-3">
-                <div>
-                  <h3 className="font-semibold text-white">Message Alert Sound</h3>
-                  <p className="text-[#a1a1aa] text-[11px]">Synthesized audio chime played when a message arrives</p>
+              {/* Volume Slider */}
+              <div className="p-4 bg-[#09090b] border border-[#1f1f23] rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-white text-xs">Master Volume</span>
+                  <span className="font-mono text-[11px] text-[#71717a]">
+                    {Math.round((settings.masterVolume || 0.85) * 100)}%
+                  </span>
                 </div>
+                <div className="flex items-center gap-3">
+                  <VolumeX className="w-4 h-4 text-[#71717a]" />
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={settings.masterVolume ?? 0.85}
+                    onChange={(e) => updateSetting('masterVolume', parseFloat(e.target.value))}
+                    className="flex-1 accent-white h-1.5 bg-[#27272a] rounded-lg appearance-none cursor-pointer"
+                  />
+                  <Volume2 className="w-4 h-4 text-white" />
+                </div>
+              </div>
 
-                <div className="space-y-1.5">
-                  {MESSAGE_SOUNDS.map((item) => {
-                    const isSelected = (settings.messageSound || 'neural_ping') === item.id;
-                    const isTesting = activeTestTone === item.id;
+              {/* Message Sound Presets */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-semibold uppercase tracking-wider text-[#a1a1aa] block">
+                  Message Notification Tones
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {MESSAGE_SOUNDS.map((sound) => {
+                    const isSelected = settings.messageSound === sound.id;
+                    const isTesting = activeTestTone === sound.id;
                     return (
                       <div
-                        key={item.id}
-                        onClick={() => updateSetting('messageSound', item.id)}
-                        className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                        key={sound.id}
+                        onClick={() => updateSetting('messageSound', sound.id)}
+                        className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-2 ${
                           isSelected
-                            ? 'bg-[#27272a] border-white text-white'
-                            : 'bg-[#18181b] border-[#27272a] text-[#e4e4e7] hover:border-[#3f3f46]'
+                            ? 'bg-[#18181b] border-white/40 text-white shadow-sm'
+                            : 'bg-[#09090b] border-[#1f1f23] text-[#a1a1aa] hover:border-[#27272a] hover:text-white'
                         }`}
                       >
-                        <div className="min-w-0 pr-2">
-                          <div className="font-medium flex items-center gap-1.5">
-                            <span>{item.label}</span>
-                            {isSelected && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                        <div className="min-w-0">
+                          <div className="font-semibold text-xs text-white truncate flex items-center gap-1.5">
+                            {isSelected && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
+                            <span>{sound.label}</span>
                           </div>
-                          <p className="text-[10.5px] text-[#a1a1aa] truncate">{item.desc}</p>
+                          <div className="text-[10px] text-[#71717a] truncate mt-0.5">{sound.desc}</div>
                         </div>
+
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleTestMessageTone(item.id);
+                            handleTestMessageTone(sound.id);
                           }}
-                          className="px-2.5 py-1 bg-white hover:bg-neutral-200 text-black font-medium rounded-lg text-[11px] flex items-center gap-1 shadow-sm transition-colors flex-shrink-0"
-                          title="Play Test Sound"
+                          className={`p-2 rounded-lg transition-colors shrink-0 ${
+                            isTesting
+                              ? 'bg-emerald-500 text-black'
+                              : 'bg-[#18181b] text-white hover:bg-[#27272a]'
+                          }`}
+                          title="Test tone"
                         >
-                          <Play className={`w-3 h-3 ${isTesting ? 'animate-spin' : ''}`} />
-                          <span>Test</span>
+                          <Play className="w-3 h-3" />
                         </button>
                       </div>
                     );
@@ -273,55 +278,48 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               </div>
 
-              {/* Call Ringtone Presets */}
-              <div className="p-4 bg-[#09090b] border border-[#27272a] rounded-xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-semibold text-white">Incoming Call Ringtone</h3>
-                    <p className="text-[#a1a1aa] text-[11px]">Continuous synthesized melodic tone for incoming calls</p>
-                  </div>
-                  {isPlayingRing && (
-                    <button
-                      type="button"
-                      onClick={() => handleToggleRingtoneTest(settings.ringtone)}
-                      className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium flex items-center gap-1 text-[11px]"
-                    >
-                      <Square className="w-3 h-3" />
-                      <span>Stop</span>
-                    </button>
-                  )}
-                </div>
-
-                <div className="space-y-1.5">
-                  {RINGTONES.map((item) => {
-                    const isSelected = (settings.ringtone || 'cyber_pulse') === item.id;
+              {/* Ringtone Presets */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-semibold uppercase tracking-wider text-[#a1a1aa] block">
+                  Incoming Call Ringtones
+                </label>
+                <div className="space-y-2">
+                  {RINGTONES.map((ring) => {
+                    const isSelected = settings.ringtone === ring.id;
+                    const isTestingThis = isPlayingRing && isSelected;
                     return (
                       <div
-                        key={item.id}
-                        onClick={() => updateSetting('ringtone', item.id)}
-                        className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                        key={ring.id}
+                        onClick={() => updateSetting('ringtone', ring.id)}
+                        className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-2 ${
                           isSelected
-                            ? 'bg-[#27272a] border-white text-white'
-                            : 'bg-[#18181b] border-[#27272a] text-[#e4e4e7] hover:border-[#3f3f46]'
+                            ? 'bg-[#18181b] border-white/40 text-white shadow-sm'
+                            : 'bg-[#09090b] border-[#1f1f23] text-[#a1a1aa] hover:border-[#27272a] hover:text-white'
                         }`}
                       >
-                        <div className="min-w-0 pr-2">
-                          <div className="font-medium flex items-center gap-1.5">
-                            <span>{item.label}</span>
-                            {isSelected && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                        <div className="min-w-0">
+                          <div className="font-semibold text-xs text-white truncate flex items-center gap-1.5">
+                            {isSelected && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
+                            <span>{ring.label}</span>
                           </div>
-                          <p className="text-[10.5px] text-[#a1a1aa] truncate">{item.desc}</p>
+                          <div className="text-[10px] text-[#71717a] truncate mt-0.5">{ring.desc}</div>
                         </div>
+
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleToggleRingtoneTest(item.id);
+                            updateSetting('ringtone', ring.id);
+                            handleToggleRingtoneTest(ring.id);
                           }}
-                          className="px-2.5 py-1 bg-white hover:bg-neutral-200 text-black font-medium rounded-lg text-[11px] flex items-center gap-1 shadow-sm transition-colors flex-shrink-0"
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors shrink-0 ${
+                            isTestingThis
+                              ? 'bg-rose-600 text-white animate-pulse'
+                              : 'bg-[#18181b] text-white hover:bg-[#27272a]'
+                          }`}
                         >
-                          <Play className="w-3 h-3" />
-                          <span>Test</span>
+                          {isTestingThis ? <Square className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                          <span>{isTestingThis ? 'Stop' : 'Test'}</span>
                         </button>
                       </div>
                     );
@@ -331,122 +329,99 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           )}
 
-          {/* TAB 2: CALLS & VOICE CLARITY */}
+          {/* TAB 2: CALL & MEDIA STUDIO QUALITY */}
           {activeTab === 'calls' && (
             <div className="space-y-4">
-              {/* Studio Voice Gate & Noise Suppression */}
-              <div className="p-4 bg-[#09090b] border border-[#27272a] rounded-xl space-y-3">
+              {/* Studio Voice Engine */}
+              <div className="p-4 bg-[#09090b] border border-[#1f1f23] rounded-xl space-y-3">
                 <div className="flex items-center justify-between">
-                  <div className="pr-4">
-                    <div className="flex items-center gap-1.5">
-                      <h3 className="font-semibold text-white">Studio Voice Clarity &amp; Noise Gate</h3>
-                      <span className="px-1.5 py-0.5 bg-emerald-950/60 border border-emerald-800 text-emerald-400 text-[10px] rounded font-medium">
-                        Active DSP
-                      </span>
+                  <div>
+                    <div className="font-semibold text-white text-xs">Studio Voice &amp; Noise Isolation</div>
+                    <div className="text-[11px] text-[#71717a] mt-0.5">
+                      DSP dynamic voice gate &amp; active background noise filtering
                     </div>
-                    <p className="text-[#a1a1aa] text-[11px] mt-0.5">
-                      Eliminates low-end rumble (85Hz filter), electrical humming, and background noise. Keeps only crisp, clean human speech.
-                    </p>
                   </div>
-                  <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
-                    <input
-                      type="checkbox"
-                      checked={settings.studioVoiceGate ?? true}
-                      onChange={(e) => updateSetting('studioVoiceGate', e.target.checked)}
-                      className="sr-only peer"
+                  <button
+                    onClick={() => updateSetting('studioVoiceGate', !settings.studioVoiceGate)}
+                    className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 ${
+                      settings.studioVoiceGate ? 'bg-emerald-500' : 'bg-[#27272a]'
+                    }`}
+                  >
+                    <div
+                      className={`w-5 h-5 rounded-full bg-black shadow-md transition-transform ${
+                        settings.studioVoiceGate ? 'translate-x-5' : 'translate-x-0'
+                      }`}
                     />
-                    <div className="w-9 h-5 bg-[#27272a] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[#27272a] after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600" />
-                  </label>
+                  </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t border-[#27272a]">
-                  <label className="p-2.5 bg-[#18181b] border border-[#27272a] rounded-lg flex items-center justify-between cursor-pointer">
-                    <span className="text-white">Echo Cancellation</span>
-                    <input
-                      type="checkbox"
-                      checked={settings.echoCancellation}
-                      onChange={(e) => updateSetting('echoCancellation', e.target.checked)}
-                      className="accent-white"
-                    />
-                  </label>
-                  <label className="p-2.5 bg-[#18181b] border border-[#27272a] rounded-lg flex items-center justify-between cursor-pointer">
-                    <span className="text-white">Noise Suppression</span>
-                    <input
-                      type="checkbox"
-                      checked={settings.noiseSuppression}
-                      onChange={(e) => updateSetting('noiseSuppression', e.target.checked)}
-                      className="accent-white"
-                    />
-                  </label>
-                  <label className="p-2.5 bg-[#18181b] border border-[#27272a] rounded-lg flex items-center justify-between cursor-pointer">
-                    <span className="text-white">Auto Gain Control</span>
-                    <input
-                      type="checkbox"
-                      checked={settings.autoGainControl}
-                      onChange={(e) => updateSetting('autoGainControl', e.target.checked)}
-                      className="accent-white"
-                    />
-                  </label>
+                <div className="grid grid-cols-3 gap-2 pt-1 border-t border-[#1f1f23]">
+                  <div className="flex items-center justify-between p-2 bg-[#141418] rounded-lg">
+                    <span className="text-[10px] text-[#a1a1aa]">Echo Cancellation</span>
+                    <span className="text-emerald-400 font-bold text-[10px]">ON</span>
+                  </div>
+                  <div className="flex items-center justify-between p-2 bg-[#141418] rounded-lg">
+                    <span className="text-[10px] text-[#a1a1aa]">Noise Suppression</span>
+                    <span className="text-emerald-400 font-bold text-[10px]">ON</span>
+                  </div>
+                  <div className="flex items-center justify-between p-2 bg-[#141418] rounded-lg">
+                    <span className="text-[10px] text-[#a1a1aa]">Auto Gain Control</span>
+                    <span className="text-emerald-400 font-bold text-[10px]">ON</span>
+                  </div>
                 </div>
               </div>
 
-              {/* Opus Studio Codec & Video Quality */}
-              <div className="p-4 bg-[#09090b] border border-[#27272a] rounded-xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-semibold text-white">Audio Codec Profile</h3>
-                    <p className="text-[#a1a1aa] text-[11px]">Opus 48kHz with 128kbps stereo stream &amp; In-Band Forward Error Correction</p>
-                  </div>
-                </div>
-
+              {/* Audio Fidelity Preset */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-semibold uppercase tracking-wider text-[#a1a1aa] block">
+                  Audio Codec Quality
+                </label>
                 <div className="grid grid-cols-3 gap-2">
                   {[
-                    { id: 'opus_hd', label: 'Opus HD (48kHz)', desc: 'Broadcast quality' },
-                    { id: 'standard', label: 'Standard (44.1kHz)', desc: 'Balanced' },
-                    { id: 'eco', label: 'Eco Bandwidth', desc: 'Low network usage' },
-                  ].map((item) => (
+                    { id: 'opus_hd', label: 'Opus HD Studio', desc: '128 kbps 48kHz Stereo' },
+                    { id: 'standard', label: 'Standard Voice', desc: '48 kbps Mono' },
+                    { id: 'eco', label: 'Low Bandwidth', desc: '24 kbps Narrow' },
+                  ].map((preset) => (
                     <button
-                      key={item.id}
+                      key={preset.id}
                       type="button"
-                      onClick={() => updateSetting('audioPreset', item.id as any)}
-                      className={`p-2.5 rounded-xl border text-left transition-all ${
-                        settings.audioPreset === item.id
-                          ? 'bg-[#27272a] border-white text-white'
-                          : 'bg-[#18181b] border-[#27272a] text-[#a1a1aa] hover:border-[#3f3f46]'
+                      onClick={() => updateSetting('audioPreset', preset.id as any)}
+                      className={`p-3 rounded-xl border text-left transition-all ${
+                        settings.audioPreset === preset.id
+                          ? 'bg-[#18181b] border-white text-white font-semibold'
+                          : 'bg-[#09090b] border-[#1f1f23] text-[#71717a] hover:text-white'
                       }`}
                     >
-                      <div className="font-medium text-white text-xs">{item.label}</div>
-                      <div className="text-[10px] text-[#71717a]">{item.desc}</div>
+                      <div className="text-xs font-semibold text-white">{preset.label}</div>
+                      <div className="text-[10px] opacity-70 mt-0.5">{preset.desc}</div>
                     </button>
                   ))}
                 </div>
               </div>
 
               {/* Video Resolution */}
-              <div className="p-4 bg-[#09090b] border border-[#27272a] rounded-xl space-y-3">
-                <div>
-                  <h3 className="font-semibold text-white">Video Call Resolution</h3>
-                  <p className="text-[#a1a1aa] text-[11px]">Target capture and transmission resolution for video calls</p>
-                </div>
-
+              <div className="space-y-2">
+                <label className="text-[11px] font-semibold uppercase tracking-wider text-[#a1a1aa] block">
+                  Video Call Resolution
+                </label>
                 <div className="grid grid-cols-3 gap-2">
                   {[
-                    { id: '1080p', label: '1080p Full HD', desc: '60 FPS Ultra HD' },
-                    { id: '720p', label: '720p HD', desc: '30 FPS Crisp' },
-                    { id: '480p', label: '480p SD', desc: '24 FPS Efficient' },
-                  ].map((item) => (
+                    { id: '1080p', label: 'Full HD 1080p', desc: '60 fps VP9/H.264' },
+                    { id: '720p', label: 'HD 720p', desc: '30 fps Balanced' },
+                    { id: '480p', label: 'SD 480p', desc: 'Low Data Usage' },
+                  ].map((v) => (
                     <button
-                      key={item.id}
+                      key={v.id}
                       type="button"
-                      onClick={() => updateSetting('videoQuality', item.id as any)}
-                      className={`p-2.5 rounded-xl border text-left transition-all ${
-                        settings.videoQuality === item.id
-                          ? 'bg-[#27272a] border-white text-white'
-                          : 'bg-[#18181b] border-[#27272a] text-[#a1a1aa] hover:border-[#3f3f46]'
+                      onClick={() => updateSetting('videoQuality', v.id as any)}
+                      className={`p-3 rounded-xl border text-left transition-all ${
+                        settings.videoQuality === v.id
+                          ? 'bg-[#18181b] border-white text-white font-semibold'
+                          : 'bg-[#09090b] border-[#1f1f23] text-[#71717a] hover:text-white'
                       }`}
                     >
-                      <div className="font-medium text-white text-xs">{item.label}</div>
-                      <div className="text-[10px] text-[#71717a]">{item.desc}</div>
+                      <div className="text-xs font-semibold text-white">{v.label}</div>
+                      <div className="text-[10px] opacity-70 mt-0.5">{v.desc}</div>
                     </button>
                   ))}
                 </div>
@@ -454,63 +429,55 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           )}
 
-          {/* TAB 3: QUEUE & PRIVACY */}
+          {/* TAB 3: NETWORK & STATUS */}
           {activeTab === 'privacy' && (
             <div className="space-y-4">
-              {/* Offline Outbox Queue */}
-              <div className="p-4 bg-[#09090b] border border-[#27272a] rounded-xl space-y-2">
-                <h3 className="font-semibold text-white">Offline Outbox Auto-Delivery</h3>
-                <p className="text-[#a1a1aa] text-[11px] leading-relaxed">
-                  Messages and files sent to offline contacts are safely stored in your local IndexedDB queue without uploading binary payloads to the signaling server. When the peer reconnects online, queued items are automatically transmitted directly over peer-to-peer WebRTC!
-                </p>
-                <div className="flex items-center gap-2 pt-2 text-[11px] text-emerald-400 font-medium">
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Zero-relay storage bloat • 100% Peer-to-Peer</span>
+              <div className="p-4 bg-[#09090b] border border-[#1f1f23] rounded-xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-[#a1a1aa]">Signaling Server Status</span>
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={`w-2 h-2 rounded-full ${
+                        relayStatus === 'ONLINE'
+                          ? 'bg-emerald-400 animate-pulse'
+                          : relayStatus === 'CONNECTING'
+                          ? 'bg-amber-400'
+                          : 'bg-rose-500'
+                      }`}
+                    />
+                    <span className="font-mono text-xs text-white">{relayStatus}</span>
+                  </div>
                 </div>
-              </div>
 
-              {/* Signaling & Network Info */}
-              <div className="p-4 bg-[#09090b] border border-[#27272a] rounded-xl space-y-2.5">
-                <h3 className="font-semibold text-white">Signaling Network Status</h3>
-                <div className="flex items-center justify-between text-xs pt-1">
-                  <span className="text-[#a1a1aa]">Relay Server</span>
-                  <span className="font-medium text-emerald-400 flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                    {relayStatus}
-                  </span>
-                </div>
                 {relayPingMs !== null && relayPingMs !== undefined && (
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-[#a1a1aa]">Signaling RTT Latency</span>
-                    <span className="font-mono text-white">{relayPingMs} ms</span>
+                  <div className="flex items-center justify-between pt-2 border-t border-[#1f1f23]">
+                    <span className="text-xs text-[#a1a1aa]">Signaling Latency</span>
+                    <span className="font-mono text-xs text-emerald-400 font-semibold">
+                      {relayPingMs} ms
+                    </span>
                   </div>
                 )}
               </div>
 
-              {/* Reset Defaults */}
+              <div className="p-4 bg-[#09090b] border border-[#1f1f23] rounded-xl space-y-2">
+                <div className="font-medium text-white text-xs">Direct Zero-Knowledge Mesh</div>
+                <p className="text-[11px] text-[#71717a] leading-relaxed">
+                  All audio, video, and file streams connect directly P2P through WebSockets/WebRTC with AES-256-GCM encryption. The signaling server never decrypts or retains communication keys.
+                </p>
+              </div>
+
               <div className="pt-2">
                 <button
                   type="button"
                   onClick={handleResetDefaults}
-                  className="px-3 py-2 text-xs text-[#a1a1aa] hover:text-white bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] rounded-xl transition-colors flex items-center gap-1.5"
+                  className="flex items-center justify-center gap-2 w-full py-2.5 bg-[#18181b] hover:bg-[#27272a] text-white border border-[#27272a] rounded-xl text-xs font-medium transition-colors"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Reset All Settings to Defaults</span>
+                  <span>Restore Factory Defaults</span>
                 </button>
               </div>
             </div>
           )}
-        </div>
-
-        {/* Footer */}
-        <div className="px-5 py-3.5 border-t border-[#27272a] bg-[#09090b] flex items-center justify-end">
-          <button
-            type="button"
-            onClick={handleClose}
-            className="px-5 py-2 bg-white text-black hover:bg-neutral-200 font-medium rounded-xl transition-colors text-xs shadow-sm"
-          >
-            Done
-          </button>
         </div>
       </div>
     </div>
