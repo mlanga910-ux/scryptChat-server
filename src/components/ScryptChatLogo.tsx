@@ -12,7 +12,7 @@ export const ScryptChatLogo: React.FC<ScryptChatLogoProps> = ({
   showText = false,
 }) => {
   return (
-    <div className={`inline-flex items-center gap-2.5 select-none ${className}`}>
+    <div className={`inline-flex items-center gap-2 select-none ${className}`}>
       <svg
         width={size}
         height={size}
@@ -21,68 +21,42 @@ export const ScryptChatLogo: React.FC<ScryptChatLogoProps> = ({
         xmlns="http://www.w3.org/2000/svg"
         className="shrink-0 drop-shadow-sm"
       >
-        <rect width="512" height="512" rx="110" fill="#09090b" stroke="#27272a" strokeWidth="12" />
+        <rect width="512" height="512" rx="96" fill="#000000" />
         
-        {/* Glitch marks */}
-        <line x1="60" y1="210" x2="120" y2="210" stroke="#ffffff" strokeWidth="8" strokeLinecap="square" />
-        <line x1="45" y1="225" x2="105" y2="225" stroke="#ffffff" strokeWidth="6" strokeLinecap="square" />
-        <line x1="75" y1="238" x2="115" y2="238" stroke="#ffffff" strokeWidth="6" strokeLinecap="square" />
-        
-        <line x1="390" y1="130" x2="425" y2="130" stroke="#ffffff" strokeWidth="8" strokeLinecap="square" />
-        <line x1="380" y1="145" x2="445" y2="145" stroke="#ffffff" strokeWidth="8" strokeLinecap="square" />
-        <line x1="395" y1="160" x2="415" y2="160" stroke="#ffffff" strokeWidth="6" strokeLinecap="square" />
-        <line x1="395" y1="175" x2="415" y2="175" stroke="#ffffff" strokeWidth="6" strokeLinecap="square" />
-        <line x1="395" y1="190" x2="415" y2="190" stroke="#ffffff" strokeWidth="6" strokeLinecap="square" />
+        {/* Left glitch accent dashes and dots */}
+        <line x1="55" y1="185" x2="110" y2="185" stroke="#ffffff" strokeWidth="12" strokeLinecap="square" />
+        <line x1="38" y1="205" x2="95" y2="205" stroke="#ffffff" strokeWidth="10" strokeLinecap="square" />
+        <line x1="68" y1="225" x2="105" y2="225" stroke="#ffffff" strokeWidth="10" strokeLinecap="square" />
+        <rect x="55" y="245" width="12" height="12" fill="#ffffff" />
+        <rect x="75" y="245" width="12" height="12" fill="#ffffff" />
+        <rect x="42" y="265" width="12" height="12" fill="#ffffff" />
 
-        {/* Angular Tech Speech Bubble */}
+        {/* Right glitch accent bars and column dots */}
+        <line x1="395" y1="120" x2="445" y2="120" stroke="#ffffff" strokeWidth="12" strokeLinecap="square" />
+        <line x1="410" y1="138" x2="465" y2="138" stroke="#ffffff" strokeWidth="10" strokeLinecap="square" />
+        <rect x="415" y="156" width="12" height="12" fill="#ffffff" />
+        <rect x="415" y="174" width="12" height="12" fill="#ffffff" />
+        <rect x="415" y="192" width="12" height="12" fill="#ffffff" />
+        <rect x="415" y="210" width="12" height="12" fill="#ffffff" />
+        <rect x="435" y="192" width="12" height="12" fill="#ffffff" />
+
+        {/* Stylized Angular Speech Bubble */}
         <path
-          d="M 160 65 
-             L 352 65 
-             L 400 113 
-             L 400 120 
-             M 400 205
-             L 400 320 
-             L 352 368 
-             L 205 368 
-             L 190 425 
-             L 182 425
-             L 182 368
-             L 160 368 
-             L 112 320 
-             L 112 250
-             M 112 195
-             L 112 113 
-             Z"
-          stroke="#ffffff"
-          strokeWidth="18"
-          strokeLinecap="square"
-          strokeLinejoin="miter"
+          d="M 160 55 L 352 55 L 405 108 L 405 270 L 352 323 L 200 323 L 155 372 L 155 323 L 110 323 L 57 270 L 57 108 Z"
           fill="none"
+          stroke="#ffffff"
+          strokeWidth="22"
+          strokeLinejoin="round"
+          strokeLinecap="round"
         />
 
-        {/* Angular 'S' Shape */}
-        {/* Top bar & angle */}
-        <polygon
-          points="200,120 310,120 345,155 295,205 240,205 265,180 295,180 305,170 290,155 220,155 180,195 200,175"
-          fill="#ffffff"
-        />
-        <polygon
-          points="185,185 245,125 320,125 348,153 285,215 210,215"
-          fill="#ffffff"
-        />
-
-        {/* Bottom bar & angle */}
-        <polygon
-          points="312,312 202,312 167,277 217,227 272,227 247,252 217,252 207,262 222,277 292,277 332,237 312,257"
-          fill="#ffffff"
-        />
-        <polygon
-          points="327,247 267,307 192,307 164,279 227,217 302,217"
-          fill="#ffffff"
-        />
+        {/* Stylized Cyber Central 'S' with diagonal cuts */}
+        <path d="M 330 115 L 210 115 L 140 185 L 260 185 L 305 140 Z" fill="#ffffff" />
+        <path d="M 185 185 L 325 185 L 325 210 L 185 210 Z" fill="#ffffff" />
+        <path d="M 182 280 L 302 280 L 372 210 L 252 210 L 207 255 Z" fill="#ffffff" />
       </svg>
       {showText && (
-        <span className="font-mono tracking-tight font-bold text-white text-base">
+        <span className="tracking-tight font-bold text-white text-base font-sans">
           scrypt<span className="text-zinc-400 font-normal">Chat</span>
         </span>
       )}

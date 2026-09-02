@@ -84,6 +84,23 @@ function getClientSubnetKey(req: Request): string {
   return ip;
 }
 
+// Server-Sent Events (SSE) active subscriber connections: deviceId -> Response
+const activeSSEClients = new Map<string, Response>();
+
+export function pushSSEEventToDevice(deviceId: string, eventType: string, data: any): boolean {
+  const clientRes = activeSSEClients.get(deviceId);
+  if (clientRes && !clientRes.writableEnded) {
+    try {
+      clientRes.write(`event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`);
+      return true;
+    } catch {
+      activeSSEClients.delete(deviceId);
+      return false;
+    }
+  }
+  return false;
+}
+
 // Clean expired rooms and old mailbox entries periodically
 setInterval(() => {
   const now = Date.now();
@@ -129,6 +146,56 @@ signalingRouter.use((req, res, next) => {
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   next();
+});
+
+/**
+ * Real-Time Server-Sent Events (SSE) Stream for 0ms Latency Message & Call Delivery
+ */
+signalingRouter.get('/stream/:deviceId', (req: Request, res: Response) => {
+  const { deviceId } = req.params;
+  if (!deviceId) {
+    res.status(400).json({ error: 'deviceId is required' });
+    return;
+  }
+
+  // Set standard SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  // Register device presence & active client
+  devicePresences.set(deviceId, { lastSeen: Date.now() });
+  activeSSEClients.set(deviceId, res);
+
+  // Send initial connected handshake
+  res.write(`event: connected\ndata: ${JSON.stringify({ success: true, serverTime: Date.now(), deviceId })}\n\n`);
+
+  // Check if there are any queued mailbox messages and flush immediately
+  const pending = mailboxes.get(deviceId) || [];
+  if (pending.length > 0) {
+    for (const item of pending) {
+      res.write(`event: mailbox_item\ndata: ${JSON.stringify(item)}\n\n`);
+    }
+    mailboxes.delete(deviceId);
+  }
+
+  // Keep-alive heartbeat ping every 15s to prevent cloud proxy timeouts
+  const heartbeat = setInterval(() => {
+    if (res.writableEnded) {
+      clearInterval(heartbeat);
+      activeSSEClients.delete(deviceId);
+      return;
+    }
+    devicePresences.set(deviceId, { lastSeen: Date.now() });
+    res.write(`: ping\n\n`);
+  }, 15000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    activeSSEClients.delete(deviceId);
+  });
 });
 
 /**
@@ -445,11 +512,15 @@ signalingRouter.post('/mailbox/send', (req: Request, res: Response) => {
     timestamp: Date.now(),
   };
 
-  const queue = mailboxes.get(recipientDeviceId) || [];
-  queue.push(item);
-  mailboxes.set(recipientDeviceId, queue);
+  // Push directly to active real-time SSE stream if recipient is online
+  const pushed = pushSSEEventToDevice(recipientDeviceId, 'mailbox_item', item);
+  if (!pushed) {
+    const queue = mailboxes.get(recipientDeviceId) || [];
+    queue.push(item);
+    mailboxes.set(recipientDeviceId, queue);
+  }
 
-  res.json({ success: true, messageId: item.id });
+  res.json({ success: true, messageId: item.id, deliveredRealtime: pushed });
 });
 
 signalingRouter.get('/mailbox/pull/:deviceId', (req: Request, res: Response) => {
