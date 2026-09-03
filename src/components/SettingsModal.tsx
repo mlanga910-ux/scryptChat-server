@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Volume2,
@@ -12,6 +12,9 @@ import {
   Sliders,
   Check,
   RotateCcw,
+  PhoneOff,
+  VideoOff,
+  UserX,
 } from 'lucide-react';
 import {
   getSoundSettings,
@@ -21,7 +24,9 @@ import {
   MessageSoundType,
   RingtoneType,
 } from '../utils/cyberSoundEngine';
-import { RelayStatus } from '../types/index';
+import { RelayStatus, ContactRecord } from '../types/index';
+import { db } from '../db/index';
+import { getChatSettings, saveChatSettings, ChatCustomSettings } from '../utils/chatSettings';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -60,6 +65,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [settings, setSettings] = useState<SoundSettings>(getSoundSettings());
   const [isPlayingRing, setIsPlayingRing] = useState(false);
   const [activeTestTone, setActiveTestTone] = useState<string | null>(null);
+  const [contacts, setContacts] = useState<ContactRecord[]>([]);
+  const [contactSettingsMap, setContactSettingsMap] = useState<Record<string, ChatCustomSettings>>({});
+
+  useEffect(() => {
+    if (isOpen) {
+      db.contacts.toArray().then((list) => {
+        setContacts(list);
+        const map: Record<string, ChatCustomSettings> = {};
+        list.forEach((c) => {
+          map[c.deviceId] = getChatSettings(c.deviceId);
+        });
+        setContactSettingsMap(map);
+      });
+    }
+  }, [isOpen]);
+
+  const toggleContactBlock = (deviceId: string, field: 'blockVoiceCalls' | 'blockVideoCalls') => {
+    const current = contactSettingsMap[deviceId] || getChatSettings(deviceId);
+    const updated = { ...current, [field]: !current[field] };
+    saveChatSettings(deviceId, updated);
+    setContactSettingsMap((prev) => ({ ...prev, [deviceId]: updated }));
+  };
 
   const updateSetting = <K extends keyof SoundSettings>(key: K, value: SoundSettings[K]) => {
     const updated = { ...settings, [key]: value };
@@ -425,6 +452,78 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Call & Video Call Blocking List */}
+              <div className="p-4 bg-[#09090b] border border-[#1f1f23] rounded-xl space-y-3">
+                <div>
+                  <div className="font-semibold text-white text-xs flex items-center gap-1.5">
+                    <PhoneOff className="w-3.5 h-3.5 text-red-400" />
+                    <span>Call &amp; Video Call Blocking</span>
+                  </div>
+                  <p className="text-[11px] text-[#71717a] mt-0.5">
+                    Prevent specific contacts from calling or video calling your device.
+                  </p>
+                </div>
+
+                {contacts.length === 0 ? (
+                  <p className="text-[11px] text-[#52525b] italic py-1">
+                    No contacts paired yet. Pair with devices to manage call restrictions.
+                  </p>
+                ) : (
+                  <div className="space-y-2 pt-1 border-t border-[#1f1f23] max-h-48 overflow-y-auto pr-1">
+                    {contacts.map((c) => {
+                      const cSet = contactSettingsMap[c.deviceId] || getChatSettings(c.deviceId);
+                      const isVoiceBlocked = !!cSet.blockVoiceCalls;
+                      const isVideoBlocked = !!cSet.blockVideoCalls;
+                      return (
+                        <div
+                          key={c.deviceId}
+                          className="flex items-center justify-between p-2.5 bg-[#141418] border border-[#1f1f23] rounded-lg gap-2"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="font-medium text-white text-xs truncate">
+                              {c.alias || c.deviceId}
+                            </div>
+                            <div className="font-mono text-[10px] text-[#71717a] truncate">
+                              {c.deviceId}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => toggleContactBlock(c.deviceId, 'blockVoiceCalls')}
+                              className={`px-2 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1 ${
+                                isVoiceBlocked
+                                  ? 'bg-red-950/80 text-red-400 border border-red-800/60'
+                                  : 'bg-[#1e1e24] text-[#a1a1aa] border border-[#2e2e38] hover:text-white'
+                              }`}
+                              title={isVoiceBlocked ? 'Unblock Voice Calls' : 'Block Voice Calls'}
+                            >
+                              <PhoneOff className="w-3 h-3" />
+                              <span>{isVoiceBlocked ? 'Calls Blocked' : 'Block Calls'}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => toggleContactBlock(c.deviceId, 'blockVideoCalls')}
+                              className={`px-2 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1 ${
+                                isVideoBlocked
+                                  ? 'bg-red-950/80 text-red-400 border border-red-800/60'
+                                  : 'bg-[#1e1e24] text-[#a1a1aa] border border-[#2e2e38] hover:text-white'
+                              }`}
+                              title={isVideoBlocked ? 'Unblock Video Calls' : 'Block Video Calls'}
+                            >
+                              <VideoOff className="w-3 h-3" />
+                              <span>{isVideoBlocked ? 'Video Blocked' : 'Block Video'}</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           )}

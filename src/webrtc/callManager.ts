@@ -1,5 +1,6 @@
 import { db } from "../db/index";
 import { soundEngine, getSoundSettings } from "../utils/cyberSoundEngine";
+import { getChatSettings } from "../utils/chatSettings";
 import { CallSessionInfo, CallSignalPayload, CallType, IdentityRecord } from '../types/index';
 import { PeerManager } from './peerManager';
 import { PacketType } from '../types/index';
@@ -260,6 +261,21 @@ export class CallManager {
         }
 
         const callerDeviceId = payload.callerDeviceId || 'unknown';
+        const contactSettings = getChatSettings(callerDeviceId);
+        const callType = payload.callType || 'audio';
+        const isBlocked = (callType === 'video' && (contactSettings.blockVideoCalls || contactSettings.blockVoiceCalls)) ||
+                          (callType === 'audio' && contactSettings.blockVoiceCalls);
+
+        if (isBlocked) {
+          // Silently reject call from blocked peer
+          await this.sendCallSignal({
+            action: 'CALL_REJECT',
+            callId: payload.callId,
+            reason: 'User is not accepting calls from this device',
+          }, callerDeviceId).catch(() => {});
+          return;
+        }
+
         const contact = await db.contacts.get(callerDeviceId);
 
         this.currentSession = {

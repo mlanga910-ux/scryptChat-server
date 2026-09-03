@@ -386,7 +386,7 @@ export const PeerList: React.FC<PeerListProps> = ({
                             className="w-full px-3 py-2 text-left text-white hover:bg-[#27272a] flex items-center gap-2 transition-colors cursor-pointer"
                           >
                             <Info className="w-3.5 h-3.5 text-blue-400" />
-                            <span>Informácie (Info)</span>
+                            <span>Contact Info</span>
                           </button>
 
                           {onStartCall && (
@@ -399,7 +399,7 @@ export const PeerList: React.FC<PeerListProps> = ({
                                 className="w-full px-3 py-2 text-left text-white hover:bg-[#27272a] flex items-center gap-2 transition-colors cursor-pointer"
                               >
                                 <Phone className="w-3.5 h-3.5 text-emerald-400" />
-                                <span>Zavolať (Hovor)</span>
+                                <span>Voice Call</span>
                               </button>
                               <button
                                 onClick={() => {
@@ -409,7 +409,7 @@ export const PeerList: React.FC<PeerListProps> = ({
                                 className="w-full px-3 py-2 text-left text-white hover:bg-[#27272a] flex items-center gap-2 transition-colors cursor-pointer"
                               >
                                 <Video className="w-3.5 h-3.5 text-blue-400" />
-                                <span>Videohovor</span>
+                                <span>Video Call</span>
                               </button>
                             </>
                           )}
@@ -424,7 +424,7 @@ export const PeerList: React.FC<PeerListProps> = ({
                             className="w-full px-3 py-2 text-left text-red-400 hover:bg-red-950/40 flex items-center gap-2 transition-colors cursor-pointer"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
-                            <span>Odstrániť kontakt</span>
+                            <span>Delete Contact</span>
                           </button>
                         </div>
                       )}
@@ -452,7 +452,7 @@ export const PeerList: React.FC<PeerListProps> = ({
                 <UserX className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="font-semibold text-white text-sm">Odstrániť kontakt?</h4>
+                <h4 className="font-semibold text-white text-sm">Delete Contact?</h4>
                 <p className="text-[11px] text-[#a1a1aa]">
                   {contactToDelete.alias || contactToDelete.deviceId}
                 </p>
@@ -460,7 +460,7 @@ export const PeerList: React.FC<PeerListProps> = ({
             </div>
 
             <p className="text-xs text-[#a1a1aa] leading-relaxed">
-              Tento kontakt a celá história správ budú odstránené. Odstránenie sa automaticky zosynchronizuje aj na druhom zariadení.
+              This contact and their entire chat history will be removed. Contact removal is automatically synchronized with the peer device.
             </p>
 
             <div className="flex items-center justify-end gap-2 pt-2">
@@ -468,7 +468,7 @@ export const PeerList: React.FC<PeerListProps> = ({
                 onClick={() => setContactToDelete(null)}
                 className="px-3.5 py-1.5 bg-[#27272a] hover:bg-[#3f3f46] text-[#a1a1aa] hover:text-white rounded-lg text-xs font-medium transition-colors cursor-pointer"
               >
-                Zrušiť
+                Cancel
               </button>
               <button
                 onClick={() => {
@@ -480,7 +480,7 @@ export const PeerList: React.FC<PeerListProps> = ({
                 className="px-3.5 py-1.5 bg-red-600 hover:bg-red-500 text-white font-medium rounded-lg flex items-center gap-1.5 transition-colors text-xs shadow-sm cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>Odstrániť</span>
+                <span>Delete</span>
               </button>
             </div>
           </div>

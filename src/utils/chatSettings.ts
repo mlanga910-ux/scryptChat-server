@@ -14,6 +14,8 @@ export interface ChatCustomSettings {
   customSound: MessageSoundType | 'default';
   disappearingTimerSeconds: number; // 0 = off, 3600 = 1h, 86400 = 24h, 604800 = 7d
   privateNotes: string;
+  blockVoiceCalls: boolean;
+  blockVideoCalls: boolean;
 }
 
 export const DEFAULT_CHAT_SETTINGS: ChatCustomSettings = {
@@ -23,6 +25,8 @@ export const DEFAULT_CHAT_SETTINGS: ChatCustomSettings = {
   customSound: 'default',
   disappearingTimerSeconds: 0,
   privateNotes: '',
+  blockVoiceCalls: false,
+  blockVideoCalls: false,
 };
 
 const STORAGE_PREFIX = 'scryptchat_chat_settings_';

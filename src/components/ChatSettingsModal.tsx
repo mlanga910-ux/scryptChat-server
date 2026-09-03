@@ -12,6 +12,10 @@ import {
   Save,
   Check,
   RotateCcw,
+  PhoneOff,
+  VideoOff,
+  Phone,
+  Video,
 } from 'lucide-react';
 import { ContactRecord } from '../types/index';
 import {
@@ -259,7 +263,56 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
             </div>
           </div>
 
-          {/* 5. Private Notes */}
+          {/* 5. Call & Video Permissions / Blocking */}
+          <div className="p-4 bg-[#09090b] border border-[#27272a] rounded-xl space-y-3">
+            <div>
+              <div className="font-medium text-white flex items-center gap-1.5">
+                <PhoneOff className="w-3.5 h-3.5 text-red-400" />
+                <span>Call &amp; Video Call Permissions</span>
+              </div>
+              <p className="text-[#a1a1aa] text-[11px] mt-0.5">
+                Restrict this contact from ringing or initiating calls with you.
+              </p>
+            </div>
+
+            <div className="space-y-2 pt-1 border-t border-[#27272a]">
+              {/* Block Voice Calls */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs text-white font-medium">Block Voice Calls</span>
+                  <p className="text-[10px] text-[#71717a]">Silently reject incoming audio calls</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={settings.blockVoiceCalls}
+                    onChange={(e) => updateSetting('blockVoiceCalls', e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-[#27272a] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[#27272a] after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-600" />
+                </label>
+              </div>
+
+              {/* Block Video Calls */}
+              <div className="flex items-center justify-between pt-1 border-t border-[#1f1f23]">
+                <div>
+                  <span className="text-xs text-white font-medium">Block Video Calls</span>
+                  <p className="text-[10px] text-[#71717a]">Silently reject incoming video calls</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={settings.blockVideoCalls}
+                    onChange={(e) => updateSetting('blockVideoCalls', e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-[#27272a] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[#27272a] after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-600" />
+                </label>
+              </div>
+            </div>
+          </div>
+
+          {/* 6. Private Notes */}
           <div className="p-4 bg-[#09090b] border border-[#27272a] rounded-xl space-y-2">
             <div className="flex items-center gap-1.5 font-medium text-white">
               <FileText className="w-3.5 h-3.5 text-white" />

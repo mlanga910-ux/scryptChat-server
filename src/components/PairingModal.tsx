@@ -602,7 +602,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
             <div className="space-y-4">
               {/* Link Expiry Type Selector */}
               <div className="p-3 bg-[#121215] rounded-xl border border-[#222226] space-y-2">
-                <div className="text-[11px] font-medium text-[#a1a1aa] uppercase tracking-wider">Typ párovacieho odkazu:</div>
+                <div className="text-[11px] font-medium text-[#a1a1aa] uppercase tracking-wider">Pairing Link Type:</div>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
@@ -618,9 +618,9 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                   >
                     <div className="flex items-center gap-1.5 font-semibold text-emerald-400 mb-0.5">
                       <Clock className="w-3.5 h-3.5" />
-                      <span>Jednorazový</span>
+                      <span>One-Time Link</span>
                     </div>
-                    <p className="text-[10px] text-[#a1a1aa] leading-tight">Platný 15 minút / 1 spárovanie (predvolené & bezpečné)</p>
+                    <p className="text-[10px] text-[#a1a1aa] leading-tight">Valid 15 minutes / 1 pairing (Default &amp; Secure)</p>
                   </button>
 
                   <button
@@ -637,9 +637,9 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                   >
                     <div className="flex items-center gap-1.5 font-semibold text-purple-400 mb-0.5">
                       <InfinityIcon className="w-3.5 h-3.5" />
-                      <span>Trvalý odkaz</span>
+                      <span>Permanent Link</span>
                     </div>
-                    <p className="text-[10px] text-[#a1a1aa] leading-tight">Nekonečný pre viac kontaktov (voliteľné)</p>
+                    <p className="text-[10px] text-[#a1a1aa] leading-tight">Reusable for multiple contacts (Optional)</p>
                   </button>
                 </div>
               </div>
@@ -651,12 +651,12 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                   </div>
                   <div className="space-y-1">
                     <h4 className="text-sm font-semibold text-white">
-                      {isPermanentMode ? 'Vytvoriť trvalý odkaz na profil' : 'Vygenerovať 15-minútový kód'}
+                      {isPermanentMode ? 'Create Permanent Profile Link' : 'Generate 15-Minute Code'}
                     </h4>
                     <p className="text-xs text-[#71717a] max-w-xs mx-auto">
                       {isPermanentMode
-                        ? 'Vytvorí trvalý zdieľateľný odkaz, cez ktorý sa k vám môže pridať ľubovoľný počet kontaktov.'
-                        : 'Vytvorí bezpečný jednorazový kód a odkaz s platnosťou 15 minút.'}
+                        ? 'Creates a reusable shareable link that allows multiple contacts to pair with you.'
+                        : 'Creates a secure single-use code and link that expires in 15 minutes.'}
                     </p>
                   </div>
                   <button
@@ -670,7 +670,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                     ) : (
                       <QrCode className="w-3.5 h-3.5" />
                     )}
-                    <span>{isGeneratingRoom ? 'Generujem...' : 'Vytvoriť kód a odkaz'}</span>
+                    <span>{isGeneratingRoom ? 'Generating...' : 'Create Code & Link'}</span>
                   </button>
                 </div>
               ) : (
@@ -678,15 +678,15 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                   {/* Code Card */}
                   <div className="p-4 bg-[#121215] rounded-xl border border-[#222226] flex flex-col items-center text-center space-y-3">
                     <div className="flex items-center justify-between w-full text-xs text-[#a1a1aa]">
-                      <span>{isPermanentMode ? 'Trvalý párovací kód' : 'Jednorazový párovací kód'}</span>
+                      <span>{isPermanentMode ? 'Permanent Pairing Code' : 'One-Time Pairing Code'}</span>
                       {isPermanentMode ? (
                         <div className="flex items-center gap-1 font-mono text-purple-400 text-[11px]">
-                          <InfinityIcon className="w-3 h-3" />
-                          <span>Nekonečný</span>
+                          <InfinityIcon className="w-3.5 h-3.5" />
+                          <span>Permanent</span>
                         </div>
                       ) : (
                         <div className="flex items-center gap-1 font-mono text-emerald-400 text-[11px]">
-                          <Clock className="w-3 h-3" />
+                          <Clock className="w-3.5 h-3.5" />
                           <span>{Math.floor(remainingSeconds / 60)}:{(remainingSeconds % 60).toString().padStart(2, '0')}</span>
                         </div>
                       )}
@@ -714,7 +714,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                           className="flex-1 py-1.5 px-2.5 rounded-lg bg-[#1c1c22] hover:bg-[#27272a] text-white text-xs font-medium flex items-center justify-center gap-1.5 transition-colors border border-[#2c2c36] cursor-pointer"
                         >
                           {copiedUrl ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-[#a1a1aa]" />}
-                          <span>{copiedUrl ? 'Odkaz skopírovaný' : 'Kopírovať odkaz'}</span>
+                          <span>{copiedUrl ? 'Link Copied' : 'Copy Link'}</span>
                         </button>
 
                         {typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (
@@ -723,8 +723,8 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                               try {
                                 const url = `${window.location.origin}/?room=${roomCode}`;
                                 await navigator.share({
-                                  title: 'Pridaj si ma na bezpečný chat',
-                                  text: 'Pripoj sa k môjmu end-to-end šifrovanému chatu:',
+                                  title: 'Add me on Secure Chat',
+                                  text: 'Join my end-to-end encrypted direct chat:',
                                   url,
                                 });
                               } catch {}
@@ -732,7 +732,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                             className="py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-sm"
                           >
                             <Share2 className="w-3.5 h-3.5" />
-                            <span>Zdieľať</span>
+                            <span>Share</span>
                           </button>
                         )}
                       </div>
@@ -745,13 +745,13 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                         className="flex-1 py-2 px-3 rounded-lg bg-[#1c1c22] hover:bg-[#27272a] text-white text-xs font-medium flex items-center justify-center gap-1.5 transition-colors border border-[#2c2c36] cursor-pointer"
                       >
                         {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-[#a1a1aa]" />}
-                        <span>{copied ? 'Kód skopírovaný' : 'Kopírovať iba kód'}</span>
+                        <span>{copied ? 'Code Copied' : 'Copy Code Only'}</span>
                       </button>
 
                       <button
                         onClick={handleGenerateRoom}
                         disabled={isGeneratingRoom}
-                        title="Vygenerovať nový kód"
+                        title="Generate new code"
                         className="p-2 rounded-lg bg-[#1c1c22] hover:bg-[#27272a] text-[#a1a1aa] hover:text-white transition-colors border border-[#2c2c36] cursor-pointer"
                       >
                         <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingRoom ? 'animate-spin' : ''}`} />
@@ -766,7 +766,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                         <img src={qrDataUrl} alt="Pairing QR Code" className="w-40 h-40 object-contain" />
                       </div>
                       <p className="text-[11px] text-[#71717a]">
-                        Oskenujte tento QR kód fotoaparátom z druhého zariadenia
+                        Scan this QR code using the camera on the other device
                       </p>
                     </div>
                   )}
