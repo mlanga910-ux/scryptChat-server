@@ -5,8 +5,8 @@ import { signalingRouter } from './server/signaling';
 
 async function startServer() {
   const app = express();
-  // Replit previews use port 5000, while hosted environments provide PORT.
-  const PORT = Number(process.env.PORT) || 5000;
+  // Render/Cloud Run injects PORT environment variable; default to 3000
+  const PORT = Number(process.env.PORT) || 3000;
 
   // Relay fallback carries base64-encoded attachments, so leave room for
   // normal phone photos while direct WebRTC remains the preferred path.
