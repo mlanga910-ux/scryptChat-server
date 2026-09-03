@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { PeerManager } from '../webrtc/peerManager';
+import { db } from '../db/index';
 import {
   generateQrDataUrl,
   scanCanvasForQr,
@@ -19,6 +20,10 @@ import {
   Shield,
   ArrowRight,
   AlertCircle,
+  Share2,
+  Link as LinkIcon,
+  Infinity as InfinityIcon,
+  Info,
 } from 'lucide-react';
 import {
   LanDiscoveryService,
@@ -51,6 +56,8 @@ export const PairingModal: React.FC<PairingModalProps> = ({
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState(0);
   const [isGeneratingRoom, setIsGeneratingRoom] = useState(false);
+  const [isPermanentMode, setIsPermanentMode] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState(false);
 
   // Join state
   const [joinInput, setJoinInput] = useState(initialCode || '');
@@ -58,6 +65,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
   const [statusMessage, setStatusMessage] = useState('');
   const [isSuccess, setIsSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [alreadyAddedNotice, setAlreadyAddedNotice] = useState('');
   const [copied, setCopied] = useState(false);
 
   // Camera state
@@ -182,14 +190,15 @@ export const PairingModal: React.FC<PairingModalProps> = ({
       // Create ECDH/ECDSA offer
       const offer = await peerManager.createOffer();
 
-      // Register room on signaling (15 min TTL)
+      // Register room on signaling (15 min TTL or Permanent)
       const res = await peerManager.fetchRelay('/api/signaling/room/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           deviceId: offer.deviceId,
           offer,
-          ttlSeconds: 900,
+          ttlSeconds: isPermanentMode ? 31536000 : 900,
+          isPermanent: isPermanentMode,
         }),
       }, 8000);
 
@@ -199,7 +208,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
       }
 
       const newCode = data.roomId.toUpperCase();
-      const newExpiry = data.expiresAt || (Date.now() + 900000);
+      const newExpiry = data.expiresAt || (Date.now() + (isPermanentMode ? 31536000000 : 900000));
 
       setRoomCode(newCode);
       setExpiresAt(newExpiry);
@@ -233,8 +242,10 @@ export const PairingModal: React.FC<PairingModalProps> = ({
         }, 3000);
         const data = await res.json();
         if (data.hasAnswer && data.answer) {
-          stopPolling();
-          stopCountdown();
+          if (!isPermanentMode) {
+            stopPolling();
+            stopCountdown();
+          }
           setStatusMessage('Peer connected. Verifying cryptographic signatures...');
 
           await peerManager.acceptAnswer(data.answer);
@@ -248,9 +259,9 @@ export const PairingModal: React.FC<PairingModalProps> = ({
           }, 800);
         }
       } catch (err: any) {
-        // Do not leave the host looking idle when verification fails. The
-        // previous silent catch made the joiner wait until a misleading timeout.
-        stopPolling();
+        if (!isPermanentMode) {
+          stopPolling();
+        }
         setErrorMsg(err?.message || 'Cryptographic verification failed.');
         setStatusMessage('');
       }
@@ -270,6 +281,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
     try {
       setIsConnecting(true);
       setErrorMsg('');
+      setAlreadyAddedNotice('');
       setStatusMessage('Connecting to pairing session...');
 
       const res = await peerManager.fetchRelay(`/api/signaling/room/${cleanCode}/join`, {
@@ -288,6 +300,12 @@ export const PairingModal: React.FC<PairingModalProps> = ({
       const data = await res.json();
       if (!data.success || !data.offer) {
         throw new Error('Key exchange offer was not found.');
+      }
+
+      // Check if this peer is already in our contacts
+      const existingContact = await db.contacts.get(data.offer.deviceId);
+      if (existingContact) {
+        setAlreadyAddedNotice(`Tento kontakt (${existingContact.alias || existingContact.deviceId}) už máte pridaný v zozname kontaktov.`);
       }
 
       setStatusMessage('Generating answer and safety keys...');
@@ -556,6 +574,13 @@ export const PairingModal: React.FC<PairingModalProps> = ({
         </div>
 
         {/* Status / Alert Banners */}
+        {alreadyAddedNotice && (
+          <div className="mx-4 mt-3 p-2.5 rounded-xl bg-blue-950/40 border border-blue-900/50 flex items-center gap-2 text-blue-300 text-xs animate-in fade-in">
+            <Info className="w-4 h-4 flex-shrink-0 text-blue-400" />
+            <div className="flex-1 font-medium">{alreadyAddedNotice}</div>
+          </div>
+        )}
+
         {errorMsg && (
           <div className="mx-4 mt-3 p-2.5 rounded-xl bg-red-950/40 border border-red-900/50 flex items-center gap-2 text-red-300 text-xs animate-in fade-in">
             <AlertCircle className="w-4 h-4 flex-shrink-0 text-red-400" />
@@ -575,15 +600,63 @@ export const PairingModal: React.FC<PairingModalProps> = ({
           {/* TAB 1: MANUAL CODE GENERATION */}
           {activeTab === 'my_code' && (
             <div className="space-y-4">
+              {/* Link Expiry Type Selector */}
+              <div className="p-3 bg-[#121215] rounded-xl border border-[#222226] space-y-2">
+                <div className="text-[11px] font-medium text-[#a1a1aa] uppercase tracking-wider">Typ párovacieho odkazu:</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsPermanentMode(false);
+                      setRoomCode('');
+                    }}
+                    className={`p-2 rounded-lg text-xs font-medium border text-left transition-all cursor-pointer ${
+                      !isPermanentMode
+                        ? 'bg-[#1e1e24] border-white/20 text-white'
+                        : 'bg-[#18181b] border-transparent text-[#71717a] hover:text-[#a1a1aa]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-semibold text-emerald-400 mb-0.5">
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>Jednorazový</span>
+                    </div>
+                    <p className="text-[10px] text-[#a1a1aa] leading-tight">Platný 15 minút / 1 spárovanie (predvolené & bezpečné)</p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsPermanentMode(true);
+                      setRoomCode('');
+                    }}
+                    className={`p-2 rounded-lg text-xs font-medium border text-left transition-all cursor-pointer ${
+                      isPermanentMode
+                        ? 'bg-[#1e1e24] border-purple-500/40 text-white'
+                        : 'bg-[#18181b] border-transparent text-[#71717a] hover:text-[#a1a1aa]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-semibold text-purple-400 mb-0.5">
+                      <InfinityIcon className="w-3.5 h-3.5" />
+                      <span>Trvalý odkaz</span>
+                    </div>
+                    <p className="text-[10px] text-[#a1a1aa] leading-tight">Nekonečný pre viac kontaktov (voliteľné)</p>
+                  </button>
+                </div>
+              </div>
+
               {!roomCode ? (
-                <div className="text-center py-8 px-4 bg-[#121215] rounded-xl border border-[#222226] space-y-4">
-                  <div className="w-12 h-12 rounded-xl bg-[#1a1a20] border border-[#2e2e38] text-white flex items-center justify-center mx-auto shadow-inner">
-                    <Key className="w-6 h-6 text-[#a1a1aa]" />
+                <div className="text-center py-6 px-4 bg-[#121215] rounded-xl border border-[#222226] space-y-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#1a1a20] border border-[#2e2e38] text-white flex items-center justify-center mx-auto shadow-inner">
+                    <Key className="w-5 h-5 text-[#a1a1aa]" />
                   </div>
                   <div className="space-y-1">
-                    <h4 className="text-sm font-semibold text-white">Generate Pairing Code</h4>
+                    <h4 className="text-sm font-semibold text-white">
+                      {isPermanentMode ? 'Vytvoriť trvalý odkaz na profil' : 'Vygenerovať 15-minútový kód'}
+                    </h4>
                     <p className="text-xs text-[#71717a] max-w-xs mx-auto">
-                      A code and QR token are generated on-demand with fresh ephemeral keys.
+                      {isPermanentMode
+                        ? 'Vytvorí trvalý zdieľateľný odkaz, cez ktorý sa k vám môže pridať ľubovoľný počet kontaktov.'
+                        : 'Vytvorí bezpečný jednorazový kód a odkaz s platnosťou 15 minút.'}
                     </p>
                   </div>
                   <button
@@ -597,7 +670,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                     ) : (
                       <QrCode className="w-3.5 h-3.5" />
                     )}
-                    <span>{isGeneratingRoom ? 'Generating...' : 'Generate Code & QR'}</span>
+                    <span>{isGeneratingRoom ? 'Generujem...' : 'Vytvoriť kód a odkaz'}</span>
                   </button>
                 </div>
               ) : (
@@ -605,15 +678,64 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                   {/* Code Card */}
                   <div className="p-4 bg-[#121215] rounded-xl border border-[#222226] flex flex-col items-center text-center space-y-3">
                     <div className="flex items-center justify-between w-full text-xs text-[#a1a1aa]">
-                      <span>One-Time Pairing Code</span>
-                      <div className="flex items-center gap-1 font-mono text-emerald-400 text-[11px]">
-                        <Clock className="w-3 h-3" />
-                        <span>{Math.floor(remainingSeconds / 60)}:{(remainingSeconds % 60).toString().padStart(2, '0')}</span>
-                      </div>
+                      <span>{isPermanentMode ? 'Trvalý párovací kód' : 'Jednorazový párovací kód'}</span>
+                      {isPermanentMode ? (
+                        <div className="flex items-center gap-1 font-mono text-purple-400 text-[11px]">
+                          <InfinityIcon className="w-3 h-3" />
+                          <span>Nekonečný</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 font-mono text-emerald-400 text-[11px]">
+                          <Clock className="w-3 h-3" />
+                          <span>{Math.floor(remainingSeconds / 60)}:{(remainingSeconds % 60).toString().padStart(2, '0')}</span>
+                        </div>
+                      )}
                     </div>
 
                     <div className="text-3xl font-black font-mono tracking-widest text-white bg-[#09090b] px-6 py-2.5 rounded-xl border border-[#27272a] shadow-inner select-all">
                       {roomCode}
+                    </div>
+
+                    {/* Shareable URL Section */}
+                    <div className="w-full bg-[#09090b] p-2.5 rounded-xl border border-[#27272a] flex flex-col gap-2">
+                      <div className="flex items-center gap-1.5 text-[11px] text-[#a1a1aa]">
+                        <LinkIcon className="w-3 h-3 text-emerald-400" />
+                        <span className="truncate">{typeof window !== 'undefined' ? `${window.location.origin}/?room=${roomCode}` : `/?room=${roomCode}`}</span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            const url = `${window.location.origin}/?room=${roomCode}`;
+                            navigator.clipboard.writeText(url);
+                            setCopiedUrl(true);
+                            setTimeout(() => setCopiedUrl(false), 2000);
+                          }}
+                          className="flex-1 py-1.5 px-2.5 rounded-lg bg-[#1c1c22] hover:bg-[#27272a] text-white text-xs font-medium flex items-center justify-center gap-1.5 transition-colors border border-[#2c2c36] cursor-pointer"
+                        >
+                          {copiedUrl ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-[#a1a1aa]" />}
+                          <span>{copiedUrl ? 'Odkaz skopírovaný' : 'Kopírovať odkaz'}</span>
+                        </button>
+
+                        {typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (
+                          <button
+                            onClick={async () => {
+                              try {
+                                const url = `${window.location.origin}/?room=${roomCode}`;
+                                await navigator.share({
+                                  title: 'Pridaj si ma na bezpečný chat',
+                                  text: 'Pripoj sa k môjmu end-to-end šifrovanému chatu:',
+                                  url,
+                                });
+                              } catch {}
+                            }}
+                            className="py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+                          >
+                            <Share2 className="w-3.5 h-3.5" />
+                            <span>Zdieľať</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     <div className="flex items-center gap-2 w-full pt-1">
@@ -623,13 +745,13 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                         className="flex-1 py-2 px-3 rounded-lg bg-[#1c1c22] hover:bg-[#27272a] text-white text-xs font-medium flex items-center justify-center gap-1.5 transition-colors border border-[#2c2c36] cursor-pointer"
                       >
                         {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-[#a1a1aa]" />}
-                        <span>{copied ? 'Copied' : 'Copy Code'}</span>
+                        <span>{copied ? 'Kód skopírovaný' : 'Kopírovať iba kód'}</span>
                       </button>
 
                       <button
                         onClick={handleGenerateRoom}
                         disabled={isGeneratingRoom}
-                        title="Generate new code"
+                        title="Vygenerovať nový kód"
                         className="p-2 rounded-lg bg-[#1c1c22] hover:bg-[#27272a] text-[#a1a1aa] hover:text-white transition-colors border border-[#2c2c36] cursor-pointer"
                       >
                         <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingRoom ? 'animate-spin' : ''}`} />
@@ -644,7 +766,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                         <img src={qrDataUrl} alt="Pairing QR Code" className="w-40 h-40 object-contain" />
                       </div>
                       <p className="text-[11px] text-[#71717a]">
-                        Scan this QR code using the camera on your other device
+                        Oskenujte tento QR kód fotoaparátom z druhého zariadenia
                       </p>
                     </div>
                   )}

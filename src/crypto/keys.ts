@@ -132,18 +132,43 @@ export async function getOrCreateIdentity(customDisplayName?: string, customAvat
   return identity;
 }
 
-export async function updateIdentityProfile(displayName: string, avatarColor?: string, statusBio?: string): Promise<IdentityRecord | null> {
+export async function updateIdentityProfile(
+  displayName: string,
+  avatarColor?: string,
+  statusBio?: string,
+  options?: {
+    status?: string;
+    phone?: string;
+    email?: string;
+    socialLinks?: {
+      twitter?: string;
+      telegram?: string;
+      github?: string;
+      instagram?: string;
+      website?: string;
+    };
+  }
+): Promise<IdentityRecord | null> {
   const list = await db.identity.toArray();
   if (list.length === 0) return null;
   const current = list[0];
   current.displayName = displayName;
   if (avatarColor) current.avatarColor = avatarColor;
   if (statusBio !== undefined) current.statusBio = statusBio;
+  if (options) {
+    if (options.status !== undefined) current.status = options.status;
+    if (options.phone !== undefined) current.phone = options.phone;
+    if (options.email !== undefined) current.email = options.email;
+    if (options.socialLinks !== undefined) current.socialLinks = options.socialLinks;
+  }
   await db.identity.put(current);
 
   try {
     localStorage.setItem(STORAGE_KEY_NAME, displayName);
     if (avatarColor) localStorage.setItem(STORAGE_KEY_COLOR, avatarColor);
+    if (options?.phone) localStorage.setItem('scryptchat_phone', options.phone);
+    if (options?.email) localStorage.setItem('scryptchat_email', options.email);
+    if (options?.socialLinks) localStorage.setItem('scryptchat_socials', JSON.stringify(options.socialLinks));
   } catch {}
 
   return current;

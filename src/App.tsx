@@ -71,7 +71,8 @@ export default function App() {
       const params = new URLSearchParams(window.location.search);
       const roomParam = params.get('room');
       if (roomParam && /^[A-Z0-9]{6}$/i.test(roomParam.trim())) {
-        setInitialPairCode(roomParam.trim().toUpperCase());
+        const code = roomParam.trim().toUpperCase();
+        setInitialPairCode(code);
         setIsPairingOpen(true);
         window.history.replaceState({}, '', window.location.pathname);
       }
@@ -93,7 +94,7 @@ export default function App() {
         if (!isMounted) return;
         setIdentity(idRecord);
 
-        // If user has not set a display name yet, show onboarding
+        // If user has not set a display name yet or first time visit, show onboarding
         if (!idRecord.displayName || idRecord.displayName.trim() === '') {
           setShowOnboarding(true);
         }
@@ -131,8 +132,9 @@ export default function App() {
             setActiveContact((curr) => {
               if (!curr) return null;
               const found = updated.find((c) => c.deviceId === curr.deviceId);
-              return found || curr;
+              return found || null;
             });
+            await reloadLastMessages();
           },
           onMessageReceived: async (msg) => {
             soundEngine.playMessageReceived();
@@ -268,6 +270,10 @@ export default function App() {
   };
 
   const handleDeleteContact = async (deviceId: string) => {
+    // Notify the other peer so it gets deleted from their device as well
+    if (peerManagerRef.current) {
+      await peerManagerRef.current.notifyContactRemoved(deviceId);
+    }
     await db.contacts.delete(deviceId);
     await db.messages.where('chatDeviceId').equals(deviceId).delete();
     const updated = contacts.filter((c) => c.deviceId !== deviceId);
@@ -480,6 +486,8 @@ export default function App() {
             onOpenGroupCreator={() => setIsGroupCreatorOpen(true)}
             onOpenContactDetails={(contact) => setSelectedContactForDetails(contact)}
             onOpenGroupDetails={(group) => setSelectedGroupForDetails(group)}
+            onStartCall={handleStartCall}
+            onDeleteContact={handleDeleteContact}
           />
           <ChatView
             activeContact={activeContact}
@@ -514,6 +522,8 @@ export default function App() {
               onOpenGroupCreator={() => setIsGroupCreatorOpen(true)}
               onOpenContactDetails={(contact) => setSelectedContactForDetails(contact)}
               onOpenGroupDetails={(group) => setSelectedGroupForDetails(group)}
+              onStartCall={handleStartCall}
+              onDeleteContact={handleDeleteContact}
             />
           ) : (
             <ChatView
@@ -585,7 +595,7 @@ export default function App() {
         />
       )}
 
-      {/* Onboarding Welcome Screen (Only on first visit) */}
+      {/* Onboarding Welcome Screen (Only on first visit or after erase) */}
       {showOnboarding && identity && (
         <OnboardingModal
           identity={identity}
@@ -639,8 +649,19 @@ export default function App() {
       <DataWipeDialog
         isOpen={isWipeOpen}
         onClose={() => setIsWipeOpen(false)}
-        onWipeCompleted={() => {
-          peerManagerRef.current?.cleanup();
+        onWipeCompleted={async () => {
+          peerManagerRef.current?.destroy();
+          callManagerRef.current?.destroy();
+          setContacts([]);
+          setGroups([]);
+          setActiveContact(null);
+          setActiveGroup(null);
+          setMessages([]);
+          setLastMessagesMap(new Map());
+          setIsWipeOpen(false);
+          const freshId = await getOrCreateIdentity();
+          setIdentity(freshId);
+          setShowOnboarding(true);
         }}
       />
     </div>

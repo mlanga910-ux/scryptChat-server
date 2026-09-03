@@ -32,11 +32,23 @@ export enum AckStatus {
   NACK_RETRANSMIT_REQ = 0x01,
 }
 
+export interface SocialLinks {
+  twitter?: string;
+  telegram?: string;
+  github?: string;
+  instagram?: string;
+  website?: string;
+}
+
 export interface UserProfile {
   deviceId: string;
   displayName: string;
   avatarColor: string;
   statusBio: string;
+  status?: string;
+  phone?: string;
+  email?: string;
+  socialLinks?: SocialLinks;
   joinedAt: number;
 }
 
@@ -48,6 +60,10 @@ export interface IdentityRecord {
   displayName?: string;
   avatarColor?: string;
   statusBio?: string;
+  status?: string;
+  phone?: string;
+  email?: string;
+  socialLinks?: SocialLinks;
   createdAt: number;
 }
 

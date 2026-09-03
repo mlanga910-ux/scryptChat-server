@@ -66,7 +66,7 @@ export interface PeerManagerEvents {
     pingMs?: number | null,
     errorReason?: string
   ) => void;
-  onContactsPresencesUpdate?: (presences: Record<string, { isOnline: boolean; lastSeen: number }>) => void;
+  onContactsPresencesUpdate?: (presences?: Record<string, { isOnline: boolean; lastSeen: number }>) => void;
   onMessageReceived: (message: MessageRecord) => void;
   onFileProgress: (progress: FileTransferProgress) => void;
   onFileCompleted: (fileRecord: FileRecord, blob: Blob) => void;
@@ -268,6 +268,17 @@ export class PeerManager {
       if (envelope.type === 'CALL_SIGNAL' || envelope.signal || envelope.action) {
         const signal = envelope.signal || envelope;
         this.events.onMediaSignal?.(signal);
+        return;
+      }
+
+      // 1.1 Contact Revocation / Deletion Sync
+      if (envelope.type === 'CONTACT_REVOKED') {
+        const senderId = item.senderDeviceId || envelope.senderDeviceId;
+        if (senderId) {
+          await db.contacts.delete(senderId);
+          await db.messages.where('chatDeviceId').equals(senderId).delete();
+          this.events.onContactsPresencesUpdate?.();
+        }
         return;
       }
 
@@ -830,6 +841,32 @@ export class PeerManager {
       }
     } catch (err: any) {
       console.warn('Frame decrypt/handle error:', err);
+    }
+  }
+
+  /**
+   * Notify peer of mutual contact deletion / revocation
+   */
+  public async notifyContactRemoved(targetDeviceId: string): Promise<void> {
+    try {
+      const envelope = {
+        type: 'CONTACT_REVOKED',
+        senderDeviceId: this.identity.deviceId,
+        timestamp: Date.now(),
+      };
+      const encryptedEnvelope = btoa(unescape(encodeURIComponent(JSON.stringify(envelope))));
+      await this.fetchRelay('/api/signaling/mailbox/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          senderDeviceId: this.identity.deviceId,
+          recipientDeviceId: targetDeviceId,
+          encryptedEnvelope,
+          timestamp: Date.now(),
+        }),
+      }, 5000);
+    } catch (err) {
+      console.warn('Failed to notify contact deletion:', err);
     }
   }
 

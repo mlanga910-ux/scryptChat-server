@@ -32,26 +32,27 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showSecurityDetails, setShowSecurityDetails] = useState(false);
 
-  // Sync media streams to video & audio elements
+  // Sync media streams to video & audio elements without recreating or resetting streams
   useEffect(() => {
-    if (!session) return;
+    if (!session || session.state === 'IDLE' || session.state === 'ENDED') return;
 
     const localStream = callManager.getLocalStream();
-    if (localVideoRef.current && localStream) {
+    if (localVideoRef.current && localStream && localVideoRef.current.srcObject !== localStream) {
       localVideoRef.current.srcObject = localStream;
+      localVideoRef.current.play().catch(() => {});
     }
 
     const remoteStream = callManager.getRemoteStream();
-    if (remoteVideoRef.current && remoteStream) {
+    if (remoteVideoRef.current && remoteStream && remoteVideoRef.current.srcObject !== remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
       remoteVideoRef.current.play().catch(() => {});
     }
 
-    if (remoteAudioRef.current && remoteStream) {
+    if (remoteAudioRef.current && remoteStream && remoteAudioRef.current.srcObject !== remoteStream) {
       remoteAudioRef.current.srcObject = remoteStream;
       remoteAudioRef.current.play().catch(() => {});
     }
-  }, [session, session?.state, session?.isVideoMuted, session?.isRemoteVideoMuted]);
+  });
 
   if (!session || session.state === 'IDLE' || session.state === 'ENDED') {
     return null;
@@ -201,16 +202,20 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
 
       {/* Media Viewport */}
       <div className="relative flex-1 bg-zinc-950 flex items-center justify-center overflow-hidden">
-        {/* Remote Video */}
-        {session.callType === 'video' && !session.isRemoteVideoMuted ? (
-          <video
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          /* Audio / Video Off Avatar State */
+        {/* Remote Video Element - always preserved in DOM */}
+        <video
+          ref={remoteVideoRef}
+          autoPlay
+          playsInline
+          className={`w-full h-full object-cover transition-opacity duration-200 ${
+            session.callType === 'video' && !session.isRemoteVideoMuted
+              ? 'opacity-100 block'
+              : 'opacity-0 hidden'
+          }`}
+        />
+
+        {/* Audio / Video Off Avatar State when video is not active */}
+        {(session.callType !== 'video' || session.isRemoteVideoMuted) && (
           <div className="flex flex-col items-center justify-center p-6 text-center space-y-4">
             <div className="relative w-28 h-28 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center shadow-xl">
               <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-zinc-800 to-zinc-700 flex items-center justify-center">
@@ -239,15 +244,16 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
         {/* Local Video PIP (Picture in Picture) */}
         {session.callType === 'video' && (
           <div className="absolute top-4 right-4 w-28 h-36 sm:w-32 sm:h-44 rounded-xl overflow-hidden border border-zinc-700 shadow-xl bg-zinc-900 z-10">
-            {!session.isVideoMuted ? (
-              <video
-                ref={localVideoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-full object-cover mirror"
-              />
-            ) : (
+            <video
+              ref={localVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className={`w-full h-full object-cover mirror ${
+                !session.isVideoMuted ? 'block' : 'hidden'
+              }`}
+            />
+            {session.isVideoMuted && (
               <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-900 text-zinc-500 text-xs">
                 <VideoOff className="w-6 h-6 mb-1" />
                 <span>Camera off</span>

@@ -12,7 +12,8 @@ interface RoomPeer {
 interface SignalingRoom {
   roomId: string;
   createdAt: number;
-  expiresAt: number; // 60-second rolling expiry
+  expiresAt: number; // 15-minute or permanent expiry
+  isPermanent?: boolean;
   initiator?: RoomPeer;
   responder?: RoomPeer;
   isConfirmed?: boolean;
@@ -273,10 +274,10 @@ signalingRouter.post('/presence/query', (req: Request, res: Response) => {
 });
 
 /**
- * 1. Create a 15-minute Rolling Dynamic Pairing Room & Token
+ * 1. Create a 15-minute Rolling Dynamic Pairing Room & Token (or Permanent Link)
  */
 signalingRouter.post('/room/create', (req: Request, res: Response) => {
-  const { deviceId, offer, ttlSeconds = 900 } = req.body;
+  const { deviceId, offer, ttlSeconds = 900, isPermanent = false } = req.body;
   
   // Generate friendly 6-character code (avoid confusing letters like 0/O, 1/I)
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -286,10 +287,12 @@ signalingRouter.post('/room/create', (req: Request, res: Response) => {
   }
 
   const now = Date.now();
+  const calculatedExpiry = isPermanent ? now + (365 * 24 * 3600 * 1000) : now + (ttlSeconds * 1000);
   const room: SignalingRoom = {
     roomId,
     createdAt: now,
-    expiresAt: now + (ttlSeconds * 1000),
+    expiresAt: calculatedExpiry,
+    isPermanent: !!isPermanent,
     initiator: {
       deviceId: deviceId || 'initiator',
       role: 'initiator',
@@ -304,7 +307,8 @@ signalingRouter.post('/room/create', (req: Request, res: Response) => {
     success: true,
     roomId,
     expiresAt: room.expiresAt,
-    ttlSeconds,
+    isPermanent: room.isPermanent,
+    ttlSeconds: isPermanent ? 31536000 : ttlSeconds,
   });
 });
 

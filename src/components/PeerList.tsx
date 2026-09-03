@@ -10,6 +10,11 @@ import {
   Users,
   MessageSquare,
   FileCode,
+  Phone,
+  Video,
+  Info,
+  Trash2,
+  UserX,
 } from 'lucide-react';
 
 interface PeerListProps {
@@ -25,6 +30,8 @@ interface PeerListProps {
   onOpenGroupCreator?: () => void;
   onOpenContactDetails: (contact: ContactRecord) => void;
   onOpenGroupDetails?: (group: GroupRecord) => void;
+  onStartCall?: (deviceId: string, alias: string, type: 'audio' | 'video') => void;
+  onDeleteContact?: (deviceId: string) => void;
 }
 
 export const PeerList: React.FC<PeerListProps> = ({
@@ -40,9 +47,13 @@ export const PeerList: React.FC<PeerListProps> = ({
   onOpenGroupCreator,
   onOpenContactDetails,
   onOpenGroupDetails,
+  onStartCall,
+  onDeleteContact,
 }) => {
   const [filter, setFilter] = useState('');
   const [currentTab, setCurrentTab] = useState<'all' | 'direct' | 'groups'>('all');
+  const [contactMenuOpenId, setContactMenuOpenId] = useState<string | null>(null);
+  const [contactToDelete, setContactToDelete] = useState<ContactRecord | null>(null);
 
   const filteredContacts = contacts.filter(
     (c) =>
@@ -323,6 +334,101 @@ export const PeerList: React.FC<PeerListProps> = ({
                         {renderLastMessagePreview(lastMsg)}
                       </div>
                     </div>
+
+                    {/* Quick Contact Actions: Call, Info, Options Menu */}
+                    <div className="relative shrink-0 flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
+                      {onStartCall && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onStartCall(contact.deviceId, contact.alias, 'audio');
+                          }}
+                          className="p-1 rounded-lg text-[#a1a1aa] hover:text-emerald-400 hover:bg-[#27272a] transition-colors cursor-pointer"
+                          title="Call contact"
+                        >
+                          <Phone className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenContactDetails(contact);
+                        }}
+                        className="p-1 rounded-lg text-[#a1a1aa] hover:text-blue-400 hover:bg-[#27272a] transition-colors cursor-pointer"
+                        title="Contact Info"
+                      >
+                        <Info className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setContactMenuOpenId(contactMenuOpenId === contact.deviceId ? null : contact.deviceId);
+                        }}
+                        className="p-1 rounded-lg text-[#71717a] hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer"
+                        title="More options"
+                      >
+                        <MoreVertical className="w-3.5 h-3.5" />
+                      </button>
+
+                      {/* Contact Menu Popup */}
+                      {contactMenuOpenId === contact.deviceId && (
+                        <div
+                          className="absolute right-0 top-full mt-1 w-44 bg-[#18181b] border border-[#27272a] rounded-xl shadow-2xl py-1 z-30 animate-in fade-in zoom-in-95 font-sans text-xs"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            onClick={() => {
+                              setContactMenuOpenId(null);
+                              onOpenContactDetails(contact);
+                            }}
+                            className="w-full px-3 py-2 text-left text-white hover:bg-[#27272a] flex items-center gap-2 transition-colors cursor-pointer"
+                          >
+                            <Info className="w-3.5 h-3.5 text-blue-400" />
+                            <span>Informácie (Info)</span>
+                          </button>
+
+                          {onStartCall && (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setContactMenuOpenId(null);
+                                  onStartCall(contact.deviceId, contact.alias, 'audio');
+                                }}
+                                className="w-full px-3 py-2 text-left text-white hover:bg-[#27272a] flex items-center gap-2 transition-colors cursor-pointer"
+                              >
+                                <Phone className="w-3.5 h-3.5 text-emerald-400" />
+                                <span>Zavolať (Hovor)</span>
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setContactMenuOpenId(null);
+                                  onStartCall(contact.deviceId, contact.alias, 'video');
+                                }}
+                                className="w-full px-3 py-2 text-left text-white hover:bg-[#27272a] flex items-center gap-2 transition-colors cursor-pointer"
+                              >
+                                <Video className="w-3.5 h-3.5 text-blue-400" />
+                                <span>Videohovor</span>
+                              </button>
+                            </>
+                          )}
+
+                          <div className="my-1 border-t border-[#27272a]" />
+
+                          <button
+                            onClick={() => {
+                              setContactMenuOpenId(null);
+                              setContactToDelete(contact);
+                            }}
+                            className="w-full px-3 py-2 text-left text-red-400 hover:bg-red-950/40 flex items-center gap-2 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Odstrániť kontakt</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })
@@ -330,6 +436,56 @@ export const PeerList: React.FC<PeerListProps> = ({
           </div>
         )}
       </div>
+
+      {/* Delete Contact Confirmation Modal */}
+      {contactToDelete && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 font-sans text-xs"
+          onClick={() => setContactToDelete(null)}
+        >
+          <div
+            className="w-full max-w-sm bg-[#18181b] border border-[#27272a] rounded-2xl p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in-95"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2.5 text-red-400">
+              <div className="p-2 rounded-xl bg-red-950/50 border border-red-900/50">
+                <UserX className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-semibold text-white text-sm">Odstrániť kontakt?</h4>
+                <p className="text-[11px] text-[#a1a1aa]">
+                  {contactToDelete.alias || contactToDelete.deviceId}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-[#a1a1aa] leading-relaxed">
+              Tento kontakt a celá história správ budú odstránené. Odstránenie sa automaticky zosynchronizuje aj na druhom zariadení.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setContactToDelete(null)}
+                className="px-3.5 py-1.5 bg-[#27272a] hover:bg-[#3f3f46] text-[#a1a1aa] hover:text-white rounded-lg text-xs font-medium transition-colors cursor-pointer"
+              >
+                Zrušiť
+              </button>
+              <button
+                onClick={() => {
+                  if (onDeleteContact && contactToDelete) {
+                    onDeleteContact(contactToDelete.deviceId);
+                  }
+                  setContactToDelete(null);
+                }}
+                className="px-3.5 py-1.5 bg-red-600 hover:bg-red-500 text-white font-medium rounded-lg flex items-center gap-1.5 transition-colors text-xs shadow-sm cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Odstrániť</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 };
