@@ -483,7 +483,9 @@ export class PeerManager {
     await this.waitForIceCandidates(this.peerConnection);
 
     const ourIdentityRaw = base64ToArrayBuffer(this.identity.publicKeyRaw);
-    const sdpRaw = new TextEncoder().encode(this.peerConnection.localDescription!.sdp);
+    // Both sides must sign the same transcript. The initiator's offer SDP is
+    // the stable fingerprint included in the original pairing payload.
+    const sdpRaw = new TextEncoder().encode(offerData.sdp.sdp);
     const sdpHash = await sha256(sdpRaw);
 
     const transcriptHash = await computeTranscriptHash({
@@ -523,6 +525,11 @@ export class PeerManager {
     });
 
     await this.saveContact(this.remoteDeviceId, offerData.identityPublicKeyRaw, safetyNumber, this.remoteDisplayName);
+
+    if (this.dataChannel?.readyState === 'open') {
+      this.setState('CONNECTED');
+      this.startHeartbeat();
+    }
 
     return {
       protocolVer: PROTOCOL_VERSION,

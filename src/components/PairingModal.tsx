@@ -247,8 +247,12 @@ export const PairingModal: React.FC<PairingModalProps> = ({
             onClose();
           }, 800);
         }
-      } catch {
-        // Retry silently
+      } catch (err: any) {
+        // Do not leave the host looking idle when verification fails. The
+        // previous silent catch made the joiner wait until a misleading timeout.
+        stopPolling();
+        setErrorMsg(err?.message || 'Cryptographic verification failed.');
+        setStatusMessage('');
       }
     }, 1500);
   };
@@ -308,7 +312,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
 
   const pollForHandshakeFinalize = async (code: string) => {
     let attempts = 0;
-    const maxAttempts = 15;
+    const maxAttempts = 30;
     return new Promise<void>((resolve, reject) => {
       const timer = setInterval(async () => {
         attempts++;
