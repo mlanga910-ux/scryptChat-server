@@ -96,7 +96,7 @@ export const PeerList: React.FC<PeerListProps> = ({
   };
 
   return (
-    <aside className="relative w-full md:w-80 h-full flex flex-col border-r border-[#27272a] bg-[#09090b] font-sans select-none">
+    <aside className="relative w-full md:w-80 h-full min-h-0 flex flex-col border-r border-[#27272a] bg-[#09090b] font-sans select-none">
       {/* Top Header */}
       <div className="px-4 pt-3.5 pb-2 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-white tracking-tight">

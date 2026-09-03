@@ -442,7 +442,7 @@ export default function App() {
   };
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-[#09090b] text-[#f4f4f5] overflow-hidden select-none font-sans">
+    <div className="h-[100dvh] w-screen max-w-full flex flex-col bg-[#09090b] text-[#f4f4f5] overflow-hidden select-none font-sans">
       {/* Top Header Bar */}
       <TerminalHeader
         identity={identity}
@@ -462,9 +462,9 @@ export default function App() {
       />
 
       {/* Main Workspace Layout */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 min-h-0 flex overflow-hidden">
         {/* Desktop: Dual-Pane Master-Detail */}
-        <div className="hidden md:flex flex-1 overflow-hidden">
+        <div className="hidden md:flex flex-1 min-h-0 h-full overflow-hidden">
           <PeerList
             contacts={contacts}
             groups={groups}
@@ -497,7 +497,7 @@ export default function App() {
         </div>
 
         {/* Mobile: Single-View Navigation */}
-        <div className="flex md:hidden flex-1 overflow-hidden">
+        <div className="flex md:hidden flex-1 min-h-0 h-full overflow-hidden">
           {mobileTab === 'peers' ? (
             <PeerList
               contacts={contacts}
