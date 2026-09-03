@@ -40,7 +40,7 @@ import {
   Plus,
 } from 'lucide-react';
 import { db } from '../db/index';
-import { ImageExifModal } from './ImageExifModal';
+import { ImageViewerModal } from './ImageViewerModal';
 import { ChatSettingsModal } from './ChatSettingsModal';
 import { CodeViewerModal } from './CodeViewerModal';
 import { getChatSettings, ChatCustomSettings } from '../utils/chatSettings';
@@ -125,9 +125,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const [downloadUrls, setDownloadUrls] = useState<Map<string, string>>(new Map());
   const [fileRecordsMap, setFileRecordsMap] = useState<Map<string, FileRecord>>(new Map());
 
-  // EXIF Inspector Modal state
-  const [selectedExifFile, setSelectedExifFile] = useState<FileRecord | null>(null);
-  const [isExifModalOpen, setIsExifModalOpen] = useState(false);
+  // Fullscreen Image Viewer Modal state
+  const [selectedImageFile, setSelectedImageFile] = useState<FileRecord | null>(null);
+  const [selectedImageBlobUrl, setSelectedImageBlobUrl] = useState<string | undefined>(undefined);
+  const [selectedImageMessage, setSelectedImageMessage] = useState<MessageRecord | null>(null);
+  const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
 
   // Chat Settings Modal state & Per-Chat Preferences
   const [isChatSettingsOpen, setIsChatSettingsOpen] = useState(false);
@@ -382,9 +384,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const openExifModal = (fileRec: FileRecord) => {
-    setSelectedExifFile(fileRec);
-    setIsExifModalOpen(true);
+  const openImageViewer = (fileRec: FileRecord, blobUrl?: string, msg?: MessageRecord) => {
+    setSelectedImageFile(fileRec);
+    setSelectedImageBlobUrl(blobUrl);
+    setSelectedImageMessage(msg || null);
+    setIsImageViewerOpen(true);
   };
 
   const openCodeModal = (snippet: CodeSnippet) => {
@@ -663,8 +667,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         <img
                           src={downloadUrl}
                           alt={fileRec?.name || 'Encrypted Photo'}
-                          className="max-h-72 w-auto object-cover cursor-pointer"
-                          onClick={() => fileRec && openExifModal(fileRec)}
+                          className="max-h-72 w-auto object-cover cursor-pointer hover:opacity-95 transition-opacity"
+                          onClick={() => fileRec && openImageViewer(fileRec, downloadUrl, msg)}
                         />
                       ) : (
                         <div className="w-64 h-48 bg-[#18181b] flex items-center justify-center text-xs text-[#71717a]">
@@ -672,14 +676,17 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         </div>
                       )}
                       <div className="p-2.5 flex items-center justify-between gap-2 border-t border-black/10 dark:border-white/10 text-xs">
-                        <span className="truncate max-w-[150px] font-medium opacity-80">
+                        <span
+                          className="truncate max-w-[150px] font-medium opacity-80 cursor-pointer hover:underline"
+                          onClick={() => fileRec && openImageViewer(fileRec, downloadUrl, msg)}
+                        >
                           {fileRec?.name || 'Photo'}
                         </span>
                         {downloadUrl && (
                           <a
                             href={downloadUrl}
                             download={fileRec?.name || 'photo.png'}
-                            className="p-1.5 rounded-lg bg-black/10 hover:bg-black/20 text-current transition-colors"
+                            className="p-1.5 rounded-lg bg-black/10 hover:bg-black/20 text-current transition-colors cursor-pointer"
                             title="Download Photo"
                           >
                             <Download className="w-3.5 h-3.5" />
@@ -1066,14 +1073,18 @@ export const ChatView: React.FC<ChatViewProps> = ({
         />
       )}
 
-      {/* EXIF Details Modal */}
-      {isExifModalOpen && selectedExifFile && (
-        <ImageExifModal
-          isOpen={isExifModalOpen}
-          fileRecord={selectedExifFile}
+      {/* Fullscreen Image Viewer Modal */}
+      {isImageViewerOpen && selectedImageFile && (
+        <ImageViewerModal
+          isOpen={isImageViewerOpen}
+          fileRecord={selectedImageFile}
+          blobUrl={selectedImageBlobUrl}
+          message={selectedImageMessage}
           onClose={() => {
-            setIsExifModalOpen(false);
-            setSelectedExifFile(null);
+            setIsImageViewerOpen(false);
+            setSelectedImageFile(null);
+            setSelectedImageBlobUrl(undefined);
+            setSelectedImageMessage(null);
           }}
         />
       )}

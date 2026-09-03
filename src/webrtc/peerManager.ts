@@ -213,6 +213,18 @@ export class PeerManager {
         }
       });
 
+      sse.addEventListener('call_signal', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          const signal = data.signal || data;
+          if (data.senderDeviceId !== this.identity.deviceId && signal) {
+            this.events.onMediaSignal?.(signal);
+          }
+        } catch (err) {
+          console.warn('SSE call_signal parse error:', err);
+        }
+      });
+
       sse.onerror = () => {
         sse.close();
         this.sseSource = null;

@@ -536,6 +536,7 @@ export class CallManager {
   private async acquireUserMedia(video: boolean, facingMode: 'user' | 'environment'): Promise<MediaStream> {
     const settings = getSoundSettings();
 
+    // 1. Try standard mobile-friendly constraints
     try {
       return await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -545,19 +546,52 @@ export class CallManager {
         },
         video: video
           ? {
-              facingMode,
+              facingMode: { ideal: facingMode },
               width: { ideal: 1280, max: 1920 },
               height: { ideal: 720, max: 1080 },
             }
           : false,
       });
-    } catch {
-      // Fallback with minimal constraints for maximum mobile compatibility
+    } catch (err1) {
+      console.warn('Initial media constraint acquisition failed, trying standard fallback:', err1);
+    }
+
+    // 2. Try simple boolean constraints
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: video ? { facingMode } : false,
+      });
+    } catch (err2) {
+      console.warn('Second tier media acquisition failed, trying basic audio/video:', err2);
+    }
+
+    // 3. Try plain audio & video boolean
+    try {
       return await navigator.mediaDevices.getUserMedia({
         audio: true,
         video: video ? true : false,
       });
+    } catch (err3) {
+      console.warn('Third tier media acquisition failed:', err3);
     }
+
+    // 4. If video was requested but failed (e.g. camera permission denied or in use), fallback to audio only
+    if (video) {
+      try {
+        const audioOnlyStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (this.currentSession) {
+          this.currentSession.callType = 'audio';
+          this.currentSession.isVideoMuted = true;
+          this.events.onCallStateChange({ ...this.currentSession });
+        }
+        return audioOnlyStream;
+      } catch (err4) {
+        throw new Error('Could not access microphone or camera. Please grant permissions in your browser settings.');
+      }
+    }
+
+    throw new Error('Microphone permission required for call. Please grant permissions in browser settings.');
   }
 
   private async sendCallSignal(payload: CallSignalPayload, targetDeviceId?: string): Promise<void> {

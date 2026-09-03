@@ -712,6 +712,9 @@ signalingRouter.post('/call/signal', (req: Request, res: Response) => {
     return;
   }
 
+  // Update presence
+  devicePresences.set(senderDeviceId, { lastSeen: Date.now() });
+
   const signalObj: FastCallSignal = {
     id: `cs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     senderDeviceId,
@@ -722,9 +725,12 @@ signalingRouter.post('/call/signal', (req: Request, res: Response) => {
 
   const current = callSignalsQueue.get(recipientDeviceId) || [];
   current.push(signalObj);
-  callSignalsQueue.set(recipientDeviceId, current.slice(-20)); // keep last 20 max
+  callSignalsQueue.set(recipientDeviceId, current.slice(-30)); // keep last 30 max
 
-  res.json({ success: true, signalId: signalObj.id });
+  // Push directly over active SSE stream for immediate zero-latency ring/signal
+  const pushedRealtime = pushSSEEventToDevice(recipientDeviceId, 'call_signal', signalObj);
+
+  res.json({ success: true, signalId: signalObj.id, deliveredRealtime: pushedRealtime });
 });
 
 // 8.2 Poll Call Signals

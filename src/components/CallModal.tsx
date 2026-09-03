@@ -27,11 +27,12 @@ interface CallModalProps {
 export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) => {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showSecurityDetails, setShowSecurityDetails] = useState(false);
 
-  // Sync media streams to video elements
+  // Sync media streams to video & audio elements
   useEffect(() => {
     if (!session) return;
 
@@ -43,6 +44,12 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
     const remoteStream = callManager.getRemoteStream();
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
+      remoteVideoRef.current.play().catch(() => {});
+    }
+
+    if (remoteAudioRef.current && remoteStream) {
+      remoteAudioRef.current.srcObject = remoteStream;
+      remoteAudioRef.current.play().catch(() => {});
     }
   }, [session, session?.state, session?.isVideoMuted, session?.isRemoteVideoMuted]);
 
@@ -257,6 +264,9 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
           </div>
         )}
       </div>
+
+      {/* Hidden dedicated audio element for continuous audio stream */}
+      <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
 
       {/* Bottom Controls Bar */}
       <div className="p-4 bg-zinc-900/90 backdrop-blur-md border-t border-zinc-800 flex items-center justify-center gap-3 z-20">
