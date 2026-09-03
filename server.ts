@@ -5,10 +5,12 @@ import { signalingRouter } from './server/signaling';
 
 async function startServer() {
   const app = express();
-  // On Render, respect the PORT environment variable; in development/AI Studio container bind strictly to 3000
-  const PORT = process.env.RENDER ? (Number(process.env.PORT) || 3000) : 3000;
+  // Replit previews use port 5000, while hosted environments provide PORT.
+  const PORT = Number(process.env.PORT) || 5000;
 
-  app.use(express.json({ limit: '10mb' }));
+  // Relay fallback carries base64-encoded attachments, so leave room for
+  // normal phone photos while direct WebRTC remains the preferred path.
+  app.use(express.json({ limit: '50mb' }));
 
   // Serve static assets from public folder
   const publicPath = path.join(process.cwd(), 'public');

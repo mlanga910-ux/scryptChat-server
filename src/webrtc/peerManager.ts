@@ -3,6 +3,7 @@ import {
   ContactRecord,
   FileRecord,
   FileTransferProgress,
+  GroupRecord,
   HandshakeAnswerData,
   HandshakeFinalizeData,
   HandshakeOfferData,
@@ -110,9 +111,11 @@ export class PeerManager {
   private heartbeatInterval: any = null;
   private mailboxPollInterval: any = null;
   private relayCheckInterval: any = null;
+  private callPollInterval: any = null;
   private sseSource: EventSource | null = null;
   private sseReconnectTimeout: any = null;
   private lastPingSentTime = 0;
+  private processedMailboxIds = new Set<string>();
 
   constructor(identity: IdentityRecord, events: PeerManagerEvents) {
     this.identity = identity;
@@ -124,6 +127,7 @@ export class PeerManager {
     this.checkRelayHealth();
     this.startRealtimeStream();
     this.startMailboxPolling();
+    this.startCallSignalPolling();
     this.startRelayHealthCheck();
   }
 
@@ -224,10 +228,28 @@ export class PeerManager {
   public async processIncomingMailboxItem(item: any) {
     if (!item) return;
     try {
+      if (item.id) {
+        if (this.processedMailboxIds.has(item.id)) return;
+        this.processedMailboxIds.add(item.id);
+        if (this.processedMailboxIds.size > 500) {
+          const oldest = this.processedMailboxIds.values().next().value;
+          if (oldest) this.processedMailboxIds.delete(oldest);
+        }
+      }
+
       let envelope: any = {};
       if (item.encryptedEnvelope) {
-        const decodedJson = decodeURIComponent(escape(atob(item.encryptedEnvelope)));
-        envelope = JSON.parse(decodedJson);
+        try {
+          const decodedJson = decodeURIComponent(escape(atob(item.encryptedEnvelope)));
+          envelope = JSON.parse(decodedJson);
+        } catch {
+          // Group relay packets from older clients were sent as plain JSON.
+          try {
+            envelope = JSON.parse(item.encryptedEnvelope);
+          } catch {
+            envelope = {};
+          }
+        }
       }
 
       // 1. Media Call Signal
@@ -237,7 +259,66 @@ export class PeerManager {
         return;
       }
 
-      // 2. File Attachment / Photo / Voice Note
+      // 2. Group message / group metadata relay packet
+      if (envelope.type === 'GROUP_TEXT' || envelope.type === 'GROUP_FILE') {
+        const group = envelope.group as any;
+        if (group?.groupId) {
+          await db.groups.put({
+            ...group,
+            memberDeviceIds: Array.from(
+              new Set([...(group.memberDeviceIds || []), this.identity.deviceId])
+            ),
+            lastActivityAt: Date.now(),
+          });
+        }
+
+        const messageId = envelope.messageId || item.id;
+        const duplicate = await db.messages
+          .filter((message) => message.messageId === messageId)
+          .first();
+        if (duplicate) return;
+
+        const groupId = envelope.groupId || group?.groupId;
+        if (!groupId) return;
+        let groupFile: FileRecord | undefined;
+        if (envelope.type === 'GROUP_FILE' && envelope.fileBase64Chunk) {
+          const mimeType = envelope.mimeType || 'application/octet-stream';
+          groupFile = {
+            fileId: envelope.fileId,
+            name: envelope.fileName,
+            size: envelope.size,
+            mimeType,
+            hashSHA256: envelope.hashSHA256 || '',
+            blobRef: new Blob([base64ToArrayBuffer(envelope.fileBase64Chunk)], { type: mimeType }),
+            isImage: mimeType.startsWith('image/'),
+            isAudio: mimeType.startsWith('audio/'),
+            isVideo: mimeType.startsWith('video/'),
+          };
+          if (groupFile.fileId) await db.files.put(groupFile);
+        }
+        const groupMessage: MessageRecord = {
+          messageId,
+          chatDeviceId: groupId,
+          groupId,
+          isGroup: true,
+          senderDeviceId: item.senderDeviceId || envelope.senderDeviceId,
+          senderDisplayName: envelope.senderDisplayName,
+          senderAvatarColor: envelope.senderAvatarColor,
+          direction: 'INBOUND',
+          payloadText: envelope.text || envelope.fileName || '[Encrypted Message]',
+          fileId: groupFile?.fileId,
+          fileRecord: groupFile,
+          timestamp: envelope.timestamp || item.timestamp || Date.now(),
+          status: 'delivered',
+          mediaType: envelope.type === 'GROUP_FILE' ? 'file' : 'text',
+        };
+        const id = await db.messages.add(groupMessage);
+        groupMessage.id = id;
+        this.events.onMessageReceived(groupMessage);
+        return;
+      }
+
+      // 3. File Attachment / Photo / Voice Note
       let fileId = undefined;
       let fileRecord: FileRecord | undefined = undefined;
 
@@ -273,11 +354,24 @@ export class PeerManager {
         : fileRecord
         ? 'file'
         : 'text';
+      const messageId = envelope.messageId || item.id;
+
+      const duplicate = await db.messages
+        .filter((message) =>
+          message.messageId === messageId ||
+          (!!fileId && message.fileId === fileId)
+        )
+        .first();
+      if (duplicate) return;
+      // Do not turn an invalid/stale relay envelope into a fake message.
+      // This was the source of the intermittent "[Encrypted Message]" rows.
+      if (!fileRecord && typeof envelope.text !== 'string') return;
 
       const msgRecord: MessageRecord = {
+        messageId,
         chatDeviceId: item.senderDeviceId,
         direction: 'INBOUND',
-        payloadText: envelope.text || fileRecord?.name || '[Encrypted Message]',
+        payloadText: envelope.text || fileRecord?.name || '',
         fileId,
         fileRecord,
         mediaType,
@@ -616,8 +710,28 @@ export class PeerManager {
 
       switch (header.packetType) {
         case PacketType.TEXT_MESSAGE: {
-          const text = new TextDecoder().decode(decryptedPayload);
+          const decodedText = new TextDecoder().decode(decryptedPayload);
+          let text = decodedText;
+          let messageId: string | undefined;
+          try {
+            const packet = JSON.parse(decodedText);
+            if (packet && typeof packet.text === 'string') {
+              text = packet.text;
+              messageId = packet.messageId;
+            }
+          } catch {
+            // Messages from older clients were plain UTF-8 text.
+          }
+
+          if (
+            messageId &&
+            await db.messages.filter((message) => message.messageId === messageId).first()
+          ) {
+            break;
+          }
+
           const msgRecord: MessageRecord = {
+            messageId,
             chatDeviceId: this.remoteDeviceId,
             direction: 'INBOUND',
             payloadText: text,
@@ -646,6 +760,9 @@ export class PeerManager {
                 onProgress: this.events.onFileProgress,
                 onCompleted: async (fileRec, blob) => {
                   await db.files.put(fileRec);
+                  if (await db.messages.where('fileId').equals(fileRec.fileId).first()) {
+                    return;
+                  }
                   const mediaType = fileRec.isImage
                     ? 'image'
                     : fileRec.isAudio
@@ -706,7 +823,9 @@ export class PeerManager {
       throw new Error('No recipient device specified');
     }
 
+    const messageId = `msg_${Date.now()}_${generateRandomHexId(8)}`;
     const msgRecord: MessageRecord = {
+      messageId,
       chatDeviceId: recipientId,
       direction: 'OUTBOUND',
       payloadText: text,
@@ -719,9 +838,10 @@ export class PeerManager {
     msgRecord.id = id;
 
     // 1. Direct WebRTC transmission if connected
+    let deliveredDirectly = false;
     if (this.isConnected() && this.cryptoSession && this.dataChannel && recipientId === this.remoteDeviceId) {
       try {
-        const payloadBytes = new TextEncoder().encode(text);
+        const payloadBytes = new TextEncoder().encode(JSON.stringify({ messageId, text }));
         const msgIdBigInt = BigInt('0x' + generateRandomHexId(8));
         const headerBytes = buildPacketHeader(
           PacketType.TEXT_MESSAGE,
@@ -731,34 +851,39 @@ export class PeerManager {
         );
         const frame = await this.cryptoSession.encryptFrame(headerBytes, payloadBytes);
         this.dataChannel.send(frame);
+        deliveredDirectly = true;
       } catch (err) {
         console.warn('WebRTC dataChannel send error:', err);
       }
     }
 
-    // 2. Immediate real-time push via SSE & relay mailbox for zero-latency instant delivery
-    try {
-      const envelope = {
-        type: 'TEXT',
-        text,
-        senderDeviceId: this.identity.deviceId,
-        senderDisplayName: this.identity.displayName || 'Secure Peer',
-        timestamp: Date.now(),
-      };
-      const encryptedEnvelope = btoa(unescape(encodeURIComponent(JSON.stringify(envelope))));
-
-      await this.fetchRelay('/api/signaling/mailbox/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+    // Relay is a fallback, not a second delivery path. Sending both caused
+    // duplicate messages and made the receiver process stale envelopes.
+    if (!deliveredDirectly) {
+      try {
+        const envelope = {
+          type: 'TEXT',
+          messageId,
+          text,
           senderDeviceId: this.identity.deviceId,
-          recipientDeviceId: recipientId,
-          encryptedEnvelope,
+          senderDisplayName: this.identity.displayName || 'Secure Peer',
           timestamp: Date.now(),
-        }),
-      });
-    } catch (err) {
-      console.warn('Signaling mailbox send error:', err);
+        };
+        const encryptedEnvelope = btoa(unescape(encodeURIComponent(JSON.stringify(envelope))));
+
+        await this.fetchRelay('/api/signaling/mailbox/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            senderDeviceId: this.identity.deviceId,
+            recipientDeviceId: recipientId,
+            encryptedEnvelope,
+            timestamp: Date.now(),
+          }),
+        });
+      } catch (err) {
+        console.warn('Signaling mailbox send error:', err);
+      }
     }
 
     return msgRecord;
@@ -775,7 +900,9 @@ export class PeerManager {
     const fileBytes = new Uint8Array(arrayBuf);
     const hashBytes = await sha256(fileBytes);
     const hashHex = arrayBufferToHex(hashBytes);
-    const fileId = 'F_' + generateRandomHexId(8);
+    // Keep the file id compatible with the chunked WebRTC transfer id so a
+    // reconnect/fallback can never create a second copy of the same file.
+    const fileId = arrayBufferToHex(hashBytes.slice(0, 8)).toUpperCase();
     const mime = file.type || 'application/octet-stream';
     const isImage = mime.startsWith('image/');
     const isAudio = mime.startsWith('audio/');
@@ -812,7 +939,9 @@ export class PeerManager {
     this.events.onMessageReceived(msgRecord);
 
     // 1. Send via WebRTC if channel open
+    let deliveredDirectly = false;
     if (this.isConnected() && this.cryptoSession && this.dataChannel && recipientId === this.remoteDeviceId) {
+      deliveredDirectly = true;
       fileTransferManager.sendFile(
         file,
         this.dataChannel,
@@ -827,43 +956,147 @@ export class PeerManager {
       ).catch(() => {});
     }
 
-    // 2. Send via real-time SSE stream for instant delivery of photos / files
-    try {
-      const base64Chunk = arrayBufferToBase64(fileBytes);
-      const envelope = {
-        type: 'FILE',
-        fileName: file.name,
-        mimeType: mime,
-        size: file.size,
-        senderDeviceId: this.identity.deviceId,
-        senderDisplayName: this.identity.displayName || 'Secure Peer',
-        timestamp: Date.now(),
-      };
-      const encryptedEnvelope = btoa(unescape(encodeURIComponent(JSON.stringify(envelope))));
-
-      await this.fetchRelay('/api/signaling/mailbox/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+    // 2. Relay only when a direct channel is not available. The relay is
+    // intentionally limited to files accepted by the server's JSON body
+    // limit; large files use the direct encrypted channel.
+    if (!deliveredDirectly) {
+      try {
+        const base64Chunk = arrayBufferToBase64(fileBytes);
+        const envelope = {
+          type: 'FILE',
+          messageId: `msg_${Date.now()}_${generateRandomHexId(8)}`,
+          fileName: file.name,
+          mimeType: mime,
+          size: file.size,
           senderDeviceId: this.identity.deviceId,
-          recipientDeviceId: recipientId,
-          encryptedEnvelope,
-          fileMetadata: {
-            fileId,
-            name: file.name,
-            size: file.size,
-            mimeType: mime,
-            hashSHA256: hashHex,
-          },
-          fileBase64Chunk: base64Chunk,
+          senderDisplayName: this.identity.displayName || 'Secure Peer',
           timestamp: Date.now(),
-        }),
-      });
-    } catch (err) {
-      console.warn('File signaling push error:', err);
+        };
+        const encryptedEnvelope = btoa(unescape(encodeURIComponent(JSON.stringify(envelope))));
+
+        const response = await this.fetchRelay('/api/signaling/mailbox/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            senderDeviceId: this.identity.deviceId,
+            recipientDeviceId: recipientId,
+            encryptedEnvelope,
+            timestamp: Date.now(),
+            fileMetadata: {
+              fileId,
+              name: file.name,
+              size: file.size,
+              mimeType: mime,
+              hashSHA256: hashHex,
+            },
+            fileBase64Chunk: base64Chunk,
+          }),
+        });
+        if (!response.ok) throw new Error(`File relay returned HTTP ${response.status}`);
+      } catch (err) {
+        console.warn('File signaling push error:', err);
+        throw err;
+      }
     }
 
     return fileRecord;
+  }
+
+  public async sendGroupTextMessage(text: string, group: GroupRecord): Promise<string> {
+    const messageId = `msg_${Date.now()}_${generateRandomHexId(8)}`;
+    const payload = {
+      type: 'GROUP_TEXT',
+      messageId,
+      groupId: group.groupId,
+      text,
+      senderDeviceId: this.identity.deviceId,
+      senderDisplayName: this.identity.displayName || 'Secure Peer',
+      senderAvatarColor: this.identity.avatarColor,
+      group,
+      timestamp: Date.now(),
+    };
+
+    const recipients = group.memberDeviceIds.filter(
+      (deviceId) => deviceId !== this.identity.deviceId
+    );
+    await Promise.all(
+      recipients.map(async (recipientDeviceId) => {
+        const response = await this.fetchRelay('/api/signaling/group/broadcast', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            groupId: group.groupId,
+            senderDeviceId: this.identity.deviceId,
+            recipients: [recipientDeviceId],
+            payload,
+          }),
+        });
+        if (!response.ok) {
+          throw new Error(`Group relay returned HTTP ${response.status}`);
+        }
+      })
+    );
+    return messageId;
+  }
+
+  public async sendGroupFile(
+    file: File,
+    group: GroupRecord
+  ): Promise<{ fileRecord: FileRecord; messageId: string }> {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const hashBytes = await sha256(bytes);
+    const mimeType = file.type || 'application/octet-stream';
+    const fileRecord: FileRecord = {
+      fileId: arrayBufferToHex(hashBytes.slice(0, 8)).toUpperCase(),
+      name: file.name,
+      size: file.size,
+      mimeType,
+      hashSHA256: arrayBufferToHex(hashBytes),
+      blobRef: new Blob([bytes], { type: mimeType }),
+      isImage: mimeType.startsWith('image/'),
+      isAudio: mimeType.startsWith('audio/'),
+      isVideo: mimeType.startsWith('video/'),
+    };
+    const messageId = `msg_${Date.now()}_${generateRandomHexId(8)}`;
+    const payload = {
+      type: 'GROUP_FILE',
+      messageId,
+      groupId: group.groupId,
+      fileId: fileRecord.fileId,
+      fileName: fileRecord.name,
+      size: fileRecord.size,
+      mimeType: fileRecord.mimeType,
+      hashSHA256: fileRecord.hashSHA256,
+      fileBase64Chunk: arrayBufferToBase64(bytes),
+      senderDeviceId: this.identity.deviceId,
+      senderDisplayName: this.identity.displayName || 'Secure Peer',
+      senderAvatarColor: this.identity.avatarColor,
+      group,
+      timestamp: Date.now(),
+    };
+
+    await db.files.put(fileRecord);
+    const recipients = group.memberDeviceIds.filter(
+      (deviceId) => deviceId !== this.identity.deviceId
+    );
+    await Promise.all(
+      recipients.map(async (recipientDeviceId) => {
+        const response = await this.fetchRelay('/api/signaling/group/broadcast', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            groupId: group.groupId,
+            senderDeviceId: this.identity.deviceId,
+            recipients: [recipientDeviceId],
+            payload,
+          }),
+        });
+        if (!response.ok) {
+          throw new Error(`Group file relay returned HTTP ${response.status}`);
+        }
+      })
+    );
+    return { fileRecord, messageId };
   }
 
   public async checkRelayHealth(): Promise<RelayStatus> {
@@ -992,6 +1225,30 @@ export class PeerManager {
     }, 4000);
   }
 
+  private startCallSignalPolling() {
+    if (this.callPollInterval) clearInterval(this.callPollInterval);
+    this.callPollInterval = setInterval(async () => {
+      if (!this.identity?.deviceId) return;
+      try {
+        const response = await this.fetchRelay(
+          `/api/signaling/call/poll/${encodeURIComponent(this.identity.deviceId)}`,
+          { method: 'GET', headers: { Accept: 'application/json' } },
+          2500
+        );
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!Array.isArray(data.signals)) return;
+        for (const queued of data.signals) {
+          if (queued.senderDeviceId !== this.identity.deviceId && queued.signal) {
+            await this.events.onMediaSignal?.(queued.signal);
+          }
+        }
+      } catch {
+        // The mailbox/SSE path remains available while the fast poll retries.
+      }
+    }, 500);
+  }
+
   private startHeartbeat() {
     this.stopHeartbeat();
     this.heartbeatInterval = setInterval(async () => {
@@ -1062,6 +1319,10 @@ export class PeerManager {
     if (this.relayCheckInterval) {
       clearInterval(this.relayCheckInterval);
       this.relayCheckInterval = null;
+    }
+    if (this.callPollInterval) {
+      clearInterval(this.callPollInterval);
+      this.callPollInterval = null;
     }
   }
 }

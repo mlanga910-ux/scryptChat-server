@@ -8,6 +8,7 @@ import {
   ContactRecord,
   FileRecord,
   FileTransferProgress,
+  GroupRecord,
   IdentityRecord,
   MessageRecord,
   RelayServerStats,
@@ -26,12 +27,17 @@ import { OnboardingModal } from './components/OnboardingModal';
 import { ProfileModal } from './components/ProfileModal';
 import { SettingsModal } from './components/SettingsModal';
 import { ContactDetailsModal } from './components/ContactDetailsModal';
+import { GroupCreatorModal } from './components/GroupCreatorModal';
+import { GroupDetailsModal } from './components/GroupDetailsModal';
 
 export default function App() {
   const [identity, setIdentity] = useState<IdentityRecord | null>(null);
   const [contacts, setContacts] = useState<ContactRecord[]>([]);
+  const [groups, setGroups] = useState<GroupRecord[]>([]);
   const [activeContact, setActiveContact] = useState<ContactRecord | null>(null);
+  const [activeGroup, setActiveGroup] = useState<GroupRecord | null>(null);
   const [selectedContactForDetails, setSelectedContactForDetails] = useState<ContactRecord | null>(null);
+  const [selectedGroupForDetails, setSelectedGroupForDetails] = useState<GroupRecord | null>(null);
   const [messages, setMessages] = useState<MessageRecord[]>([]);
   const [lastMessagesMap, setLastMessagesMap] = useState<Map<string, MessageRecord>>(new Map());
   const [activeTransfers, setActiveTransfers] = useState<FileTransferProgress[]>([]);
@@ -56,6 +62,7 @@ export default function App() {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isWipeOpen, setIsWipeOpen] = useState(false);
+  const [isGroupCreatorOpen, setIsGroupCreatorOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   // Check URL params for direct pairing link (e.g. ?room=ABC123)
@@ -73,6 +80,8 @@ export default function App() {
 
   // Peer Manager ref
   const peerManagerRef = useRef<PeerManager | null>(null);
+  const activeChatKeyRef = useRef<string | null>(null);
+  const pendingCallSignalsRef = useRef<any[]>([]);
 
   // Initialize Identity & Load Contacts
   useEffect(() => {
@@ -92,8 +101,11 @@ export default function App() {
         // Load contacts
         const loadedContacts = await db.contacts.toArray();
         setContacts(loadedContacts);
-        if (loadedContacts.length > 0) {
+        const loadedGroups = await db.groups.toArray();
+        setGroups(loadedGroups);
+        if (loadedContacts.length > 0 && loadedGroups.length === 0) {
           setActiveContact(loadedContacts[0]);
+          activeChatKeyRef.current = loadedContacts[0].deviceId;
         }
 
         // Load all latest messages for sidebar previews
@@ -124,12 +136,16 @@ export default function App() {
           },
           onMessageReceived: async (msg) => {
             soundEngine.playMessageReceived();
-            setMessages((prev) => {
-              if (activeContact && msg.chatDeviceId === activeContact.deviceId) {
-                return [...prev, msg];
-              }
-              return prev;
-            });
+            if (activeChatKeyRef.current === msg.chatDeviceId) {
+              setMessages((prev) =>
+                prev.some((existing) =>
+                  (msg.messageId && existing.messageId === msg.messageId) ||
+                  (msg.id !== undefined && existing.id === msg.id)
+                )
+                  ? prev
+                  : [...prev, msg]
+              );
+            }
             await reloadLastMessages();
           },
           onFileProgress: (progress) => {
@@ -148,7 +164,13 @@ export default function App() {
             await reloadLastMessages();
           },
           onMediaSignal: (signal) => {
-            callManagerRef.current?.handleCallSignal(signal);
+            if (callManagerRef.current) {
+              callManagerRef.current.handleCallSignal(signal).catch((err) => {
+                console.warn('Call signal handling error:', err);
+              });
+            } else {
+              pendingCallSignalsRef.current.push(signal);
+            }
           },
           onPeerInfo: (contact) => {
             setActiveContact(contact);
@@ -169,13 +191,21 @@ export default function App() {
           onCallStateChange: (session) => {
             setCallSession(session ? { ...session } : null);
           },
-          onLocalStream: () => {},
-          onRemoteStream: () => {},
+          onLocalStream: () => {
+            setCallSession((current) => current ? { ...current } : current);
+          },
+          onRemoteStream: () => {
+            setCallSession((current) => current ? { ...current } : current);
+          },
           onError: (errMsg) => {
             console.warn('Call error:', errMsg);
           },
         });
         callManagerRef.current = cm;
+        const pendingSignals = pendingCallSignalsRef.current.splice(0);
+        for (const signal of pendingSignals) {
+          await cm.handleCallSignal(signal);
+        }
       } catch (err) {
         console.error('Initialization error:', err);
       }
@@ -202,18 +232,20 @@ export default function App() {
   // Reload messages when activeContact changes
   useEffect(() => {
     async function loadMessages() {
-      if (!activeContact) {
+      const chatKey = activeGroup?.groupId || activeContact?.deviceId || null;
+      activeChatKeyRef.current = chatKey;
+      if (!chatKey) {
         setMessages([]);
         return;
       }
       const msgs = await db.messages
         .where('chatDeviceId')
-        .equals(activeContact.deviceId)
+        .equals(chatKey)
         .sortBy('timestamp');
       setMessages(msgs);
     }
     loadMessages();
-  }, [activeContact]);
+  }, [activeContact, activeGroup]);
 
   const refreshContacts = async () => {
     const list = await db.contacts.toArray();
@@ -223,6 +255,15 @@ export default function App() {
 
   const handleSelectPeer = (contact: ContactRecord) => {
     setActiveContact(contact);
+    setActiveGroup(null);
+    activeChatKeyRef.current = contact.deviceId;
+    setMobileTab('chat');
+  };
+
+  const handleSelectGroup = (group: GroupRecord) => {
+    setActiveGroup(group);
+    setActiveContact(null);
+    activeChatKeyRef.current = group.groupId;
     setMobileTab('chat');
   };
 
@@ -271,19 +312,105 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = async (text: string) => {
-    if (!peerManagerRef.current || !activeContact) return;
+  const handleSendMessage = async (
+    text: string,
+    options?: { codeSnippet?: any; isGroup?: boolean; groupId?: string }
+  ) => {
+    if (!peerManagerRef.current) return;
+    if (activeGroup) {
+      const messageId = await peerManagerRef.current.sendGroupTextMessage(text, activeGroup);
+      const msg: MessageRecord = {
+        messageId,
+        chatDeviceId: activeGroup.groupId,
+        groupId: activeGroup.groupId,
+        isGroup: true,
+        senderDeviceId: identity?.deviceId,
+        senderDisplayName: identity?.displayName || 'You',
+        senderAvatarColor: identity?.avatarColor,
+        direction: 'OUTBOUND',
+        payloadText: text,
+        mediaType: 'text',
+        codeSnippet: options?.codeSnippet,
+        ...(options?.codeSnippet ? { mediaType: 'code' as const } : {}),
+        timestamp: Date.now(),
+        status: 'delivered',
+      };
+      const id = await db.messages.add(msg);
+      msg.id = id;
+      setMessages((prev) => [...prev, msg]);
+      await reloadLastMessages();
+      return;
+    }
+    if (!activeContact) return;
     const msg = await peerManagerRef.current.sendTextMessage(text, activeContact.deviceId);
     soundEngine.playMessageSent();
     setMessages((prev) => [...prev, msg]);
     await reloadLastMessages();
   };
 
-  const handleSendFile = async (file: File) => {
-    if (!peerManagerRef.current || !activeContact) return;
+  const handleSendFile = async (
+    file: File,
+    options?: { isGroup?: boolean; groupId?: string }
+  ) => {
+    if (!peerManagerRef.current) return;
     soundEngine.playActionPing();
+    if (activeGroup) {
+      const result = await peerManagerRef.current.sendGroupFile(file, activeGroup);
+      const msg: MessageRecord = {
+        messageId: result.messageId,
+        chatDeviceId: activeGroup.groupId,
+        groupId: activeGroup.groupId,
+        isGroup: true,
+        senderDeviceId: identity?.deviceId,
+        senderDisplayName: identity?.displayName || 'You',
+        senderAvatarColor: identity?.avatarColor,
+        direction: 'OUTBOUND',
+        payloadText: file.name,
+        fileId: result.fileRecord.fileId,
+        fileRecord: result.fileRecord,
+        mediaType: result.fileRecord.isImage
+          ? 'image'
+          : result.fileRecord.isAudio
+          ? 'audio'
+          : result.fileRecord.isVideo
+          ? 'video'
+          : 'file',
+        timestamp: Date.now(),
+        status: 'delivered',
+      };
+      const id = await db.messages.add(msg);
+      msg.id = id;
+      setMessages((prev) => [...prev, msg]);
+      await reloadLastMessages();
+      return;
+    }
+    if (!activeContact) return;
     await peerManagerRef.current.sendFile(file, activeContact.deviceId);
     await reloadLastMessages();
+  };
+
+  const handleUpdateGroup = (updated: GroupRecord) => {
+    setGroups((prev) => prev.map((group) => group.groupId === updated.groupId ? updated : group));
+    setActiveGroup((current) => current?.groupId === updated.groupId ? updated : current);
+    setSelectedGroupForDetails((current) => current?.groupId === updated.groupId ? updated : current);
+  };
+
+  const handleDeleteGroup = async (groupId: string) => {
+    await db.messages.where('chatDeviceId').equals(groupId).delete();
+    setGroups((prev) => prev.filter((group) => group.groupId !== groupId));
+    if (activeGroup?.groupId === groupId) {
+      const nextContact = contacts[0] || null;
+      setActiveGroup(null);
+      setActiveContact(nextContact);
+      activeChatKeyRef.current = nextContact?.deviceId || null;
+    }
+    setSelectedGroupForDetails(null);
+    await reloadLastMessages();
+  };
+
+  const handleGroupCreated = (group: GroupRecord) => {
+    setGroups((prev) => [...prev, group]);
+    handleSelectGroup(group);
   };
 
   const handleOnboardingComplete = (updatedId: IdentityRecord) => {
@@ -340,17 +467,23 @@ export default function App() {
         <div className="hidden md:flex flex-1 overflow-hidden">
           <PeerList
             contacts={contacts}
+            groups={groups}
             activeContactId={activeContact?.deviceId || null}
+            activeGroupId={activeGroup?.groupId || null}
             connectedPeerId={
               connectionState === 'CONNECTED' ? activeContact?.deviceId || null : null
             }
             lastMessages={lastMessagesMap}
             onSelectPeer={handleSelectPeer}
+            onSelectGroup={handleSelectGroup}
             onOpenPairing={() => setIsPairingOpen(true)}
+            onOpenGroupCreator={() => setIsGroupCreatorOpen(true)}
             onOpenContactDetails={(contact) => setSelectedContactForDetails(contact)}
+            onOpenGroupDetails={(group) => setSelectedGroupForDetails(group)}
           />
           <ChatView
             activeContact={activeContact}
+            activeGroup={activeGroup}
             messages={messages}
             activeTransfers={activeTransfers}
             isConnected={connectionState === 'CONNECTED'}
@@ -368,18 +501,24 @@ export default function App() {
           {mobileTab === 'peers' ? (
             <PeerList
               contacts={contacts}
+              groups={groups}
               activeContactId={activeContact?.deviceId || null}
+              activeGroupId={activeGroup?.groupId || null}
               connectedPeerId={
                 connectionState === 'CONNECTED' ? activeContact?.deviceId || null : null
               }
               lastMessages={lastMessagesMap}
               onSelectPeer={handleSelectPeer}
+              onSelectGroup={handleSelectGroup}
               onOpenPairing={() => setIsPairingOpen(true)}
+              onOpenGroupCreator={() => setIsGroupCreatorOpen(true)}
               onOpenContactDetails={(contact) => setSelectedContactForDetails(contact)}
+              onOpenGroupDetails={(group) => setSelectedGroupForDetails(group)}
             />
           ) : (
             <ChatView
               activeContact={activeContact}
+              activeGroup={activeGroup}
               messages={messages}
               activeTransfers={activeTransfers}
               isConnected={connectionState === 'CONNECTED'}
@@ -419,6 +558,24 @@ export default function App() {
           }}
         />
       )}
+
+      <GroupCreatorModal
+        isOpen={isGroupCreatorOpen}
+        identity={identity}
+        contacts={contacts}
+        onClose={() => setIsGroupCreatorOpen(false)}
+        onGroupCreated={handleGroupCreated}
+      />
+
+      <GroupDetailsModal
+        isOpen={!!selectedGroupForDetails}
+        group={selectedGroupForDetails}
+        identity={identity}
+        contacts={contacts}
+        onClose={() => setSelectedGroupForDetails(null)}
+        onUpdateGroup={handleUpdateGroup}
+        onDeleteGroup={handleDeleteGroup}
+      />
 
       {/* Call Modal (Audio & Video E2EE) */}
       {callSession && callManagerRef.current && (
@@ -484,7 +641,6 @@ export default function App() {
         onClose={() => setIsWipeOpen(false)}
         onWipeCompleted={() => {
           peerManagerRef.current?.cleanup();
-          window.location.reload();
         }}
       />
     </div>

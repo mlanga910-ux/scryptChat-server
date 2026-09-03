@@ -77,9 +77,9 @@ export async function getOrCreateIdentity(customDisplayName?: string, customAvat
         publicKeyECDSA: publicKey,
         privateKeyECDSA: privateKey,
         publicKeyRaw: savedPubRaw,
-        displayName: customDisplayName || savedName || 'Secure Node',
-        avatarColor: customAvatarColor || savedColor || '#3b82f6',
-        statusBio: 'E2EE Sovereign Node',
+        displayName: customDisplayName || savedName || undefined,
+        avatarColor: customAvatarColor || savedColor || undefined,
+        statusBio: undefined,
         createdAt: Date.now(),
       };
 
@@ -112,9 +112,9 @@ export async function getOrCreateIdentity(customDisplayName?: string, customAvat
     publicKeyECDSA: keyPair.publicKey,
     privateKeyECDSA: keyPair.privateKey,
     publicKeyRaw,
-    displayName: customDisplayName || 'Secure Node',
-    avatarColor: customAvatarColor || '#3b82f6',
-    statusBio: 'E2EE Sovereign Node',
+    displayName: customDisplayName,
+    avatarColor: customAvatarColor,
+    statusBio: undefined,
     createdAt: Date.now(),
   };
 

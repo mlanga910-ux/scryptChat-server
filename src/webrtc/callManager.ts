@@ -38,6 +38,7 @@ export class CallManager {
   private durationTimer: any = null;
   private currentFacingMode: 'user' | 'environment' = 'user';
   private disconnectTimeout: any = null;
+  private pendingIceCandidates: RTCIceCandidateInit[] = [];
 
   constructor(peerManager: PeerManager, identity: IdentityRecord, events: CallManagerEvents) {
     this.peerManager = peerManager;
@@ -92,6 +93,7 @@ export class CallManager {
     soundEngine.startRingtoneLoop(true);
 
     try {
+      this.pendingIceCandidates = [];
       // 1. Get User Media
       const stream = await this.acquireUserMedia(callType === 'video', this.currentFacingMode);
       this.localStream = stream;
@@ -282,6 +284,7 @@ export class CallManager {
           await this.mediaPeerConnection!.setRemoteDescription(
             new RTCSessionDescription(payload.sdp as RTCSessionDescriptionInit)
           );
+          await this.flushPendingIceCandidates();
         }
 
         this.events.onCallStateChange({ ...this.currentSession });
@@ -297,6 +300,7 @@ export class CallManager {
           await this.mediaPeerConnection.setRemoteDescription(
             new RTCSessionDescription(payload.sdp as RTCSessionDescriptionInit)
           );
+          await this.flushPendingIceCandidates();
         }
 
         this.currentSession.state = 'CONNECTED';
@@ -308,9 +312,13 @@ export class CallManager {
       }
 
       case 'CALL_ICE': {
-        if (payload.candidate && this.mediaPeerConnection) {
+        if (payload.candidate) {
+          if (!this.mediaPeerConnection?.remoteDescription) {
+            this.pendingIceCandidates.push(payload.candidate);
+            break;
+          }
           try {
-            await this.mediaPeerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+            await this.mediaPeerConnection!.addIceCandidate(new RTCIceCandidate(payload.candidate));
           } catch {}
         }
         break;
@@ -510,6 +518,21 @@ export class CallManager {
     };
   }
 
+  private async flushPendingIceCandidates(): Promise<void> {
+    if (!this.mediaPeerConnection?.remoteDescription || this.pendingIceCandidates.length === 0) {
+      return;
+    }
+
+    const pending = this.pendingIceCandidates.splice(0);
+    for (const candidate of pending) {
+      try {
+        await this.mediaPeerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch {
+        // Browsers may reject candidates that arrive after ICE completed.
+      }
+    }
+  }
+
   private async acquireUserMedia(video: boolean, facingMode: 'user' | 'environment'): Promise<MediaStream> {
     const settings = getSoundSettings();
 
@@ -545,7 +568,9 @@ export class CallManager {
     const session = this.peerManager.cryptoSession;
     const dataChannel = this.peerManager.dataChannel;
 
-    // Send via WebRTC DataChannel if open
+    let deliveredDirectly = false;
+    // Send via WebRTC DataChannel if open. Relay is a fallback, not a second
+    // copy: duplicate offers can replace the receiver's active call session.
     if (session && dataChannel && dataChannel.readyState === 'open') {
       try {
         const header = buildPacketHeader(
@@ -556,30 +581,26 @@ export class CallManager {
         );
         const frame = await session.encryptFrame(header, payloadBytes);
         dataChannel.send(frame);
+        deliveredDirectly = true;
       } catch {}
     }
 
-    // Always also send via real-time relay for instant zero-latency delivery
-    if (recipientId) {
+    // Use the dedicated call queue. The mailbox is for chat messages/files and
+    // can be drained by the fallback poller while a call is being negotiated.
+    if (recipientId && !deliveredDirectly) {
       try {
-        const envelope = {
-          type: 'CALL_SIGNAL',
-          signal: payload,
-          senderDeviceId: this.identity.deviceId,
-          senderDisplayName: this.identity.displayName || 'Secure Peer',
-          timestamp: Date.now(),
-        };
-        const encryptedEnvelope = btoa(unescape(encodeURIComponent(JSON.stringify(envelope))));
-        await this.peerManager.fetchRelay('/api/signaling/mailbox/send', {
+        const response = await this.peerManager.fetchRelay('/api/signaling/call/signal', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             senderDeviceId: this.identity.deviceId,
             recipientDeviceId: recipientId,
-            encryptedEnvelope,
-            timestamp: Date.now(),
+            signal: payload,
           }),
         });
+        if (!response.ok) {
+          throw new Error(`Call relay returned HTTP ${response.status}`);
+        }
       } catch {}
     }
   }
@@ -645,6 +666,7 @@ export class CallManager {
       } catch {}
       this.mediaPeerConnection = null;
     }
+    this.pendingIceCandidates = [];
   }
 
   public destroy() {

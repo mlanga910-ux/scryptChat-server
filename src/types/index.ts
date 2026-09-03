@@ -123,6 +123,7 @@ export interface GroupRecord {
 
 export interface MessageRecord {
   id?: number;
+  messageId?: string;
   chatDeviceId: string; // Peer deviceId OR groupId
   isGroup?: boolean;
   groupId?: string;

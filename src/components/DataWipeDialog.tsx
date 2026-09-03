@@ -22,7 +22,6 @@ export const DataWipeDialog: React.FC<DataWipeDialogProps> = ({
       setIsWiping(true);
       await clearAllLocalData();
       onWipeCompleted();
-      window.location.reload();
     } catch (err) {
       console.error('Wipe error:', err);
       setIsWiping(false);
