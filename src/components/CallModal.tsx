@@ -14,8 +14,10 @@ import {
   Maximize2,
   Minimize2,
   Volume2,
-  Sparkles,
+  VolumeX,
   Lock,
+  MessageSquare,
+  Hash,
 } from 'lucide-react';
 
 interface CallModalProps {
@@ -31,6 +33,7 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showSecurityDetails, setShowSecurityDetails] = useState(false);
+  const [isSpeakerOn, setIsSpeakerOn] = useState(true);
 
   // Sync media streams to video & audio elements without recreating or resetting streams
   useEffect(() => {
@@ -64,164 +67,158 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // 1. INCOMING CALL DIALOG
+  const initial = session.peerDisplayName ? session.peerDisplayName.charAt(0).toUpperCase() : 'U';
+
+  // 1. INCOMING CALL SCREEN - Standard Phone UI
   if (session.state === 'INCOMING') {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
-        <div className="w-full max-w-sm rounded-2xl bg-zinc-900 border border-zinc-800 p-6 text-center shadow-2xl space-y-6">
-          <div className="relative mx-auto w-24 h-24 rounded-full bg-gradient-to-tr from-emerald-600 to-teal-400 p-1 flex items-center justify-center shadow-lg shadow-emerald-500/20 animate-pulse">
-            <div className="w-full h-full rounded-full bg-zinc-900 flex items-center justify-center">
-              {session.callType === 'video' ? (
-                <Video className="w-10 h-10 text-emerald-400" />
-              ) : (
-                <Phone className="w-10 h-10 text-emerald-400" />
-              )}
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-xl animate-in fade-in duration-200 select-none font-sans">
+        <div className="w-full max-w-sm flex flex-col items-center justify-between min-h-[460px] py-8 text-center text-white">
+          {/* Top Info */}
+          <div className="space-y-3 flex flex-col items-center">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium bg-white/10 text-white/90 backdrop-blur-md">
+              <Lock className="w-3 h-3 text-emerald-400" />
+              <span>End-to-End Encrypted</span>
+            </div>
+
+            <div className="pt-2">
+              <h2 className="text-2xl font-bold tracking-tight text-white">{session.peerDisplayName}</h2>
+              <p className="text-xs text-neutral-400 font-mono mt-0.5">{session.peerDeviceId.slice(0, 16)}...</p>
+              <p className="text-sm font-medium text-emerald-400 mt-2 animate-pulse">
+                Incoming {session.callType === 'video' ? 'Video Call' : 'Voice Call'}...
+              </p>
             </div>
           </div>
 
-          <div className="space-y-1">
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              <Lock className="w-3 h-3" />
-              <span>E2EE Encrypted Call</span>
+          {/* Central Pulsing Avatar */}
+          <div className="relative my-8">
+            <div className="w-28 h-28 rounded-full bg-gradient-to-tr from-neutral-800 to-neutral-700 border-2 border-white/20 flex items-center justify-center text-3xl font-bold shadow-2xl z-10 relative">
+              {initial}
             </div>
-            <h3 className="text-xl font-bold text-zinc-100">{session.peerDisplayName}</h3>
-            <p className="text-xs text-zinc-400 font-mono">{session.peerDeviceId}</p>
-            <p className="text-sm text-zinc-300 pt-1">
-              Incoming {session.callType === 'video' ? 'video call' : 'voice call'}...
-            </p>
+            {/* Native Pulse Rings */}
+            <div className="absolute -inset-2 rounded-full border-2 border-emerald-500/40 animate-ping" />
+            <div className="absolute -inset-6 rounded-full border border-emerald-500/20 animate-pulse" />
           </div>
 
-          <div className="flex items-center justify-center gap-4 pt-2">
-            {/* Decline Button */}
+          {/* Bottom Accept / Decline Buttons (Standard Native Style) */}
+          <div className="w-full flex items-center justify-around px-6">
+            {/* Decline */}
             <button
               onClick={() => callManager.rejectCall('Call rejected')}
-              className="flex flex-col items-center gap-1.5 group cursor-pointer"
+              className="flex flex-col items-center gap-2 group cursor-pointer"
             >
-              <div className="w-14 h-14 rounded-full bg-rose-600 hover:bg-rose-500 flex items-center justify-center text-white shadow-lg shadow-rose-600/30 transition-transform active:scale-95">
-                <PhoneOff className="w-6 h-6" />
+              <div className="w-16 h-16 rounded-full bg-rose-600 hover:bg-rose-500 active:scale-95 flex items-center justify-center text-white shadow-lg shadow-rose-600/40 transition-all">
+                <PhoneOff className="w-7 h-7" />
               </div>
-              <span className="text-xs font-medium text-zinc-400 group-hover:text-zinc-200">Decline</span>
+              <span className="text-xs font-semibold text-neutral-300 group-hover:text-white">Decline</span>
             </button>
 
-            {/* Accept Audio */}
-            {session.callType !== 'video' && (
-              <button
-                onClick={() => callManager.acceptCall(false)}
-                className="flex flex-col items-center gap-1.5 group cursor-pointer"
-              >
-                <div className="w-14 h-14 rounded-full bg-emerald-600 hover:bg-emerald-500 flex items-center justify-center text-white shadow-lg shadow-emerald-600/30 transition-transform active:scale-95 animate-bounce">
-                  <Phone className="w-6 h-6" />
-                </div>
-                <span className="text-xs font-medium text-emerald-400 group-hover:text-emerald-300">Accept</span>
-              </button>
-            )}
-
-            {/* Accept Video */}
-            {session.callType === 'video' && (
-              <button
-                onClick={() => callManager.acceptCall(true)}
-                className="flex flex-col items-center gap-1.5 group cursor-pointer"
-              >
-                <div className="w-14 h-14 rounded-full bg-emerald-600 hover:bg-emerald-500 flex items-center justify-center text-white shadow-lg shadow-emerald-600/30 transition-transform active:scale-95 animate-bounce">
-                  <Video className="w-6 h-6" />
-                </div>
-                <span className="text-xs font-medium text-emerald-400 group-hover:text-emerald-300">Accept Video</span>
-              </button>
-            )}
+            {/* Accept */}
+            <button
+              onClick={() => callManager.acceptCall(session.callType === 'video')}
+              className="flex flex-col items-center gap-2 group cursor-pointer"
+            >
+              <div className="w-16 h-16 rounded-full bg-emerald-500 hover:bg-emerald-400 active:scale-95 flex items-center justify-center text-white shadow-lg shadow-emerald-500/40 transition-all animate-bounce">
+                {session.callType === 'video' ? (
+                  <Video className="w-7 h-7" />
+                ) : (
+                  <Phone className="w-7 h-7" />
+                )}
+              </div>
+              <span className="text-xs font-semibold text-emerald-400 group-hover:text-emerald-300">Accept</span>
+            </button>
           </div>
         </div>
       </div>
     );
   }
 
-  // 2. OUTGOING CALLING / ACTIVE CONNECTED CALL OVERLAY
+  // 2. ACTIVE / CALLING SCREEN - Standard Native Mobile & Desktop Overlay
+  const isVideo = session.callType === 'video';
+
   return (
     <div
-      className={`fixed z-50 bg-zinc-950 text-zinc-100 flex flex-col transition-all duration-300 ${
+      className={`fixed z-50 bg-[#09090b] text-white flex flex-col transition-all duration-300 select-none font-sans ${
         isFullscreen
           ? 'inset-0'
-          : 'inset-0 sm:inset-auto sm:right-6 sm:bottom-6 sm:w-[460px] sm:h-[580px] sm:rounded-2xl sm:border sm:border-zinc-800 sm:shadow-2xl overflow-hidden'
+          : 'inset-0 sm:inset-auto sm:right-6 sm:bottom-6 sm:w-[420px] sm:h-[620px] sm:rounded-3xl sm:border sm:border-neutral-800 sm:shadow-2xl overflow-hidden'
       }`}
     >
-      {/* Top Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-zinc-900/80 backdrop-blur-md border-b border-zinc-800/80 z-20">
+      {/* Top Floating Glass Header */}
+      <div className="flex items-center justify-between px-5 py-3.5 bg-black/40 backdrop-blur-md border-b border-white/10 z-20 shrink-0">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
+          <div className={`w-2.5 h-2.5 rounded-full ${session.state === 'CALLING' ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
           <div className="min-w-0">
-            <h4 className="text-sm font-semibold text-zinc-100 truncate">{session.peerDisplayName}</h4>
-            <div className="flex items-center gap-1.5 text-xs text-zinc-400">
+            <h4 className="text-sm font-bold text-white truncate">{session.peerDisplayName}</h4>
+            <div className="flex items-center gap-1.5 text-[11px] text-neutral-400 font-mono">
               {session.state === 'CALLING' ? (
-                <span className="text-amber-400 font-medium animate-pulse">Calling...</span>
+                <span className="text-amber-400 font-sans font-medium animate-pulse">Calling...</span>
               ) : (
-                <span className="font-mono text-emerald-400">{formatDuration(session.durationSeconds)}</span>
+                <span className="text-emerald-400 font-bold">{formatDuration(session.durationSeconds)}</span>
               )}
               <span>•</span>
-              <span className="inline-flex items-center gap-0.5 text-zinc-400">
-                <Lock className="w-3 h-3 text-emerald-400 inline" /> P2P DTLS
+              <span className="inline-flex items-center gap-1 text-neutral-400">
+                <Lock className="w-3 h-3 text-emerald-400" /> P2P E2EE
               </span>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1">
           <button
             onClick={() => setShowSecurityDetails(!showSecurityDetails)}
-            title="Security fingerprint"
-            className="p-2 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors"
+            title="E2EE Verification"
+            className="p-2 rounded-full text-neutral-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
           >
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
           </button>
           <button
             onClick={() => setIsFullscreen(!isFullscreen)}
-            title={isFullscreen ? 'Minimize' : 'Fullscreen'}
-            className="p-2 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors"
+            title={isFullscreen ? 'Minimize window' : 'Full screen'}
+            className="p-2 rounded-full text-neutral-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
           >
             {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>
         </div>
       </div>
 
-      {/* Security Safety Number Panel */}
+      {/* Security Safety Number Dropdown */}
       {showSecurityDetails && (
-        <div className="px-4 py-2.5 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between text-xs animate-in slide-in-from-top-2">
+        <div className="px-4 py-2.5 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between text-xs animate-in slide-in-from-top-2 z-20">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span className="text-zinc-300">Safety Code:</span>
+            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="text-neutral-300">Safety Code:</span>
             <span className="font-mono font-bold text-emerald-400 tracking-wider">
               {session.safetyNumber || 'E2EE-VERIFIED'}
             </span>
           </div>
           <button
             onClick={() => setShowSecurityDetails(false)}
-            className="text-zinc-500 hover:text-zinc-300 font-semibold"
+            className="text-neutral-500 hover:text-neutral-300 font-semibold cursor-pointer"
           >
             Close
           </button>
         </div>
       )}
 
-      {/* Media Viewport */}
-      <div className="relative flex-1 bg-zinc-950 flex items-center justify-center overflow-hidden">
-        {/* Remote Video Element - always preserved in DOM */}
+      {/* Central Viewport */}
+      <div className="relative flex-1 bg-gradient-to-b from-[#121216] to-[#09090b] flex flex-col items-center justify-center overflow-hidden p-6">
+        {/* Remote Video Stream (Always in DOM) */}
         <video
           ref={remoteVideoRef}
           autoPlay
           playsInline
-          className={`w-full h-full object-cover transition-opacity duration-200 ${
-            session.callType === 'video' && !session.isRemoteVideoMuted
-              ? 'opacity-100 block'
-              : 'opacity-0 hidden'
+          className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${
+            isVideo && !session.isRemoteVideoMuted ? 'opacity-100' : 'opacity-0 pointer-events-none'
           }`}
         />
 
-        {/* Audio / Video Off Avatar State when video is not active */}
-        {(session.callType !== 'video' || session.isRemoteVideoMuted) && (
-          <div className="flex flex-col items-center justify-center p-6 text-center space-y-4">
-            <div className="relative w-28 h-28 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center shadow-xl">
-              <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-zinc-800 to-zinc-700 flex items-center justify-center">
-                <span className="text-3xl font-bold text-zinc-200">
-                  {session.peerDisplayName.charAt(0).toUpperCase()}
-                </span>
+        {/* Standard Voice Call Layout when video is off */}
+        {(!isVideo || session.isRemoteVideoMuted) && (
+          <div className="flex flex-col items-center text-center space-y-4 z-10">
+            <div className="relative">
+              <div className="w-28 h-28 rounded-full bg-neutral-800 border border-neutral-700 flex items-center justify-center text-3xl font-bold text-white shadow-2xl">
+                {initial}
               </div>
               {session.state === 'CALLING' && (
                 <div className="absolute inset-0 rounded-full border-2 border-emerald-500/40 animate-ping" />
@@ -229,21 +226,21 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
             </div>
 
             <div className="space-y-1">
-              <h3 className="text-lg font-bold text-zinc-100">{session.peerDisplayName}</h3>
-              <p className="text-xs text-zinc-400">
+              <h3 className="text-xl font-bold text-white">{session.peerDisplayName}</h3>
+              <p className="text-xs text-neutral-400">
                 {session.state === 'CALLING'
-                  ? 'Connecting secure P2P stream...'
-                  : session.callType === 'video' && session.isRemoteVideoMuted
-                  ? 'Partner camera is off'
-                  : 'Encrypted High-Fidelity Call'}
+                  ? 'Connecting direct P2P audio...'
+                  : isVideo && session.isRemoteVideoMuted
+                  ? 'Partner camera is paused'
+                  : 'Encrypted High-Definition Voice'}
               </p>
             </div>
           </div>
         )}
 
         {/* Local Video PIP (Picture in Picture) */}
-        {session.callType === 'video' && (
-          <div className="absolute top-4 right-4 w-28 h-36 sm:w-32 sm:h-44 rounded-xl overflow-hidden border border-zinc-700 shadow-xl bg-zinc-900 z-10">
+        {isVideo && (
+          <div className="absolute top-4 right-4 w-28 h-40 sm:w-32 sm:h-44 rounded-2xl overflow-hidden border-2 border-white/20 shadow-2xl bg-neutral-900 z-20">
             <video
               ref={localVideoRef}
               autoPlay
@@ -254,85 +251,118 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
               }`}
             />
             {session.isVideoMuted && (
-              <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-900 text-zinc-500 text-xs">
-                <VideoOff className="w-6 h-6 mb-1" />
+              <div className="w-full h-full flex flex-col items-center justify-center bg-neutral-900 text-neutral-500 text-[11px] p-2 text-center">
+                <VideoOff className="w-5 h-5 mb-1" />
                 <span>Camera off</span>
               </div>
             )}
           </div>
         )}
 
-        {/* Remote Mute Indicator */}
+        {/* Remote Muted Notification Badge */}
         {session.isRemoteAudioMuted && session.state === 'CONNECTED' && (
-          <div className="absolute bottom-4 left-4 bg-zinc-900/90 border border-zinc-800 px-3 py-1.5 rounded-full flex items-center gap-1.5 text-xs text-amber-400 backdrop-blur-md">
+          <div className="absolute bottom-4 bg-neutral-900/90 border border-neutral-800 px-3.5 py-1.5 rounded-full flex items-center gap-1.5 text-xs text-amber-400 backdrop-blur-md z-10">
             <MicOff className="w-3.5 h-3.5" />
-            <span>Partner mic is muted</span>
+            <span>Partner is muted</span>
           </div>
         )}
       </div>
 
-      {/* Hidden dedicated audio element for continuous audio stream */}
+      {/* Hidden dedicated audio element for continuous WebRTC audio stream */}
       <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
 
-      {/* Bottom Controls Bar */}
-      <div className="p-4 bg-zinc-900/90 backdrop-blur-md border-t border-zinc-800 flex items-center justify-center gap-3 z-20">
-        {/* Toggle Audio Mute */}
-        <button
-          onClick={() => callManager.toggleAudioMute()}
-          title={session.isAudioMuted ? 'Unmute microphone' : 'Mute microphone'}
-          className={`p-3.5 rounded-full border transition-all cursor-pointer ${
-            session.isAudioMuted
-              ? 'bg-rose-500/15 border-rose-500/30 text-rose-400 hover:bg-rose-500/25'
-              : 'bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-700'
-          }`}
-        >
-          {session.isAudioMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-        </button>
-
-        {/* Toggle Video Mute */}
-        <button
-          onClick={() => callManager.toggleVideoMute()}
-          title={session.isVideoMuted ? 'Turn on camera' : 'Turn off camera'}
-          className={`p-3.5 rounded-full border transition-all cursor-pointer ${
-            session.isVideoMuted
-              ? 'bg-rose-500/15 border-rose-500/30 text-rose-400 hover:bg-rose-500/25'
-              : 'bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-700'
-          }`}
-        >
-          {session.isVideoMuted ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
-        </button>
-
-        {/* Switch Camera (Mobile) */}
-        {session.callType === 'video' && (
+      {/* Bottom Calling Action Grid (Standard Native 6-button matrix + End Call) */}
+      <div className="p-5 bg-black/60 backdrop-blur-xl border-t border-white/10 flex flex-col items-center gap-4 z-20 shrink-0">
+        {/* Controls Grid */}
+        <div className="grid grid-cols-4 gap-3 sm:gap-4 w-full max-w-xs justify-items-center">
+          {/* Mute Mic */}
           <button
-            onClick={() => callManager.switchCamera()}
-            title="Switch camera (Front / Back)"
-            className="p-3.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-200 hover:bg-zinc-700 transition-all cursor-pointer"
+            onClick={() => callManager.toggleAudioMute()}
+            className="flex flex-col items-center gap-1 group cursor-pointer"
           >
-            <SwitchCamera className="w-5 h-5" />
+            <div
+              className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
+                session.isAudioMuted
+                  ? 'bg-white text-black'
+                  : 'bg-white/10 hover:bg-white/20 text-white'
+              }`}
+            >
+              {session.isAudioMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+            </div>
+            <span className="text-[10px] font-medium text-neutral-400 group-hover:text-white">
+              {session.isAudioMuted ? 'Unmute' : 'Mute'}
+            </span>
           </button>
-        )}
 
-        {/* Screen Share (Desktop) */}
-        <button
-          onClick={() => callManager.toggleScreenShare()}
-          title={session.isScreenSharing ? 'Stop screen sharing' : 'Share screen'}
-          className={`p-3.5 rounded-full border transition-all cursor-pointer ${
-            session.isScreenSharing
-              ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/30'
-              : 'bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-700'
-          }`}
-        >
-          <Monitor className="w-5 h-5" />
-        </button>
+          {/* Toggle Video */}
+          <button
+            onClick={() => callManager.toggleVideoMute()}
+            className="flex flex-col items-center gap-1 group cursor-pointer"
+          >
+            <div
+              className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
+                session.isVideoMuted
+                  ? 'bg-white/10 text-neutral-400'
+                  : 'bg-white/20 hover:bg-white/30 text-white'
+              }`}
+            >
+              {session.isVideoMuted ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
+            </div>
+            <span className="text-[10px] font-medium text-neutral-400 group-hover:text-white">Video</span>
+          </button>
+
+          {/* Switch Camera (if video) or Speaker Toggle */}
+          {isVideo ? (
+            <button
+              onClick={() => callManager.switchCamera()}
+              className="flex flex-col items-center gap-1 group cursor-pointer"
+            >
+              <div className="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all">
+                <SwitchCamera className="w-5 h-5" />
+              </div>
+              <span className="text-[10px] font-medium text-neutral-400 group-hover:text-white">Flip</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => setIsSpeakerOn(!isSpeakerOn)}
+              className="flex flex-col items-center gap-1 group cursor-pointer"
+            >
+              <div
+                className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
+                  isSpeakerOn ? 'bg-white text-black' : 'bg-white/10 text-white'
+                }`}
+              >
+                {isSpeakerOn ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+              </div>
+              <span className="text-[10px] font-medium text-neutral-400 group-hover:text-white">Speaker</span>
+            </button>
+          )}
+
+          {/* Screen Share */}
+          <button
+            onClick={() => callManager.toggleScreenShare()}
+            className="flex flex-col items-center gap-1 group cursor-pointer"
+          >
+            <div
+              className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
+                session.isScreenSharing
+                  ? 'bg-emerald-500 text-white'
+                  : 'bg-white/10 hover:bg-white/20 text-white'
+              }`}
+            >
+              <Monitor className="w-5 h-5" />
+            </div>
+            <span className="text-[10px] font-medium text-neutral-400 group-hover:text-white">Share</span>
+          </button>
+        </div>
 
         {/* End Call Button */}
         <button
           onClick={() => callManager.endCall()}
-          title="End call"
-          className="p-3.5 rounded-full bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/30 transition-transform active:scale-95 cursor-pointer ml-2"
+          className="w-16 h-16 rounded-full bg-rose-600 hover:bg-rose-500 active:scale-95 flex items-center justify-center text-white shadow-lg shadow-rose-600/40 transition-all cursor-pointer mt-1"
+          title="End Call"
         >
-          <PhoneOff className="w-5 h-5" />
+          <PhoneOff className="w-7 h-7" />
         </button>
       </div>
     </div>

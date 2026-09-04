@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { ContactRecord, GroupRecord, IdentityRecord } from '../types/index';
 import { db } from '../db/index';
 import {
@@ -9,7 +9,11 @@ import {
   Plus,
   Shield,
   Hash,
+  Camera,
+  Upload,
+  Trash2,
 } from 'lucide-react';
+import { fileToAvatarDataUrl } from '../utils/imageHelper';
 
 interface GroupCreatorModalProps {
   isOpen: boolean;
@@ -40,12 +44,25 @@ export const GroupCreatorModal: React.FC<GroupCreatorModalProps> = ({
   const [groupName, setGroupName] = useState('');
   const [description, setDescription] = useState('');
   const [selectedColor, setSelectedColor] = useState(GROUP_COLORS[0]);
+  const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
   const [selectedDeviceIds, setSelectedDeviceIds] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen || !identity) return null;
+
+  const handleAvatarFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await fileToAvatarDataUrl(file);
+      setAvatarUrl(dataUrl);
+    } catch (err) {
+      console.error('Error processing group avatar:', err);
+    }
+  };
 
   const filteredContacts = contacts.filter((c) =>
     (c.alias || c.deviceId).toLowerCase().includes(searchQuery.toLowerCase())
@@ -90,6 +107,7 @@ export const GroupCreatorModal: React.FC<GroupCreatorModalProps> = ({
         name: groupName.trim(),
         description: description.trim() || undefined,
         avatarColor: selectedColor,
+        avatarUrl,
         adminDeviceId: identity.deviceId,
         memberDeviceIds: allMembers,
         createdAt: Date.now(),
@@ -145,7 +163,7 @@ export const GroupCreatorModal: React.FC<GroupCreatorModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-[#71717a] hover:text-white hover:bg-[#18181b] rounded-lg transition-colors"
+            className="p-1.5 text-[#71717a] hover:text-white hover:bg-[#18181b] rounded-lg transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -161,12 +179,31 @@ export const GroupCreatorModal: React.FC<GroupCreatorModalProps> = ({
 
           {/* Group Avatar Preview & Name */}
           <div className="flex items-center gap-3.5 p-3.5 bg-[#09090b] border border-[#1f1f23] rounded-xl">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleAvatarFileSelect}
+              accept="image/*"
+              className="hidden"
+            />
             <div
-              className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-md shrink-0"
-              style={{ backgroundColor: selectedColor }}
+              className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-md shrink-0 relative group cursor-pointer overflow-hidden"
+              style={{ backgroundColor: avatarUrl ? '#18181b' : selectedColor }}
+              onClick={() => fileInputRef.current?.click()}
+              title="Upload custom group icon"
             >
-              {groupName.trim() ? groupName.trim().charAt(0).toUpperCase() : <Hash className="w-5 h-5" />}
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="Group Icon" className="w-full h-full object-cover" />
+              ) : groupName.trim() ? (
+                groupName.trim().charAt(0).toUpperCase()
+              ) : (
+                <Hash className="w-5 h-5" />
+              )}
+              <div className="absolute inset-0 bg-black/60 rounded-xl opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white">
+                <Camera className="w-4 h-4" />
+              </div>
             </div>
+
             <div className="flex-1 min-w-0">
               <input
                 type="text"
@@ -176,6 +213,28 @@ export const GroupCreatorModal: React.FC<GroupCreatorModalProps> = ({
                 className="w-full px-3 py-1.5 bg-[#141418] border border-[#27272a] rounded-lg text-white placeholder-[#71717a] text-xs focus:outline-none focus:border-white"
                 autoFocus
               />
+              <div className="flex items-center gap-2 mt-1.5">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="text-[10px] text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <Upload className="w-3 h-3" />
+                  <span>{avatarUrl ? 'Change image' : 'Add custom image'}</span>
+                </button>
+                {avatarUrl && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAvatarUrl(undefined);
+                      if (fileInputRef.current) fileInputRef.current.value = '';
+                    }}
+                    className="text-[10px] text-rose-400 hover:underline cursor-pointer"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 

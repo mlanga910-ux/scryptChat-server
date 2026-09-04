@@ -44,6 +44,7 @@ export interface UserProfile {
   deviceId: string;
   displayName: string;
   avatarColor: string;
+  avatarUrl?: string;
   statusBio: string;
   status?: string;
   phone?: string;
@@ -59,6 +60,7 @@ export interface IdentityRecord {
   publicKeyRaw: string; // Base64 uncompressed 65 bytes
   displayName?: string;
   avatarColor?: string;
+  avatarUrl?: string;
   statusBio?: string;
   status?: string;
   phone?: string;
@@ -71,6 +73,7 @@ export interface ContactRecord {
   deviceId: string;
   alias: string;
   avatarColor?: string;
+  avatarUrl?: string;
   statusBio?: string;
   identityPublicKeyPEM: string;
   publicKeyRaw: string;
@@ -130,6 +133,7 @@ export interface GroupRecord {
   name: string;
   description?: string;
   avatarColor: string;
+  avatarUrl?: string;
   adminDeviceId: string;
   memberDeviceIds: string[];
   createdAt: number;
@@ -146,6 +150,7 @@ export interface MessageRecord {
   senderDeviceId?: string;
   senderDisplayName?: string;
   senderAvatarColor?: string;
+  senderAvatarUrl?: string;
   direction: MessageDirection;
   payloadText: string;
   fileId?: string;
@@ -209,6 +214,8 @@ export interface CallSessionInfo {
   callId: string;
   peerDeviceId: string;
   peerDisplayName: string;
+  peerAvatarUrl?: string;
+  peerAvatarColor?: string;
   callType: CallType;
   direction: 'OUTBOUND' | 'INBOUND';
   state: CallState;
@@ -232,6 +239,8 @@ export interface CallSignalPayload {
   callType?: CallType;
   callerDeviceId?: string;
   callerDisplayName?: string;
+  callerAvatarUrl?: string;
+  callerAvatarColor?: string;
   sdp?: RTCSessionDescriptionInit;
   candidate?: RTCIceCandidateInit;
   reason?: string;

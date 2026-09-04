@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { IdentityRecord, SocialLinks } from '../types/index';
 import {
   X,
@@ -15,8 +15,12 @@ import {
   AtSign,
   Shield,
   Activity,
+  Camera,
+  Trash2,
+  Upload,
 } from 'lucide-react';
 import { updateIdentityProfile } from '../crypto/keys';
+import { fileToAvatarDataUrl } from '../utils/imageHelper';
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -47,6 +51,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
 
   const [displayName, setDisplayName] = useState(identity.displayName || '');
   const [avatarColor, setAvatarColor] = useState(identity.avatarColor || '#2563eb');
+  const [avatarUrl, setAvatarUrl] = useState<string | undefined>(identity.avatarUrl);
   const [statusBio, setStatusBio] = useState(identity.statusBio || 'Online');
   const [status, setStatus] = useState(identity.status || 'Available');
   const [phone, setPhone] = useState(identity.phone || '');
@@ -55,6 +60,23 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const [activeTab, setActiveTab] = useState<'general' | 'optional'>('general');
   const [copied, setCopied] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAvatarFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await fileToAvatarDataUrl(file);
+      setAvatarUrl(dataUrl);
+    } catch (err) {
+      console.error('Error processing avatar image:', err);
+    }
+  };
+
+  const handleRemoveAvatar = () => {
+    setAvatarUrl(undefined);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,6 +86,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       avatarColor,
       statusBio.trim(),
       {
+        avatarUrl,
         status: status.trim() || undefined,
         phone: phone.trim() || undefined,
         email: email.trim() || undefined,
@@ -152,23 +175,64 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
         <form onSubmit={handleSaveProfile} className="flex-1 overflow-y-auto p-4 space-y-4 flex flex-col justify-between">
           {activeTab === 'general' ? (
             <div className="space-y-4">
-              {/* Avatar Preview & Color Selection */}
-              <div className="flex flex-col items-center gap-2.5 p-3.5 bg-[#09090b] border border-[#1f1f23] rounded-xl">
-                <div
-                  className="w-14 h-14 rounded-2xl flex items-center justify-center text-white font-bold text-xl shadow-lg ring-2 ring-[#27272a]"
-                  style={{ backgroundColor: avatarColor }}
-                >
-                  {initial}
+              {/* Avatar Preview & Custom Photo Upload */}
+              <div className="flex flex-col items-center gap-3 p-3.5 bg-[#09090b] border border-[#1f1f23] rounded-xl">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleAvatarFileSelect}
+                  accept="image/*"
+                  className="hidden"
+                />
+
+                <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                  <div
+                    className="w-16 h-16 rounded-2xl flex items-center justify-center text-white font-bold text-xl shadow-lg ring-2 ring-[#27272a] overflow-hidden"
+                    style={{ backgroundColor: avatarUrl ? '#18181b' : avatarColor }}
+                  >
+                    {avatarUrl ? (
+                      <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                    ) : (
+                      initial
+                    )}
+                  </div>
+
+                  <div className="absolute inset-0 bg-black/60 rounded-2xl opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white">
+                    <Camera className="w-5 h-5" />
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-1.5 flex-wrap justify-center pt-0.5">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-2.5 py-1 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] text-white rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Upload className="w-3.5 h-3.5 text-blue-400" />
+                    <span>{avatarUrl ? 'Change Photo' : 'Upload Photo'}</span>
+                  </button>
+                  {avatarUrl && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveAvatar}
+                      className="p-1.5 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-900/50 text-rose-300 rounded-lg text-xs transition-colors cursor-pointer"
+                      title="Remove custom photo"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Color Palette fallback */}
+                <div className="flex items-center gap-1.5 flex-wrap justify-center pt-1 border-t border-[#1f1f23] w-full">
+                  <span className="text-[10px] text-[#71717a] mr-1">Fallback Color:</span>
                   {AVATAR_COLORS.map((color) => (
                     <button
                       key={color}
                       type="button"
                       onClick={() => setAvatarColor(color)}
-                      className={`w-5 h-5 rounded-full transition-transform ${
-                        avatarColor === color ? 'scale-125 ring-2 ring-white shadow-md' : 'hover:scale-110 opacity-80 hover:opacity-100'
+                      className={`w-4 h-4 rounded-full transition-transform cursor-pointer ${
+                        avatarColor === color ? 'scale-125 ring-2 ring-white shadow-md' : 'hover:scale-110 opacity-70 hover:opacity-100'
                       }`}
                       style={{ backgroundColor: color }}
                       title={color}

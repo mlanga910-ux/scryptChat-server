@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { ContactRecord, GroupRecord, IdentityRecord } from '../types/index';
 import { db } from '../db/index';
 import {
@@ -13,7 +13,10 @@ import {
   Check,
   Shield,
   Search,
+  Camera,
+  Upload,
 } from 'lucide-react';
+import { fileToAvatarDataUrl } from '../utils/imageHelper';
 
 interface GroupDetailsModalProps {
   isOpen: boolean;
@@ -39,11 +42,40 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
   const [isAddingMembers, setIsAddingMembers] = useState(false);
   const [selectedToAdd, setSelectedToAdd] = useState<string[]>([]);
   const [searchMemberQuery, setSearchMemberQuery] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen || !group || !identity) return null;
 
   const isAdmin = group.adminDeviceId === identity.deviceId;
   const nonMemberContacts = contacts.filter((c) => !group.memberDeviceIds.includes(c.deviceId));
+
+  const handleAvatarFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await fileToAvatarDataUrl(file);
+      const updated: GroupRecord = {
+        ...group,
+        avatarUrl: dataUrl,
+        lastActivityAt: Date.now(),
+      };
+      await db.groups.put(updated);
+      onUpdateGroup(updated);
+    } catch (err) {
+      console.error('Error updating group icon:', err);
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    const updated: GroupRecord = {
+      ...group,
+      avatarUrl: undefined,
+      lastActivityAt: Date.now(),
+    };
+    await db.groups.put(updated);
+    onUpdateGroup(updated);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
 
   const handleAddMembers = async () => {
     if (selectedToAdd.length === 0) return;
@@ -108,7 +140,7 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-[#71717a] hover:text-white hover:bg-[#18181b] rounded-lg transition-colors"
+            className="p-1.5 text-[#71717a] hover:text-white hover:bg-[#18181b] rounded-lg transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -118,12 +150,55 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
           {/* Group Profile Header */}
           <div className="flex flex-col items-center text-center space-y-2">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleAvatarFileSelect}
+              accept="image/*"
+              className="hidden"
+            />
             <div
-              className="w-16 h-16 rounded-2xl flex items-center justify-center text-white text-2xl font-bold shadow-lg"
-              style={{ backgroundColor: group.avatarColor }}
+              className={`w-16 h-16 rounded-2xl flex items-center justify-center text-white text-2xl font-bold shadow-lg overflow-hidden relative ${
+                isAdmin ? 'cursor-pointer group' : ''
+              }`}
+              style={{ backgroundColor: group.avatarUrl ? '#18181b' : (group.avatarColor || '#2563eb') }}
+              onClick={() => isAdmin && fileInputRef.current?.click()}
+              title={isAdmin ? 'Change Group Image' : undefined}
             >
-              {group.name.charAt(0).toUpperCase()}
+              {group.avatarUrl ? (
+                <img src={group.avatarUrl} alt={group.name} className="w-full h-full object-cover" />
+              ) : (
+                group.name.charAt(0).toUpperCase()
+              )}
+              {isAdmin && (
+                <div className="absolute inset-0 bg-black/60 rounded-2xl opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white">
+                  <Camera className="w-5 h-5" />
+                </div>
+              )}
             </div>
+
+            {isAdmin && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="text-[11px] text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <Upload className="w-3 h-3" />
+                  <span>{group.avatarUrl ? 'Change Photo' : 'Upload Photo'}</span>
+                </button>
+                {group.avatarUrl && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveAvatar}
+                    className="text-[11px] text-rose-400 hover:underline cursor-pointer"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            )}
+
             <h3 className="text-base font-semibold text-white">{group.name}</h3>
             {group.description && (
               <p className="text-xs text-[#a1a1aa] max-w-xs">{group.description}</p>

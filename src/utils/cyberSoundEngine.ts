@@ -251,7 +251,7 @@ class CyberSoundEngine {
     if (this.isRingingActive) return;
     this.isRingingActive = true;
 
-    const playChime = async () => {
+    const playTone = async () => {
       if (!this.isRingingActive) return;
       const ctx = await this.getContext();
       if (!ctx) return;
@@ -260,55 +260,97 @@ class CyberSoundEngine {
       if (!settings.soundEnabled || settings.masterVolume <= 0) return;
       const vol = Math.max(0.1, settings.masterVolume);
 
-      const t = ctx.currentTime + 0.01;
+      const t = ctx.currentTime + 0.02;
 
       if (isOutgoing) {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(440, t);
-        osc.frequency.setValueAtTime(480, t);
+        // Standard Dual-Tone Outgoing Ringback (440Hz + 480Hz telecommunication standard)
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        const gain2 = ctx.createGain();
+        const masterGain = ctx.createGain();
 
-        gain.gain.setValueAtTime(0, t);
-        gain.gain.linearRampToValueAtTime(0.12 * vol, t + 0.03);
-        gain.gain.setValueAtTime(0.12 * vol, t + 0.6);
-        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.7);
+        osc1.type = 'sine';
+        osc2.type = 'sine';
+        osc1.frequency.setValueAtTime(440, t);
+        osc2.frequency.setValueAtTime(480, t);
 
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(t);
-        osc.stop(t + 0.75);
+        const toneDuration = 1.2;
+        gain1.gain.setValueAtTime(0.08 * vol, t);
+        gain2.gain.setValueAtTime(0.08 * vol, t);
+
+        masterGain.gain.setValueAtTime(0.001, t);
+        masterGain.gain.linearRampToValueAtTime(0.15 * vol, t + 0.04);
+        masterGain.gain.setValueAtTime(0.15 * vol, t + toneDuration - 0.05);
+        masterGain.gain.linearRampToValueAtTime(0.0001, t + toneDuration);
+
+        osc1.connect(gain1);
+        osc2.connect(gain2);
+        gain1.connect(masterGain);
+        gain2.connect(masterGain);
+        masterGain.connect(ctx.destination);
+
+        osc1.start(t);
+        osc2.start(t);
+        osc1.stop(t + toneDuration + 0.05);
+        osc2.stop(t + toneDuration + 0.05);
       } else {
-        const notes = [523.25, 659.25, 783.99];
-        notes.forEach((freq, idx) => {
-          const noteTime = t + idx * 0.12;
+        // High-Quality Modern Smartphone Polyphonic Ringtone
+        const melody = [
+          { f: 523.25, d: 0.12, pause: 0.04 }, // C5
+          { f: 659.25, d: 0.12, pause: 0.04 }, // E5
+          { f: 783.99, d: 0.18, pause: 0.08 }, // G5
+          { f: 1046.5, d: 0.28, pause: 0.15 }, // C6
+          { f: 783.99, d: 0.14, pause: 0.04 }, // G5
+          { f: 1046.5, d: 0.35, pause: 0.2 },  // C6
+        ];
+
+        let offset = 0;
+        melody.forEach(({ f, d, pause }) => {
+          const noteTime = t + offset;
           const osc = ctx.createOscillator();
           const gain = ctx.createGain();
 
           osc.type = 'sine';
-          osc.frequency.setValueAtTime(freq, noteTime);
+          osc.frequency.setValueAtTime(f, noteTime);
+
+          // Add harmonic warmth
+          const oscHarmonic = ctx.createOscillator();
+          const gainHarmonic = ctx.createGain();
+          oscHarmonic.type = 'triangle';
+          oscHarmonic.frequency.setValueAtTime(f * 2, noteTime);
 
           gain.gain.setValueAtTime(0, noteTime);
-          gain.gain.linearRampToValueAtTime(0.2 * vol, noteTime + 0.02);
-          gain.gain.exponentialRampToValueAtTime(0.0001, noteTime + 0.45);
+          gain.gain.linearRampToValueAtTime(0.22 * vol, noteTime + 0.015);
+          gain.gain.exponentialRampToValueAtTime(0.0001, noteTime + d);
+
+          gainHarmonic.gain.setValueAtTime(0, noteTime);
+          gainHarmonic.gain.linearRampToValueAtTime(0.06 * vol, noteTime + 0.015);
+          gainHarmonic.gain.exponentialRampToValueAtTime(0.0001, noteTime + d * 0.8);
 
           osc.connect(gain);
+          oscHarmonic.connect(gainHarmonic);
           gain.connect(ctx.destination);
+          gainHarmonic.connect(ctx.destination);
 
           osc.start(noteTime);
-          osc.stop(noteTime + 0.5);
+          oscHarmonic.start(noteTime);
+          osc.stop(noteTime + d + 0.02);
+          oscHarmonic.stop(noteTime + d + 0.02);
+
+          offset += d + pause;
         });
       }
     };
 
-    playChime();
+    playTone();
     this.ringInterval = setInterval(() => {
       if (!this.isRingingActive) {
         clearInterval(this.ringInterval);
         return;
       }
-      playChime();
-    }, isOutgoing ? 2500 : 2000);
+      playTone();
+    }, isOutgoing ? 3000 : 2200);
   }
 
   public async startIncomingRingtone(ringtonePreset?: RingtoneType) {

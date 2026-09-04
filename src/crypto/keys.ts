@@ -137,6 +137,7 @@ export async function updateIdentityProfile(
   avatarColor?: string,
   statusBio?: string,
   options?: {
+    avatarUrl?: string;
     status?: string;
     phone?: string;
     email?: string;
@@ -156,6 +157,7 @@ export async function updateIdentityProfile(
   if (avatarColor) current.avatarColor = avatarColor;
   if (statusBio !== undefined) current.statusBio = statusBio;
   if (options) {
+    if (options.avatarUrl !== undefined) current.avatarUrl = options.avatarUrl;
     if (options.status !== undefined) current.status = options.status;
     if (options.phone !== undefined) current.phone = options.phone;
     if (options.email !== undefined) current.email = options.email;
@@ -166,6 +168,8 @@ export async function updateIdentityProfile(
   try {
     localStorage.setItem(STORAGE_KEY_NAME, displayName);
     if (avatarColor) localStorage.setItem(STORAGE_KEY_COLOR, avatarColor);
+    if (current.avatarUrl) localStorage.setItem('scryptchat_avatar_url', current.avatarUrl);
+    else localStorage.removeItem('scryptchat_avatar_url');
     if (options?.phone) localStorage.setItem('scryptchat_phone', options.phone);
     if (options?.email) localStorage.setItem('scryptchat_email', options.email);
     if (options?.socialLinks) localStorage.setItem('scryptchat_socials', JSON.stringify(options.socialLinks));
