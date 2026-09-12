@@ -130,17 +130,18 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
   return (
     <div
       id="group-details-modal-backdrop"
-      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 select-none font-sans text-xs animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 select-none font-sans animate-in fade-in duration-150"
     >
-      <div className="w-full max-w-md h-[580px] max-h-[92vh] bg-[#0c0c0e] border border-[#27272a] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+      <div className="w-full max-w-md h-[560px] max-h-[92vh] bg-zinc-950 border border-zinc-800 rounded-2xl shadow-xl flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="px-5 py-4 border-b border-[#1f1f23] bg-[#09090b] flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2 text-xs font-semibold text-[#a1a1aa] uppercase tracking-wider">
-            <span>Group Information</span>
-          </div>
+        <div className="px-5 py-4 border-b border-zinc-800 bg-zinc-950/50 flex items-center justify-between shrink-0">
+          <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+            Group Information
+          </h2>
           <button
             onClick={onClose}
-            className="p-1.5 text-[#71717a] hover:text-white hover:bg-[#18181b] rounded-lg transition-colors cursor-pointer"
+            className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-900 rounded-lg transition-colors"
+            aria-label="Close"
           >
             <X className="w-4 h-4" />
           </button>
@@ -156,6 +157,7 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
               onChange={handleAvatarFileSelect}
               accept="image/*"
               className="hidden"
+              aria-label="Upload group icon"
             />
             <div
               className={`w-16 h-16 rounded-2xl flex items-center justify-center text-white text-2xl font-bold shadow-lg overflow-hidden relative ${
@@ -183,6 +185,7 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   className="text-[11px] text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
+                  aria-label={group.avatarUrl ? 'Change photo' : 'Upload photo'}
                 >
                   <Upload className="w-3 h-3" />
                   <span>{group.avatarUrl ? 'Change Photo' : 'Upload Photo'}</span>
@@ -192,6 +195,7 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
                     type="button"
                     onClick={handleRemoveAvatar}
                     className="text-[11px] text-rose-400 hover:underline cursor-pointer"
+                    aria-label="Remove photo"
                   >
                     Remove
                   </button>
@@ -199,11 +203,15 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
               </div>
             )}
 
-            <h3 className="text-base font-semibold text-white">{group.name}</h3>
+            <h3 className="text-base font-semibold text-white" title={group.name}>
+              {group.name}
+            </h3>
             {group.description && (
-              <p className="text-xs text-[#a1a1aa] max-w-xs">{group.description}</p>
+              <p className="text-xs text-zinc-400 max-w-xs text-center">
+                {group.description}
+              </p>
             )}
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-[#18181b] border border-[#27272a] text-[#71717a]">
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-zinc-900 border border-zinc-800 text-zinc-500">
               <span>{group.memberDeviceIds.length} Members</span>
             </div>
           </div>
@@ -212,14 +220,16 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
           <div className="grid grid-cols-2 gap-2.5">
             <button
               onClick={() => onStartGroupCall?.(group, 'audio')}
-              className="flex items-center justify-center gap-2 p-3 bg-[#141418] hover:bg-[#1c1c22] border border-[#27272a] rounded-xl text-white font-medium transition-colors"
+              className="flex items-center justify-center gap-2 p-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-xl text-white font-medium transition-colors"
+              aria-label="Group voice call"
             >
               <Phone className="w-4 h-4 text-emerald-400" />
               <span>Group Voice</span>
             </button>
             <button
               onClick={() => onStartGroupCall?.(group, 'video')}
-              className="flex items-center justify-center gap-2 p-3 bg-[#141418] hover:bg-[#1c1c22] border border-[#27272a] rounded-xl text-white font-medium transition-colors"
+              className="flex items-center justify-center gap-2 p-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-xl text-white font-medium transition-colors"
+              aria-label="Group video call"
             >
               <Video className="w-4 h-4 text-blue-400" />
               <span>Group Video</span>
@@ -229,13 +239,14 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
           {/* Members List */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-[#a1a1aa] uppercase tracking-wider">
+              <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">
                 Members ({group.memberDeviceIds.length})
               </span>
               {isAdmin && nonMemberContacts.length > 0 && (
                 <button
                   onClick={() => setIsAddingMembers(!isAddingMembers)}
                   className="flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300 font-medium"
+                  aria-label={isAddingMembers ? 'Cancel' : 'Add members'}
                 >
                   <UserPlus className="w-3.5 h-3.5" />
                   <span>{isAddingMembers ? 'Cancel' : 'Add Members'}</span>
@@ -243,37 +254,56 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
               )}
             </div>
 
-            {/* Add Member Multi-select Drawer */}
+            {/* Add Member Multi-select */}
             {isAddingMembers && (
-              <div className="p-3 bg-[#09090b] border border-[#27272a] rounded-xl space-y-2.5">
-                <span className="text-[11px] text-[#a1a1aa] block">Select contacts to add:</span>
+              <div className="p-3 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-2.5">
+                <span className="text-[11px] text-zinc-400 block">Select contacts to add:</span>
+
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    type="text"
+                    value={searchMemberQuery}
+                    onChange={(e) => setSearchMemberQuery(e.target.value)}
+                    placeholder="Filter contacts..."
+                    className="w-full pl-8 pr-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs text-white placeholder-zinc-500 input-base focus:ring-1 focus:ring-emerald-400/20"
+                    aria-label="Filter contacts"
+                  />
+                </div>
+
                 <div className="space-y-1 max-h-32 overflow-y-auto">
-                  {nonMemberContacts.map((c) => {
-                    const isChecked = selectedToAdd.includes(c.deviceId);
-                    return (
-                      <button
-                        key={c.deviceId}
-                        onClick={() => {
-                          if (isChecked) {
-                            setSelectedToAdd(selectedToAdd.filter((id) => id !== c.deviceId));
-                          } else {
-                            setSelectedToAdd([...selectedToAdd, c.deviceId]);
-                          }
-                        }}
-                        className={`w-full flex items-center justify-between p-2 rounded-lg text-left text-xs transition-colors ${
-                          isChecked ? 'bg-[#18181b] text-white' : 'text-[#a1a1aa] hover:bg-[#141418]'
-                        }`}
-                      >
-                        <span>{c.alias || c.deviceId}</span>
-                        {isChecked && <Check className="w-3.5 h-3.5 text-blue-400" />}
-                      </button>
-                    );
-                  })}
+                  {nonMemberContacts
+                    .filter((c) =>
+                      (c.alias || c.deviceId).toLowerCase().includes(searchMemberQuery.toLowerCase())
+                    )
+                    .map((c) => {
+                      const isChecked = selectedToAdd.includes(c.deviceId);
+                      return (
+                        <button
+                          key={c.deviceId}
+                          onClick={() => {
+                            if (isChecked) {
+                              setSelectedToAdd(selectedToAdd.filter((id) => id !== c.deviceId));
+                            } else {
+                              setSelectedToAdd([...selectedToAdd, c.deviceId]);
+                            }
+                          }}
+                          className={`w-full flex items-center justify-between p-2 rounded-lg text-left text-xs transition-colors ${
+                            isChecked ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:bg-zinc-900 hover:text-white'
+                          }`}
+                          aria-label={`Select ${c.alias || c.deviceId}`}
+                        >
+                          <span>{c.alias || c.deviceId}</span>
+                          {isChecked && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                        </button>
+                      );
+                    })}
                 </div>
                 <button
                   onClick={handleAddMembers}
                   disabled={selectedToAdd.length === 0}
-                  className="w-full py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold disabled:opacity-50 transition-colors"
+                  className="w-full py-1.5 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 rounded-lg text-xs font-semibold disabled:opacity-50 transition-colors"
+                  aria-label="Add selected members"
                 >
                   Add Selected ({selectedToAdd.length})
                 </button>
@@ -293,7 +323,7 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
                 return (
                   <div
                     key={memberId}
-                    className="flex items-center justify-between p-2.5 bg-[#141418] border border-[#1f1f23] rounded-xl"
+                    className="flex items-center justify-between p-2.5 bg-zinc-900 border border-zinc-800 rounded-xl"
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
                       <div
@@ -317,7 +347,7 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
                             </span>
                           )}
                         </div>
-                        <p className="font-mono text-[10px] text-[#71717a] truncate">
+                        <p className="font-mono text-[10px] text-zinc-500 truncate">
                           {memberId}
                         </p>
                       </div>
@@ -326,8 +356,9 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
                     {isAdmin && !isMe && (
                       <button
                         onClick={() => handleRemoveMember(memberId)}
-                        className="text-[#71717a] hover:text-rose-400 p-1 transition-colors"
+                        className="text-zinc-500 hover:text-rose-400 p-1 transition-colors"
                         title="Remove member"
+                        aria-label={`Remove ${displayName}`}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -339,10 +370,11 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
           </div>
 
           {/* Danger Zone */}
-          <div className="pt-2 border-t border-[#1f1f23] space-y-2">
+          <div className="pt-2 border-t border-zinc-800 space-y-2">
             <button
               onClick={handleLeaveGroup}
-              className="w-full flex items-center justify-center gap-2 p-2.5 bg-[#18181b] hover:bg-rose-950/30 text-rose-300 border border-[#27272a] hover:border-rose-900/50 rounded-xl transition-colors font-medium text-xs"
+              className="w-full flex items-center justify-center gap-2 p-2.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-rose-400 rounded-xl transition-colors font-medium text-xs"
+              aria-label="Leave group"
             >
               <LogOut className="w-4 h-4" />
               <span>Leave Group</span>
@@ -351,7 +383,8 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
             {isAdmin && (
               <button
                 onClick={handleDeleteGroup}
-                className="w-full flex items-center justify-center gap-2 p-2.5 bg-rose-950/20 hover:bg-rose-950/50 text-rose-400 border border-rose-900/40 rounded-xl transition-colors font-medium text-xs"
+                className="w-full flex items-center justify-center gap-2 p-2.5 bg-rose-950/20 hover:bg-rose-950/40 border border-rose-900/30 text-rose-400 rounded-xl transition-colors font-medium text-xs"
+                aria-label="Delete group"
               >
                 <Trash2 className="w-4 h-4" />
                 <span>Delete Group</span>

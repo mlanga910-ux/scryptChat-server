@@ -4,10 +4,8 @@ import {
   Copy,
   Check,
   Download,
-  Code2,
   FileCode,
   Search,
-  CheckCheck,
 } from 'lucide-react';
 import { CodeSnippet } from '../types/index';
 
@@ -82,13 +80,13 @@ export const CodeViewerModal: React.FC<CodeViewerModalProps> = ({
   return (
     <div
       id="code-viewer-modal-backdrop"
-      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 select-none font-sans text-xs animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 bg-[#0a0a0b]/95 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 select-none font-sans text-xs animate-in fade-in duration-150"
     >
-      <div className="w-full max-w-3xl h-[620px] max-h-[92vh] bg-[#0c0c0e] border border-[#27272a] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+      <div className="w-full max-w-3xl h-[620px] max-h-[92vh] bg-[#0c0c0e] border border-[#27272a]/60 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="px-5 py-3.5 border-b border-[#1f1f23] bg-[#09090b] flex items-center justify-between shrink-0">
+        <div className="px-5 py-3.5 border-b border-[#27272a]/60 bg-[#0a0a0b]/80 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-[#18181b] border border-[#27272a] flex items-center justify-center text-white shrink-0">
+            <div className="w-8 h-8 rounded-lg bg-[#111114] border border-[#27272a]/60 flex items-center justify-center text-white shrink-0">
               <FileCode className="w-4 h-4 text-emerald-400" />
             </div>
             <div className="min-w-0">
@@ -96,7 +94,7 @@ export const CodeViewerModal: React.FC<CodeViewerModalProps> = ({
                 <h3 className="text-sm font-semibold text-white tracking-tight truncate">
                   {snippet.title || 'Code Snippet'}
                 </h3>
-                <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-[#18181b] border border-[#27272a] text-emerald-400 font-semibold">
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-[#111114] border border-[#27272a]/60 text-emerald-400 font-semibold">
                   {snippet.language || 'text'}
                 </span>
               </div>
@@ -112,31 +110,43 @@ export const CodeViewerModal: React.FC<CodeViewerModalProps> = ({
               className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
                 wrapLines
                   ? 'bg-white text-black border-white'
-                  : 'bg-[#18181b] text-[#a1a1aa] border-[#27272a] hover:text-white'
+                  : 'bg-[#111114] text-[#a1a1aa] border-[#27272a]/60 hover:text-white'
               }`}
               title="Toggle Word Wrap"
+              aria-label={wrapLines ? 'Disable word wrap' : 'Enable word wrap'}
             >
               Wrap
             </button>
             <button
               onClick={handleCopy}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] text-white rounded-lg text-xs font-medium transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#111114] hover:bg-[#27272a] border border-[#27272a]/60 text-white rounded-lg text-xs font-medium transition-colors"
               title="Copy to clipboard"
+              aria-label="Copy to clipboard"
             >
-              {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+              {copied ? (
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
+              ) : (
+                <Copy className="w-3.5 h-3.5" />
+              )}
               <span>{copied ? 'Copied' : 'Copy'}</span>
             </button>
-            <button
-              onClick={handleDownload}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-neutral-200 text-black font-semibold rounded-lg text-xs transition-colors"
+            <a
+              href="#"
+              onClick={(e) => {
+                e.preventDefault();
+                handleDownload();
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-neutral-200 text-black font-semibold rounded-lg text-xs transition-colors shadow-sm"
               title="Download file"
+              aria-label="Download snippet"
             >
               <Download className="w-3.5 h-3.5" />
               <span>Download</span>
-            </button>
+            </a>
             <button
               onClick={onClose}
-              className="p-1.5 text-[#71717a] hover:text-white hover:bg-[#18181b] rounded-lg transition-colors ml-1"
+              className="p-1.5 text-[#71717a] hover:text-white hover:bg-[#27272a] rounded-lg transition-colors ml-1"
+              aria-label="Close"
             >
               <X className="w-4 h-4" />
             </button>
@@ -144,7 +154,7 @@ export const CodeViewerModal: React.FC<CodeViewerModalProps> = ({
         </div>
 
         {/* Search Toolbar */}
-        <div className="px-5 py-2 border-b border-[#1f1f23] bg-[#09090b]/80 flex items-center justify-between gap-3 shrink-0">
+        <div className="px-5 py-2 border-b border-[#27272a]/60 bg-[#0a0a0b]/80 flex items-center justify-between gap-3 shrink-0">
           <div className="relative flex-1 max-w-sm">
             <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#71717a]" />
             <input
@@ -152,7 +162,8 @@ export const CodeViewerModal: React.FC<CodeViewerModalProps> = ({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search in code snippet..."
-              className="w-full pl-8 pr-3 py-1 bg-[#18181b] border border-[#27272a] rounded-lg text-xs text-white placeholder-[#71717a] focus:outline-none focus:border-neutral-400"
+              className="w-full pl-8 pr-3 py-1 bg-[#111114] border border-[#27272a]/60 rounded-lg text-xs text-white placeholder-[#71717a] focus:outline-none focus:border-neutral-400"
+              aria-label="Search in code snippet"
             />
           </div>
           {searchQuery && filteredIndices && (
@@ -175,7 +186,7 @@ export const CodeViewerModal: React.FC<CodeViewerModalProps> = ({
                       isMatch ? 'bg-amber-500/15' : ''
                     }`}
                   >
-                    <td className="w-12 text-right pr-4 text-[#52525b] select-none align-top font-mono text-[11px] py-0.5 border-r border-[#1f1f23]">
+                    <td className="w-12 text-right pr-4 text-[#52525b] select-none align-top font-mono text-[11px] py-0.5 border-r border-[#27272a]/60">
                       {idx + 1}
                     </td>
                     <td

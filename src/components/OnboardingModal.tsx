@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { IdentityRecord } from '../types/index';
-import { Shield, User, ArrowRight, Key, Sparkles } from 'lucide-react';
+import { Shield, User, ArrowRight, Key } from 'lucide-react';
 import { updateIdentityProfile } from '../crypto/keys';
 
 interface OnboardingModalProps {
@@ -9,14 +9,14 @@ interface OnboardingModalProps {
 }
 
 const AVATAR_COLORS = [
-  '#7C5CFC', // Primary Violet
-  '#3b82f6', // Blue
-  '#10b981', // Emerald
-  '#f59e0b', // Amber
-  '#ec4899', // Pink
-  '#06b6d4', // Cyan
-  '#6366f1', // Indigo
-  '#64748b', // Slate
+  '#7C5CFC',
+  '#3b82f6',
+  '#059669',
+  '#d97706',
+  '#dc2626',
+  '#0891b2',
+  '#6366f1',
+  '#64748b',
 ];
 
 export const OnboardingModal: React.FC<OnboardingModalProps> = ({
@@ -24,7 +24,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   onComplete,
 }) => {
   const [displayName, setDisplayName] = useState('');
-  const [selectedColor, setSelectedColor] = useState(AVATAR_COLORS[1]); // Blue by default
+  const [selectedColor, setSelectedColor] = useState(AVATAR_COLORS[1]);
   const [statusBio, setStatusBio] = useState('Online');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -49,31 +49,61 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     }
   };
 
+  const initial = displayName.charAt(0).toUpperCase() || 'A';
+
   return (
     <div
       id="onboarding-modal-backdrop"
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 select-none font-sans"
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 select-none font-sans animate-in fade-in duration-150"
     >
-      <div className="w-full max-w-sm bg-[#18181b] border border-[#27272a] rounded-2xl shadow-xl overflow-hidden p-6 space-y-5">
+      <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-2xl shadow-xl overflow-hidden p-6 space-y-5">
         {/* Headline */}
         <div className="space-y-1">
           <h1 className="text-base font-semibold text-white tracking-tight">
             Welcome to scryptChat
           </h1>
-          <p className="text-xs text-[#a1a1aa]">
+          <p className="text-xs text-zinc-500">
             Choose a display name to start chatting.
           </p>
         </div>
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Avatar Preview & Color Picker */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div
+                className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-sm"
+                style={{ backgroundColor: selectedColor }}
+              >
+                {initial}
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {AVATAR_COLORS.map((col) => (
+                  <button
+                    key={col}
+                    type="button"
+                    onClick={() => setSelectedColor(col)}
+                    className={`w-6 h-6 rounded-full transition-all cursor-pointer ${
+                      selectedColor === col
+                        ? 'scale-110 ring-2 ring-white ring-offset-2 ring-offset-zinc-950'
+                        : 'opacity-70 hover:opacity-100'
+                    }`}
+                    style={{ backgroundColor: col }}
+                    aria-label={`Color ${col}`}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+
           {/* Display Name Input */}
           <div className="space-y-1.5">
-            <label className="block text-xs font-medium text-[#d4d4d8]">
+            <label className="block text-xs font-medium text-zinc-300">
               Display Name
             </label>
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#71717a]">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-zinc-500">
                 <User className="w-4 h-4" />
               </div>
               <input
@@ -87,38 +117,35 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 placeholder="e.g. Alex"
                 maxLength={32}
                 autoFocus
-                className="w-full pl-9 pr-3 py-2 bg-[#09090b] border border-[#27272a] rounded-lg text-xs text-white placeholder-[#71717a] focus:outline-none focus:border-white transition-colors"
+                className="w-full pl-9 pr-3 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-xs text-white placeholder-zinc-500 input-base focus:ring-1 focus:ring-emerald-400/20"
+                aria-label="Display name"
               />
             </div>
-            {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
+            {error && <p className="text-xs text-rose-400 mt-1">{error}</p>}
           </div>
 
-          {/* Avatar Color Picker */}
+          {/* Status Bio Input */}
           <div className="space-y-1.5">
-            <label className="block text-xs font-medium text-[#d4d4d8]">
-              Avatar Color
+            <label className="block text-xs font-medium text-zinc-300">
+              Status (Optional)
             </label>
-            <div className="flex items-center gap-2">
-              {AVATAR_COLORS.map((col) => (
-                <button
-                  key={col}
-                  type="button"
-                  onClick={() => setSelectedColor(col)}
-                  className={`w-6 h-6 rounded-full transition-all ${
-                    selectedColor === col ? 'scale-110 ring-2 ring-white ring-offset-2 ring-offset-[#18181b]' : 'opacity-70 hover:opacity-100'
-                  }`}
-                  style={{ backgroundColor: col }}
-                />
-              ))}
-            </div>
+            <input
+              type="text"
+              value={statusBio}
+              onChange={(e) => setStatusBio(e.target.value)}
+              maxLength={80}
+              placeholder="e.g. Available, Busy..."
+              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-xs text-white placeholder-zinc-500 input-base focus:ring-1 focus:ring-emerald-400/20"
+              aria-label="Status message"
+            />
           </div>
 
           {/* Device ID Display */}
           <div className="space-y-1">
-            <label className="block text-[11px] font-medium text-[#71717a]">
+            <label className="block text-[11px] font-medium text-zinc-500">
               Permanent Device ID
             </label>
-            <div className="font-mono text-[11px] text-[#a1a1aa] bg-[#09090b] px-2.5 py-1.5 rounded-lg border border-[#27272a] truncate select-all">
+            <div className="font-mono text-[11px] text-zinc-500 bg-zinc-900 px-2.5 py-1.5 rounded-lg border border-zinc-800 truncate select-all">
               {identity.deviceId}
             </div>
           </div>
@@ -128,7 +155,8 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             id="onboarding-submit-btn"
             type="submit"
             disabled={isSubmitting}
-            className="w-full flex items-center justify-center gap-1.5 py-2.5 px-4 bg-white hover:bg-neutral-200 text-black font-semibold text-xs rounded-lg transition-all active:scale-[0.99] disabled:opacity-50 mt-2"
+            className="w-full flex items-center justify-center gap-1.5 py-2.5 px-4 btn-primary shadow-md"
+            aria-label="Continue"
           >
             <span>Continue</span>
             <ArrowRight className="w-3.5 h-3.5" />
@@ -138,4 +166,3 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     </div>
   );
 };
-

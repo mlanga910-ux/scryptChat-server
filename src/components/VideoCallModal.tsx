@@ -147,15 +147,15 @@ export function VideoCallModal({ onClose, peerName, peerManager, isIncoming, inc
       
       <div className="flex-1 relative">
         {/* Remote Video (Full Screen) */}
-        <video
-          ref={remoteVideoRef}
-          autoPlay
-          playsInline
-          className="w-full h-full object-cover bg-[#09090b]"
-        />
+          <video
+            ref={remoteVideoRef}
+            autoPlay
+            playsInline
+            className="w-full h-full object-cover bg-[#0a0a0b]"
+          />
 
         {/* Local Video (PiP) */}
-        <div className="absolute bottom-24 right-6 w-32 h-48 sm:w-48 sm:h-72 bg-black rounded-2xl overflow-hidden shadow-2xl border border-[#27272a]">
+        <div className="absolute bottom-24 right-6 w-32 h-48 sm:w-48 sm:h-72 bg-[#0a0a0b] rounded-2xl overflow-hidden shadow-2xl border border-[#27272a]/60">
           <video
             ref={localVideoRef}
             autoPlay
@@ -171,7 +171,7 @@ export function VideoCallModal({ onClose, peerName, peerManager, isIncoming, inc
         <button
           onClick={toggleAudio}
           className={`p-4 rounded-full transition-colors ${
-            isAudioMuted ? 'bg-red-500/20 text-red-500' : 'bg-[#27272a] hover:bg-[#3f3f46] text-white'
+            isAudioMuted ? 'bg-rose-500/20 text-rose-500' : 'bg-[#27272a]/60 hover:bg-[#3f3f46] text-white'
           }`}
         >
           {isAudioMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
@@ -179,7 +179,7 @@ export function VideoCallModal({ onClose, peerName, peerManager, isIncoming, inc
         
         <button
           onClick={endCall}
-          className="p-4 rounded-full bg-red-600 hover:bg-red-500 text-white transition-colors"
+          className="p-4 rounded-full bg-rose-600 hover:bg-rose-500 text-white transition-colors"
         >
           <PhoneOff className="w-6 h-6" />
         </button>
@@ -187,7 +187,7 @@ export function VideoCallModal({ onClose, peerName, peerManager, isIncoming, inc
         <button
           onClick={toggleVideo}
           className={`p-4 rounded-full transition-colors ${
-            isVideoMuted ? 'bg-red-500/20 text-red-500' : 'bg-[#27272a] hover:bg-[#3f3f46] text-white'
+            isVideoMuted ? 'bg-rose-500/20 text-rose-500' : 'bg-[#27272a]/60 hover:bg-[#3f3f46] text-white'
           }`}
         >
           {isVideoMuted ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}

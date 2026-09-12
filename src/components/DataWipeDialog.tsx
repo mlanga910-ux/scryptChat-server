@@ -31,12 +31,12 @@ export const DataWipeDialog: React.FC<DataWipeDialogProps> = ({
   return (
     <div
       id="wipe-modal-backdrop"
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 select-none font-sans text-xs"
+      className="fixed inset-0 z-50 bg-[#0a0a0b]/92 backdrop-blur-sm flex items-center justify-center p-4 select-none font-sans animate-in fade-in duration-150"
     >
-      <div className="w-full max-w-md bg-[#18181b] border border-[#27272a] rounded-2xl shadow-xl flex flex-col overflow-hidden">
+      <div className="w-full max-w-md bg-[#0c0c0e]/90 border border-[#27272a]/60 rounded-2xl shadow-xl flex flex-col overflow-hidden backdrop-blur-xl">
         {/* Header */}
-        <div className="px-5 py-3.5 border-b border-[#27272a] flex items-center justify-between">
-          <div className="flex items-center gap-2 text-red-400">
+        <div className="px-5 py-3.5 border-b border-[#27272a]/60 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2 text-rose-400">
             <AlertTriangle className="w-4 h-4" />
             <span className="font-semibold text-white tracking-tight text-sm">
               Clear All Data
@@ -45,7 +45,8 @@ export const DataWipeDialog: React.FC<DataWipeDialogProps> = ({
           <button
             id="close-wipe-modal-btn"
             onClick={onClose}
-            className="p-1.5 text-[#71717a] hover:text-white hover:bg-[#27272a] rounded-lg transition-colors"
+            className="p-1.5 text-[#71717a] hover:text-white hover:bg-[#27272a]/60 rounded-lg transition-colors"
+            aria-label="Close"
           >
             <X className="w-4 h-4" />
           </button>
@@ -66,12 +67,13 @@ export const DataWipeDialog: React.FC<DataWipeDialogProps> = ({
         </div>
 
         {/* Footer Actions */}
-        <div className="p-4 border-t border-[#27272a] bg-[#09090b] flex items-center justify-end gap-2">
+        <div className="p-4 border-t border-[#27272a]/60 bg-[#0a0a0b]/80 flex items-center justify-end gap-2 shrink-0">
           <button
             id="cancel-wipe-btn"
             onClick={onClose}
             disabled={isWiping}
-            className="px-3.5 py-1.5 bg-[#27272a] hover:bg-[#3f3f46] text-[#a1a1aa] hover:text-white rounded-lg text-xs font-medium transition-colors"
+            className="px-3.5 py-1.5 bg-[#27272a]/60 hover:bg-[#3f3f46] text-[#a1a1aa] hover:text-white rounded-xl text-xs font-medium transition-colors disabled:opacity-40"
+            aria-label="Cancel"
           >
             Cancel
           </button>
@@ -79,7 +81,8 @@ export const DataWipeDialog: React.FC<DataWipeDialogProps> = ({
             id="confirm-wipe-btn"
             onClick={handleConfirmWipe}
             disabled={isWiping}
-            className="px-3.5 py-1.5 bg-red-600 hover:bg-red-500 text-white font-medium rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-40 text-xs shadow-sm"
+            className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-medium rounded-xl flex items-center gap-1.5 transition-colors disabled:opacity-40 text-xs shadow-sm"
+            aria-label="Clear everything"
           >
             <Trash2 className="w-3.5 h-3.5" />
             <span>{isWiping ? 'Clearing...' : 'Clear Everything'}</span>
@@ -89,4 +92,3 @@ export const DataWipeDialog: React.FC<DataWipeDialogProps> = ({
     </div>
   );
 };
-

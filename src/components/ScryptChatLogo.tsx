@@ -21,7 +21,7 @@ export const ScryptChatLogo: React.FC<ScryptChatLogoProps> = ({
         xmlns="http://www.w3.org/2000/svg"
         className="shrink-0 drop-shadow-sm"
       >
-        <rect width="512" height="512" rx="96" fill="#000000" />
+        <rect width="512" height="512" rx="96" fill="#0a0a0b" />
         
         {/* Left glitch accent dashes and dots */}
         <line x1="55" y1="185" x2="110" y2="185" stroke="#ffffff" strokeWidth="12" strokeLinecap="square" />

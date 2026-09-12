@@ -92,7 +92,7 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
 
           {/* Central Pulsing Avatar */}
           <div className="relative my-8">
-            <div className="w-28 h-28 rounded-full bg-gradient-to-tr from-neutral-800 to-neutral-700 border-2 border-white/20 flex items-center justify-center text-3xl font-bold shadow-2xl z-10 relative">
+            <div className="w-28 h-28 rounded-full bg-gradient-to-tr from-[#27272a] to-[#3f3f46] border-2 border-[#27272a]/60 flex items-center justify-center text-3xl font-bold shadow-2xl z-10 relative">
               {initial}
             </div>
             {/* Native Pulse Rings */}
@@ -110,7 +110,7 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
               <div className="w-16 h-16 rounded-full bg-rose-600 hover:bg-rose-500 active:scale-95 flex items-center justify-center text-white shadow-lg shadow-rose-600/40 transition-all">
                 <PhoneOff className="w-7 h-7" />
               </div>
-              <span className="text-xs font-semibold text-neutral-300 group-hover:text-white">Decline</span>
+              <span className="text-xs font-semibold text-[#a1a1aa] group-hover:text-white">Decline</span>
             </button>
 
             {/* Accept */}
@@ -136,28 +136,27 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
   // 2. ACTIVE / CALLING SCREEN - Standard Native Mobile & Desktop Overlay
   const isVideo = session.callType === 'video';
 
-  return (
-    <div
-      className={`fixed z-50 bg-[#09090b] text-white flex flex-col transition-all duration-300 select-none font-sans ${
+      <div
+      className={`fixed z-50 bg-[#0a0a0b] text-white flex flex-col transition-all duration-300 select-none font-sans ${
         isFullscreen
           ? 'inset-0'
-          : 'inset-0 sm:inset-auto sm:right-6 sm:bottom-6 sm:w-[420px] sm:h-[620px] sm:rounded-3xl sm:border sm:border-neutral-800 sm:shadow-2xl overflow-hidden'
+          : 'inset-0 sm:inset-auto sm:right-6 sm:bottom-6 sm:w-[420px] sm:h-[620px] sm:rounded-3xl sm:border sm:border-[#27272a]/60 sm:shadow-2xl overflow-hidden'
       }`}
     >
       {/* Top Floating Glass Header */}
-      <div className="flex items-center justify-between px-5 py-3.5 bg-black/40 backdrop-blur-md border-b border-white/10 z-20 shrink-0">
+      <div className="flex items-center justify-between px-5 py-3.5 bg-black/40 backdrop-blur-md border-b border-[#27272a]/60 z-20 shrink-0">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className={`w-2.5 h-2.5 rounded-full ${session.state === 'CALLING' ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
           <div className="min-w-0">
             <h4 className="text-sm font-bold text-white truncate">{session.peerDisplayName}</h4>
-            <div className="flex items-center gap-1.5 text-[11px] text-neutral-400 font-mono">
+            <div className="flex items-center gap-1.5 text-[11px] text-[#71717a] font-mono">
               {session.state === 'CALLING' ? (
                 <span className="text-amber-400 font-sans font-medium animate-pulse">Calling...</span>
               ) : (
                 <span className="text-emerald-400 font-bold">{formatDuration(session.durationSeconds)}</span>
               )}
               <span>•</span>
-              <span className="inline-flex items-center gap-1 text-neutral-400">
+              <span className="inline-flex items-center gap-1 text-[#71717a]">
                 <Lock className="w-3 h-3 text-emerald-400" /> P2P E2EE
               </span>
             </div>
@@ -168,14 +167,14 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
           <button
             onClick={() => setShowSecurityDetails(!showSecurityDetails)}
             title="E2EE Verification"
-            className="p-2 rounded-full text-neutral-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            className="p-2 rounded-full text-[#71717a] hover:text-white hover:bg-[#27272a]/60 transition-colors cursor-pointer"
           >
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
           </button>
           <button
             onClick={() => setIsFullscreen(!isFullscreen)}
             title={isFullscreen ? 'Minimize window' : 'Full screen'}
-            className="p-2 rounded-full text-neutral-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            className="p-2 rounded-full text-[#71717a] hover:text-white hover:bg-[#27272a]/60 transition-colors cursor-pointer"
           >
             {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>
@@ -184,25 +183,25 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
 
       {/* Security Safety Number Dropdown */}
       {showSecurityDetails && (
-        <div className="px-4 py-2.5 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between text-xs animate-in slide-in-from-top-2 z-20">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span className="text-neutral-300">Safety Code:</span>
-            <span className="font-mono font-bold text-emerald-400 tracking-wider">
-              {session.safetyNumber || 'E2EE-VERIFIED'}
-            </span>
+          <div className="px-4 py-2.5 bg-[#111114]/50 border-b border-[#27272a]/60 flex items-center justify-between text-xs animate-in slide-in-from-top-2 z-20">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="text-[#a1a1aa]">Safety Code:</span>
+              <span className="font-mono font-bold text-emerald-400 tracking-wider">
+                {session.safetyNumber || 'E2EE-VERIFIED'}
+              </span>
+            </div>
+            <button
+              onClick={() => setShowSecurityDetails(false)}
+              className="text-[#71717a] hover:text-[#d4d4d8] font-semibold cursor-pointer"
+            >
+              Close
+            </button>
           </div>
-          <button
-            onClick={() => setShowSecurityDetails(false)}
-            className="text-neutral-500 hover:text-neutral-300 font-semibold cursor-pointer"
-          >
-            Close
-          </button>
-        </div>
       )}
 
       {/* Central Viewport */}
-      <div className="relative flex-1 bg-gradient-to-b from-[#121216] to-[#09090b] flex flex-col items-center justify-center overflow-hidden p-6">
+      <div className="relative flex-1 bg-gradient-to-b from-[#121216] to-[#0a0a0b] flex flex-col items-center justify-center overflow-hidden p-6">
         {/* Remote Video Stream (Always in DOM) */}
         <video
           ref={remoteVideoRef}
@@ -217,7 +216,7 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
         {(!isVideo || session.isRemoteVideoMuted) && (
           <div className="flex flex-col items-center text-center space-y-4 z-10">
             <div className="relative">
-              <div className="w-28 h-28 rounded-full bg-neutral-800 border border-neutral-700 flex items-center justify-center text-3xl font-bold text-white shadow-2xl">
+              <div className="w-28 h-28 rounded-full bg-[#27272a] border border-[#27272a]/60 flex items-center justify-center text-3xl font-bold text-white shadow-2xl">
                 {initial}
               </div>
               {session.state === 'CALLING' && (
@@ -227,7 +226,7 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
 
             <div className="space-y-1">
               <h3 className="text-xl font-bold text-white">{session.peerDisplayName}</h3>
-              <p className="text-xs text-neutral-400">
+              <p className="text-xs text-[#71717a]">
                 {session.state === 'CALLING'
                   ? 'Connecting direct P2P audio...'
                   : isVideo && session.isRemoteVideoMuted
@@ -240,7 +239,7 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
 
         {/* Local Video PIP (Picture in Picture) */}
         {isVideo && (
-          <div className="absolute top-4 right-4 w-28 h-40 sm:w-32 sm:h-44 rounded-2xl overflow-hidden border-2 border-white/20 shadow-2xl bg-neutral-900 z-20">
+          <div className="absolute top-4 right-4 w-28 h-40 sm:w-32 sm:h-44 rounded-2xl overflow-hidden border-2 border-[#27272a]/60 shadow-2xl bg-[#111114] z-20">
             <video
               ref={localVideoRef}
               autoPlay
@@ -251,7 +250,7 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
               }`}
             />
             {session.isVideoMuted && (
-              <div className="w-full h-full flex flex-col items-center justify-center bg-neutral-900 text-neutral-500 text-[11px] p-2 text-center">
+              <div className="w-full h-full flex flex-col items-center justify-center bg-[#27272a]/60 text-[#71717a] text-[11px] p-2 text-center">
                 <VideoOff className="w-5 h-5 mb-1" />
                 <span>Camera off</span>
               </div>
@@ -261,7 +260,7 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
 
         {/* Remote Muted Notification Badge */}
         {session.isRemoteAudioMuted && session.state === 'CONNECTED' && (
-          <div className="absolute bottom-4 bg-neutral-900/90 border border-neutral-800 px-3.5 py-1.5 rounded-full flex items-center gap-1.5 text-xs text-amber-400 backdrop-blur-md z-10">
+          <div className="absolute bottom-4 bg-[#27272a]/60 border border-[#27272a]/60 px-3.5 py-1.5 rounded-full flex items-center gap-1.5 text-xs text-amber-400 backdrop-blur-md z-10">
             <MicOff className="w-3.5 h-3.5" />
             <span>Partner is muted</span>
           </div>
@@ -272,7 +271,7 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
       <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
 
       {/* Bottom Calling Action Grid (Standard Native 6-button matrix + End Call) */}
-      <div className="p-5 bg-black/60 backdrop-blur-xl border-t border-white/10 flex flex-col items-center gap-4 z-20 shrink-0">
+      <div className="p-5 bg-black/60 backdrop-blur-xl border-t border-[#27272a]/60 flex flex-col items-center gap-4 z-20 shrink-0">
         {/* Controls Grid */}
         <div className="grid grid-cols-4 gap-3 sm:gap-4 w-full max-w-xs justify-items-center">
           {/* Mute Mic */}
@@ -284,12 +283,12 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
               className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
                 session.isAudioMuted
                   ? 'bg-white text-black'
-                  : 'bg-white/10 hover:bg-white/20 text-white'
+                  : 'bg-[#27272a]/60 hover:bg-[#3f3f46] text-white'
               }`}
             >
               {session.isAudioMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
             </div>
-            <span className="text-[10px] font-medium text-neutral-400 group-hover:text-white">
+            <span className="text-[10px] font-medium text-[#71717a] group-hover:text-white">
               {session.isAudioMuted ? 'Unmute' : 'Mute'}
             </span>
           </button>
@@ -302,13 +301,13 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
             <div
               className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
                 session.isVideoMuted
-                  ? 'bg-white/10 text-neutral-400'
-                  : 'bg-white/20 hover:bg-white/30 text-white'
+                  ? 'bg-[#27272a]/30 text-[#71717a]'
+                  : 'bg-[#27272a]/60 hover:bg-[#3f3f46] text-white'
               }`}
             >
               {session.isVideoMuted ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
             </div>
-            <span className="text-[10px] font-medium text-neutral-400 group-hover:text-white">Video</span>
+            <span className="text-[10px] font-medium text-[#71717a] group-hover:text-white">Video</span>
           </button>
 
           {/* Switch Camera (if video) or Speaker Toggle */}
@@ -317,10 +316,10 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
               onClick={() => callManager.switchCamera()}
               className="flex flex-col items-center gap-1 group cursor-pointer"
             >
-              <div className="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all">
+              <div className="w-12 h-12 rounded-full bg-[#27272a]/60 hover:bg-[#3f3f46] text-white flex items-center justify-center transition-all">
                 <SwitchCamera className="w-5 h-5" />
               </div>
-              <span className="text-[10px] font-medium text-neutral-400 group-hover:text-white">Flip</span>
+              <span className="text-[10px] font-medium text-[#71717a] group-hover:text-white">Flip</span>
             </button>
           ) : (
             <button
@@ -329,12 +328,12 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
             >
               <div
                 className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
-                  isSpeakerOn ? 'bg-white text-black' : 'bg-white/10 text-white'
+                  isSpeakerOn ? 'bg-white text-black' : 'bg-[#27272a]/60 text-white'
                 }`}
               >
                 {isSpeakerOn ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
               </div>
-              <span className="text-[10px] font-medium text-neutral-400 group-hover:text-white">Speaker</span>
+              <span className="text-[10px] font-medium text-[#71717a] group-hover:text-white">Speaker</span>
             </button>
           )}
 
@@ -347,12 +346,12 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
               className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
                 session.isScreenSharing
                   ? 'bg-emerald-500 text-white'
-                  : 'bg-white/10 hover:bg-white/20 text-white'
+                  : 'bg-[#27272a]/60 hover:bg-[#3f3f46] text-white'
               }`}
             >
               <Monitor className="w-5 h-5" />
             </div>
-            <span className="text-[10px] font-medium text-neutral-400 group-hover:text-white">Share</span>
+            <span className="text-[10px] font-medium text-[#71717a] group-hover:text-white">Share</span>
           </button>
         </div>
 

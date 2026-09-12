@@ -14,7 +14,7 @@ interface AvatarProps {
 const SIZE_CLASSES = {
   xs: 'w-6 h-6 text-[10px] rounded-lg',
   sm: 'w-8 h-8 text-xs rounded-xl',
-  md: 'w-9 h-9 text-xs font-semibold rounded-xl',
+  md: 'w-10 h-10 text-xs font-semibold rounded-xl',
   lg: 'w-12 h-12 text-sm font-bold rounded-2xl',
   xl: 'w-16 h-16 text-xl font-bold rounded-2xl',
   '2xl': 'w-24 h-24 text-3xl font-bold rounded-3xl',
@@ -46,7 +46,7 @@ export const Avatar: React.FC<AvatarProps> = ({
   return (
     <div
       onClick={onClick}
-      className={`relative shrink-0 select-none ${onClick ? 'cursor-pointer' : ''} ${className}`}
+      className={`relative shrink-0 select-none transition-transform ${onClick ? 'cursor-pointer' : ''} ${className}`}
     >
       <div
         className={`${sizeClass} overflow-hidden flex items-center justify-center text-white font-sans shadow-sm transition-all`}
@@ -58,7 +58,6 @@ export const Avatar: React.FC<AvatarProps> = ({
             alt={name}
             className="w-full h-full object-cover"
             onError={(e) => {
-              // On error, fallback to letter
               (e.target as HTMLElement).style.display = 'none';
             }}
           />
@@ -69,8 +68,8 @@ export const Avatar: React.FC<AvatarProps> = ({
 
       {showBadge && (
         <div
-          className={`absolute rounded-full border-[#09090b] ${badgeClass} ${
-            isOnline ? 'bg-emerald-500 ring-1 ring-emerald-400/50' : 'bg-[#52525b]'
+          className={`absolute rounded-full border-[#0a0a0b] ${badgeClass} ${
+            isOnline ? 'bg-emerald-400 ring-1 ring-emerald-400/50' : 'bg-zinc-600'
           }`}
           title={isOnline ? 'Online' : 'Offline'}
         />

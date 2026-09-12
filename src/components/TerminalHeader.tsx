@@ -11,6 +11,7 @@ import {
   Sliders,
   QrCode,
   ChevronDown,
+  Menu,
 } from 'lucide-react';
 
 interface TerminalHeaderProps {
@@ -78,32 +79,65 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
 
   const initial = (identity?.displayName || 'U').charAt(0).toUpperCase();
 
+  const getStatusConfig = () => {
+    if (isDirect) {
+      return {
+        dotColor: 'bg-emerald-400',
+        text: 'Direct P2P',
+        textColor: 'text-emerald-400',
+        subText: latencyMs !== null ? `${latencyMs}ms` : undefined,
+      };
+    }
+    if (isConnecting && activeContact) {
+      return {
+        dotColor: 'bg-amber-400 animate-pulse',
+        text: 'Connecting P2P...',
+        textColor: 'text-amber-300',
+      };
+    }
+    if (relayStatus === 'ONLINE') {
+      return {
+        dotColor: 'bg-emerald-400',
+        text: 'Signaling Online',
+        textColor: 'text-zinc-300',
+        subText: relayPingMs !== null && relayPingMs !== undefined ? `${relayPingMs}ms` : undefined,
+      };
+    }
+    return {
+      dotColor: 'bg-amber-400 animate-pulse',
+      text: 'Connecting...',
+      textColor: 'text-amber-300',
+    };
+  };
+
+  const status = getStatusConfig();
+
   return (
-    <header className="border-b border-[#27272a] bg-[#09090b] px-4 sm:px-6 py-2.5 flex items-center justify-between gap-4 text-sm font-sans select-none z-30 relative">
+    <header className="border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm px-4 sm:px-6 py-3 flex items-center justify-between gap-4 text-sm font-sans select-none z-30 relative">
       {/* Left: Brand Logo & Title */}
-      <div className="flex items-center gap-2.5">
-        <div className="w-8 h-8 rounded-xl bg-[#18181b] border border-[#27272a] flex items-center justify-center text-white shadow-sm">
-          <Lock className="w-4 h-4" />
+      <div className="flex items-center gap-3">
+        <div className="w-8 h-8 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-white shadow-sm">
+          <Lock className="w-4 h-4 text-emerald-400" />
         </div>
         <div className="flex flex-col">
           <span className="font-semibold text-white text-sm tracking-tight leading-tight">
             scryptChat
           </span>
-          <span className="text-[10px] text-[#71717a] font-mono leading-none">
+          <span className="text-[10px] text-zinc-500 font-mono leading-none">
             E2EE P2P
           </span>
         </div>
       </div>
 
       {/* Mobile Tab Switcher */}
-      <div className="flex md:hidden items-center bg-[#18181b] border border-[#27272a] rounded-xl p-0.5">
+      <div className="flex md:hidden items-center bg-zinc-900 border border-zinc-800 rounded-xl p-0.5">
         <button
           id="tab-peers-btn"
           onClick={() => onMobileTabChange('peers')}
-          className={`px-3 py-1 text-xs rounded-lg font-medium transition-colors ${
+          className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${
             currentMobileTab === 'peers'
-              ? 'bg-white text-black font-semibold'
-              : 'text-[#a1a1aa] hover:text-white'
+              ? 'bg-white text-black font-semibold shadow-sm'
+              : 'text-zinc-400 hover:text-white'
           }`}
         >
           Contacts
@@ -111,10 +145,10 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
         <button
           id="tab-chat-btn"
           onClick={() => onMobileTabChange('chat')}
-          className={`px-3 py-1 text-xs rounded-lg font-medium transition-colors ${
+          className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${
             currentMobileTab === 'chat'
-              ? 'bg-white text-black font-semibold'
-              : 'text-[#a1a1aa] hover:text-white'
+              ? 'bg-white text-black font-semibold shadow-sm'
+              : 'text-zinc-400 hover:text-white'
           }`}
         >
           Chat
@@ -126,74 +160,68 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
         {/* Status Pill Indicator */}
         <div
           id="p2p-status-indicator"
-          className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-[#18181b] border border-[#27272a] text-xs select-none"
+          className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-xs select-none hidden sm:flex"
         >
-          {isDirect ? (
-            <>
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              <span className="text-emerald-400 font-medium">Direct P2P</span>
-              {latencyMs !== null && (
-                <span className="text-[#71717a] font-mono text-[11px] border-l border-[#27272a] pl-2 hidden sm:inline">
-                  {latencyMs}ms
-                </span>
-              )}
-            </>
-          ) : isConnecting && activeContact ? (
-            <>
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-              <span className="text-amber-300">Connecting P2P...</span>
-            </>
-          ) : relayStatus === 'ONLINE' ? (
-            <>
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              <span className="text-[#e4e4e7] font-medium hidden sm:inline">Signaling Online</span>
-              <span className="text-[#e4e4e7] font-medium sm:hidden">Online</span>
-              {relayPingMs !== null && relayPingMs !== undefined && (
-                <span className="text-[#71717a] font-mono text-[11px] border-l border-[#27272a] pl-2 hidden sm:inline">
-                  {relayPingMs}ms
-                </span>
-              )}
-            </>
-          ) : (
-            <>
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-              <span className="text-amber-300">Connecting...</span>
-            </>
+          <span className={`w-1.5 h-1.5 rounded-full ${status.dotColor}`} />
+          <span className={`font-medium ${status.textColor}`}>{status.text}</span>
+          {status.subText && (
+            <span className="text-zinc-500 font-mono text-[10px] border-l border-zinc-800 pl-2">
+              {status.subText}
+            </span>
           )}
         </div>
+
+        {/* Mobile Status Compact */}
+        <div className="sm:hidden flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-900 border border-zinc-800">
+          <span className={`w-1.5 h-1.5 rounded-full ${status.dotColor}`} />
+          <span className={`font-medium ${status.textColor} text-xs`}>
+            {isDirect ? 'P2P' : isConnecting ? 'Connecting' : relayStatus === 'ONLINE' ? 'Online' : 'Connecting'}
+          </span>
+        </div>
+
+        {/* Pair Button - Mobile Only */}
+        <button
+          className="sm:hidden p-2 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+          onClick={onOpenPairing}
+          aria-label="Pair Device"
+        >
+          <QrCode className="w-5 h-5" />
+        </button>
 
         {/* User Profile Popover Button */}
         <div className="relative" ref={profileMenuRef}>
           <button
             id="header-profile-btn"
             onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
-            className="flex items-center gap-1.5 p-1 pr-2 rounded-xl bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] transition-all cursor-pointer"
+            className="flex items-center gap-2 p-1.5 pr-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 transition-all cursor-pointer"
             title="Profile & Settings"
+            aria-expanded={isProfileMenuOpen}
+            aria-haspopup="true"
           >
             <div
-              className="w-6 h-6 rounded-lg flex items-center justify-center text-white font-semibold text-xs shadow-sm"
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-white font-semibold text-xs shadow-sm"
               style={{ backgroundColor: identity?.avatarColor || '#2563eb' }}
             >
               {initial}
             </div>
-            <span className="font-medium text-white text-xs max-w-[80px] truncate hidden sm:inline">
+            <span className="font-medium text-white text-xs max-w-[100px] truncate hidden sm:inline">
               {identity?.displayName || 'User'}
             </span>
-            <ChevronDown className="w-3 h-3 text-[#a1a1aa]" />
+            <ChevronDown className="w-3.5 h-3.5 text-zinc-400 hidden sm:block" />
           </button>
 
           {/* Top-Right Profile Dropdown Popover */}
           {isProfileMenuOpen && (
             <div
               id="profile-dropdown-menu"
-              className="absolute right-0 top-full mt-2 w-56 bg-[#18181b] border border-[#27272a] rounded-2xl shadow-2xl p-1.5 space-y-0.5 text-xs z-50 animate-in fade-in zoom-in-95 duration-100"
+              className="absolute right-0 top-full mt-2 w-56 bg-zinc-950 border border-zinc-800 rounded-2xl shadow-xl p-1.5 space-y-0.5 text-xs z-50 animate-in animate-scale-in"
             >
               {/* User Identity Header Card */}
-              <div className="p-2.5 bg-[#09090b] border border-[#27272a] rounded-xl mb-1">
+              <div className="p-3 bg-zinc-950/50 border border-zinc-800 rounded-xl mb-1">
                 <div className="font-medium text-white text-xs truncate">
                   {identity?.displayName || 'Anonymous User'}
                 </div>
-                <div className="text-[10px] text-[#71717a] font-mono truncate mt-0.5">
+                <div className="text-[10px] text-zinc-500 font-mono truncate mt-0.5">
                   {identity?.deviceId}
                 </div>
               </div>
@@ -205,10 +233,10 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
                   setIsProfileMenuOpen(false);
                   onOpenProfile();
                 }}
-                className="w-full text-left px-3 py-2 text-[#e4e4e7] hover:text-white hover:bg-[#27272a] rounded-xl transition-colors flex items-center gap-2"
+                className="w-full text-left px-3 py-2.5 text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors flex items-center gap-2"
               >
-                <User className="w-4 h-4 text-[#a1a1aa]" />
-                <span className="font-medium">Profile &amp; Identity</span>
+                <User className="w-4 h-4 text-zinc-400" />
+                <span className="font-medium">Profile & Identity</span>
               </button>
 
               {/* Settings */}
@@ -218,9 +246,9 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
                   setIsProfileMenuOpen(false);
                   onOpenSettings();
                 }}
-                className="w-full text-left px-3 py-2 text-[#e4e4e7] hover:text-white hover:bg-[#27272a] rounded-xl transition-colors flex items-center gap-2"
+                className="w-full text-left px-3 py-2.5 text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors flex items-center gap-2"
               >
-                <Sliders className="w-4 h-4 text-[#a1a1aa]" />
+                <Sliders className="w-4 h-4 text-zinc-400" />
                 <span className="font-medium">Settings</span>
               </button>
 
@@ -231,10 +259,10 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
                   setIsProfileMenuOpen(false);
                   onOpenSecurity();
                 }}
-                className="w-full text-left px-3 py-2 text-[#e4e4e7] hover:text-white hover:bg-[#27272a] rounded-xl transition-colors flex items-center gap-2"
+                className="w-full text-left px-3 py-2.5 text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors flex items-center gap-2"
               >
-                <Shield className="w-4 h-4 text-[#a1a1aa]" />
-                <span className="font-medium">Security &amp; Keys</span>
+                <Shield className="w-4 h-4 text-zinc-400" />
+                <span className="font-medium">Security & Keys</span>
               </button>
 
               {/* Pair Device */}
@@ -244,9 +272,9 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
                   setIsProfileMenuOpen(false);
                   onOpenPairing();
                 }}
-                className="w-full text-left px-3 py-2 text-[#e4e4e7] hover:text-white hover:bg-[#27272a] rounded-xl transition-colors flex items-center gap-2"
+                className="w-full text-left px-3 py-2.5 text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors flex items-center gap-2"
               >
-                <QrCode className="w-4 h-4 text-[#a1a1aa]" />
+                <QrCode className="w-4 h-4 text-zinc-400" />
                 <span className="font-medium">Pair Device</span>
               </button>
 
@@ -257,16 +285,16 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
                   copyId();
                   setIsProfileMenuOpen(false);
                 }}
-                className="w-full text-left px-3 py-2 text-[#e4e4e7] hover:text-white hover:bg-[#27272a] rounded-xl transition-colors flex items-center justify-between"
+                className="w-full text-left px-3 py-2.5 text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors flex items-center justify-between"
               >
                 <div className="flex items-center gap-2">
-                  <Copy className="w-4 h-4 text-[#a1a1aa]" />
+                  <Copy className="w-4 h-4 text-zinc-400" />
                   <span>{copied ? 'Copied ID' : 'Copy Device ID'}</span>
                 </div>
                 {copied && <Check className="w-3.5 h-3.5 text-emerald-400" />}
               </button>
 
-              <div className="border-t border-[#27272a] my-1" />
+              <div className="border-t border-zinc-800 my-1" />
 
               {/* Clear All Data */}
               <button
@@ -275,9 +303,9 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
                   setIsProfileMenuOpen(false);
                   onOpenWipe();
                 }}
-                className="w-full text-left px-3 py-2 text-red-400 hover:bg-red-950/40 rounded-xl transition-colors flex items-center gap-2"
+                className="w-full text-left px-3 py-2.5 text-rose-400 hover:bg-rose-950/30 rounded-xl transition-colors flex items-center gap-2"
               >
-                <Trash2 className="w-4 h-4 text-red-400" />
+                <Trash2 className="w-4 h-4 text-rose-400" />
                 <span className="font-medium">Clear All Data</span>
               </button>
             </div>

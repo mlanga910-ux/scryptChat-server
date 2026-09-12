@@ -9,13 +9,11 @@ import {
   Clock,
   FileText,
   Shield,
-  Save,
-  Check,
   RotateCcw,
   PhoneOff,
   VideoOff,
-  Phone,
-  Video,
+  Play,
+  Check,
 } from 'lucide-react';
 import { ContactRecord } from '../types/index';
 import {
@@ -62,13 +60,12 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
   const [settings, setSettingsState] = useState<ChatCustomSettings>(() =>
     getChatSettings(contact.deviceId)
   );
-  const [isSaved, setIsSaved] = useState(false);
 
   const updateSetting = <K extends keyof ChatCustomSettings>(
     key: K,
     value: ChatCustomSettings[K]
   ) => {
-    const updated = { ...settings, [key]: value };
+    const updated: ChatCustomSettings = { ...settings, [key]: value };
     setSettingsState(updated);
     saveChatSettings(contact.deviceId, updated);
     onSettingsChanged?.(updated);
@@ -91,11 +88,11 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
   return (
     <div
       id="chat-settings-backdrop"
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 select-none font-sans"
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150 font-sans select-none"
     >
-      <div className="w-full max-w-md bg-[#18181b] border border-[#27272a] rounded-2xl shadow-2xl overflow-hidden text-xs flex flex-col max-h-[90vh]">
+      <div className="w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-2xl shadow-xl overflow-hidden text-xs flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="px-5 py-4 border-b border-[#27272a] flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-zinc-800 bg-zinc-950/50 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
             <div
               className="w-8 h-8 rounded-full flex items-center justify-center text-white font-medium text-xs shadow-sm"
@@ -105,16 +102,17 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
             </div>
             <div>
               <h2 className="text-sm font-semibold text-white">
-                Chat Preferences: {contact.alias}
+                {contact.alias}
               </h2>
-              <p className="text-[11px] text-[#a1a1aa]">
-                Customized local settings for this specific chat
+              <p className="text-[11px] text-zinc-500">
+                Customized local settings
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-[#a1a1aa] hover:text-white hover:bg-[#27272a] rounded-lg transition-colors"
+            className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-900 rounded-lg transition-colors"
+            aria-label="Close"
           >
             <X className="w-4 h-4" />
           </button>
@@ -123,23 +121,23 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           {/* Privacy Note */}
-          <div className="p-3 bg-[#09090b] border border-[#27272a] rounded-xl flex items-start gap-2 text-[#a1a1aa] text-[11px]">
+          <div className="p-3 bg-zinc-900/30 border border-zinc-800 rounded-xl flex items-start gap-2 text-zinc-400 text-[11px]">
             <Shield className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
             <p>
-              These options are stored strictly on your local device. They will not alter or restrict the settings of {contact.alias}&apos;s device.
+              These options are stored locally on your device.
             </p>
           </div>
 
           {/* 1. Blur / Hide Images by Default */}
-          <div className="p-4 bg-[#09090b] border border-[#27272a] rounded-xl space-y-2">
+          <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-2">
             <div className="flex items-center justify-between">
               <div className="pr-3">
                 <div className="flex items-center gap-1.5 font-medium text-white">
                   <EyeOff className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Blur &amp; Hide Images by Default</span>
+                  <span>Blur Images by Default</span>
                 </div>
-                <p className="text-[#a1a1aa] text-[11px] mt-0.5">
-                  When enabled, received photos appear blurred with an eye-off overlay and a &quot;Reveal Image&quot; button.
+                <p className="text-zinc-500 text-[11px] mt-0.5">
+                  Received photos appear blurred with a reveal button.
                 </p>
               </div>
               <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
@@ -148,26 +146,27 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
                   checked={settings.blurMedia}
                   onChange={(e) => updateSetting('blurMedia', e.target.checked)}
                   className="sr-only peer"
+                  aria-label="Blur media"
                 />
-                <div className="w-9 h-5 bg-[#27272a] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[#27272a] after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500" />
+                <div className="w-9 h-5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-400" />
               </label>
             </div>
           </div>
 
-          {/* 2. Notifications & Mute for this Chat */}
-          <div className="p-4 bg-[#09090b] border border-[#27272a] rounded-xl space-y-3">
+          {/* 2. Notifications & Mute */}
+          <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-3">
             <div className="flex items-center justify-between">
               <div className="pr-3">
                 <div className="flex items-center gap-1.5 font-medium text-white">
                   {settings.muteNotifications ? (
-                    <BellOff className="w-3.5 h-3.5 text-red-400" />
+                    <BellOff className="w-3.5 h-3.5 text-rose-400" />
                   ) : (
                     <Bell className="w-3.5 h-3.5 text-white" />
                   )}
                   <span>Mute Notifications</span>
                 </div>
-                <p className="text-[#a1a1aa] text-[11px] mt-0.5">
-                  Silence sound alerts and banner notifications for incoming messages from this contact.
+                <p className="text-zinc-500 text-[11px] mt-0.5">
+                  Silence alerts and banner notifications from this contact.
                 </p>
               </div>
               <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
@@ -176,21 +175,23 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
                   checked={settings.muteNotifications}
                   onChange={(e) => updateSetting('muteNotifications', e.target.checked)}
                   className="sr-only peer"
+                  aria-label="Mute notifications"
                 />
-                <div className="w-9 h-5 bg-[#27272a] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[#27272a] after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-600" />
+                <div className="w-9 h-5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-rose-600" />
               </label>
             </div>
 
             {!settings.muteNotifications && (
-              <div className="pt-2 border-t border-[#27272a] space-y-1.5">
-                <label className="block text-[#a1a1aa] font-medium text-[11px]">
-                  Custom Notification Tone for this Chat
+              <div className="pt-2 border-t border-zinc-800 space-y-1.5">
+                <label className="block text-zinc-500 font-medium text-[11px]">
+                  Notification Tone for this Chat
                 </label>
                 <div className="flex items-center gap-2">
                   <select
-                    value={settings.customSound}
+                    value={settings.customSound || 'default'}
                     onChange={(e) => updateSetting('customSound', e.target.value as any)}
-                    className="flex-1 bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-white"
+                    className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-white text-xs focus:ring-1 focus:ring-emerald-400/20"
+                    aria-label="Notification tone"
                   >
                     {SOUND_OPTIONS.map((opt) => (
                       <option key={opt.id} value={opt.id}>
@@ -201,9 +202,10 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
                   <button
                     type="button"
                     onClick={() => handleTestSound(settings.customSound)}
-                    className="px-3 py-2 bg-white hover:bg-neutral-200 text-black font-medium rounded-xl text-xs transition-colors flex-shrink-0 shadow-sm"
+                    className="px-3 py-2 bg-white hover:bg-neutral-200 text-zinc-950 font-medium rounded-xl text-xs transition-colors flex-shrink-0 shadow-sm"
+                    aria-label="Test sound"
                   >
-                    Test Tone
+                    <Play className="w-3 h-3" />
                   </button>
                 </div>
               </div>
@@ -211,15 +213,15 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
           </div>
 
           {/* 3. Auto-Download Media */}
-          <div className="p-4 bg-[#09090b] border border-[#27272a] rounded-xl space-y-2">
+          <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-2">
             <div className="flex items-center justify-between">
               <div className="pr-3">
                 <div className="flex items-center gap-1.5 font-medium text-white">
                   <Download className="w-3.5 h-3.5 text-white" />
-                  <span>Auto-Download Media Files</span>
+                  <span>Auto-Download Media</span>
                 </div>
-                <p className="text-[#a1a1aa] text-[11px] mt-0.5">
-                  Automatically assemble incoming file chunks and store them in local IndexedDB storage.
+                <p className="text-zinc-500 text-[11px] mt-0.5">
+                  Automatically store incoming file chunks locally.
                 </p>
               </div>
               <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
@@ -228,21 +230,22 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
                   checked={settings.autoDownloadMedia}
                   onChange={(e) => updateSetting('autoDownloadMedia', e.target.checked)}
                   className="sr-only peer"
+                  aria-label="Auto-download media"
                 />
-                <div className="w-9 h-5 bg-[#27272a] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[#27272a] after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600" />
+                <div className="w-9 h-5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-400" />
               </label>
             </div>
           </div>
 
           {/* 4. Disappearing Messages */}
-          <div className="p-4 bg-[#09090b] border border-[#27272a] rounded-xl space-y-2.5">
+          <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-2.5">
             <div>
               <div className="flex items-center gap-1.5 font-medium text-white">
                 <Clock className="w-3.5 h-3.5 text-white" />
-                <span>Disappearing Message Timer</span>
+                <span>Message Timer</span>
               </div>
-              <p className="text-[#a1a1aa] text-[11px] mt-0.5">
-                Automatically purge messages older than the selected retention period on this device.
+              <p className="text-zinc-500 text-[11px] mt-0.5">
+                Automatically purge messages older than the selected period.
               </p>
             </div>
             <div className="grid grid-cols-4 gap-1.5">
@@ -253,9 +256,10 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
                   onClick={() => updateSetting('disappearingTimerSeconds', opt.value)}
                   className={`py-2 px-1 rounded-xl text-center font-medium transition-all ${
                     settings.disappearingTimerSeconds === opt.value
-                      ? 'bg-white text-black font-semibold'
-                      : 'bg-[#18181b] border border-[#27272a] text-[#a1a1aa] hover:text-white'
+                      ? 'bg-emerald-400 text-zinc-950 font-semibold'
+                      : 'bg-zinc-900 border border-zinc-800 text-zinc-500 hover:text-white'
                   }`}
+                  aria-label={`Set timer to ${opt.label}`}
                 >
                   {opt.label}
                 </button>
@@ -263,24 +267,24 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
             </div>
           </div>
 
-          {/* 5. Call & Video Permissions / Blocking */}
-          <div className="p-4 bg-[#09090b] border border-[#27272a] rounded-xl space-y-3">
+          {/* 5. Call & Video Permissions */}
+          <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-3">
             <div>
               <div className="font-medium text-white flex items-center gap-1.5">
-                <PhoneOff className="w-3.5 h-3.5 text-red-400" />
+                <PhoneOff className="w-3.5 h-3.5 text-rose-400" />
                 <span>Call &amp; Video Call Permissions</span>
               </div>
-              <p className="text-[#a1a1aa] text-[11px] mt-0.5">
-                Restrict this contact from ringing or initiating calls with you.
+              <p className="text-zinc-500 text-[11px] mt-0.5">
+                Restrict this contact from calling you.
               </p>
             </div>
 
-            <div className="space-y-2 pt-1 border-t border-[#27272a]">
+            <div className="space-y-2 pt-1 border-t border-zinc-800">
               {/* Block Voice Calls */}
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-xs text-white font-medium">Block Voice Calls</span>
-                  <p className="text-[10px] text-[#71717a]">Silently reject incoming audio calls</p>
+                  <p className="text-[10px] text-zinc-500">Silently reject incoming audio calls</p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
                   <input
@@ -288,16 +292,17 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
                     checked={settings.blockVoiceCalls}
                     onChange={(e) => updateSetting('blockVoiceCalls', e.target.checked)}
                     className="sr-only peer"
+                    aria-label="Block voice calls"
                   />
-                  <div className="w-9 h-5 bg-[#27272a] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[#27272a] after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-600" />
+                  <div className="w-9 h-5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-rose-600" />
                 </label>
               </div>
 
               {/* Block Video Calls */}
-              <div className="flex items-center justify-between pt-1 border-t border-[#1f1f23]">
+              <div className="flex items-center justify-between pt-1 border-t border-zinc-800">
                 <div>
                   <span className="text-xs text-white font-medium">Block Video Calls</span>
-                  <p className="text-[10px] text-[#71717a]">Silently reject incoming video calls</p>
+                  <p className="text-[10px] text-zinc-500">Silently reject incoming video calls</p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
                   <input
@@ -305,25 +310,27 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
                     checked={settings.blockVideoCalls}
                     onChange={(e) => updateSetting('blockVideoCalls', e.target.checked)}
                     className="sr-only peer"
+                    aria-label="Block video calls"
                   />
-                  <div className="w-9 h-5 bg-[#27272a] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[#27272a] after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-600" />
+                  <div className="w-9 h-5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-rose-600" />
                 </label>
               </div>
             </div>
           </div>
 
           {/* 6. Private Notes */}
-          <div className="p-4 bg-[#09090b] border border-[#27272a] rounded-xl space-y-2">
+          <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-2">
             <div className="flex items-center gap-1.5 font-medium text-white">
               <FileText className="w-3.5 h-3.5 text-white" />
-              <span>Private Contact Notes</span>
+              <span>Private Notes</span>
             </div>
             <textarea
-              value={settings.privateNotes}
+              value={settings.privateNotes || ''}
               onChange={(e) => updateSetting('privateNotes', e.target.value)}
-              placeholder="Encrypted private notes about this contact (only visible to you)..."
+              placeholder="Notes about this contact (local only)..."
               rows={2}
-              className="w-full bg-[#18181b] border border-[#27272a] rounded-xl p-2.5 text-white text-xs placeholder-[#52525b] focus:outline-none focus:border-white resize-none"
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-white text-xs placeholder-zinc-500 input-base focus:ring-1 focus:ring-emerald-400/20 resize-none"
+              aria-label="Private notes"
             />
           </div>
 
@@ -332,7 +339,8 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
             <button
               type="button"
               onClick={handleResetDefaults}
-              className="px-3 py-1.5 text-xs text-[#a1a1aa] hover:text-white bg-[#09090b] hover:bg-[#27272a] border border-[#27272a] rounded-lg transition-colors flex items-center gap-1.5"
+              className="px-3 py-1.5 text-xs text-zinc-500 hover:text-white bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-lg transition-colors flex items-center gap-1.5"
+              aria-label="Reset to defaults"
             >
               <RotateCcw className="w-3 h-3" />
               <span>Reset to Defaults</span>
@@ -341,11 +349,12 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3.5 border-t border-[#27272a] bg-[#09090b] flex items-center justify-end">
+        <div className="px-5 py-3.5 border-t border-zinc-800 bg-zinc-950/50 flex items-center justify-end">
           <button
             type="button"
             onClick={onClose}
-            className="px-5 py-2 bg-white text-black hover:bg-neutral-200 font-medium rounded-xl transition-colors text-xs shadow-sm"
+            className="px-5 py-2 bg-white text-zinc-950 hover:bg-neutral-200 font-medium rounded-xl transition-colors text-xs shadow-sm"
+            aria-label="Done"
           >
             Done
           </button>

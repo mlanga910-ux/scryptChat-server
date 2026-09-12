@@ -14,7 +14,6 @@ import {
   RotateCcw,
   PhoneOff,
   VideoOff,
-  UserX,
 } from 'lucide-react';
 import {
   getSoundSettings,
@@ -139,43 +138,45 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   return (
     <div
       id="settings-modal-backdrop"
-      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 select-none font-sans text-xs animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 select-none font-sans text-xs animate-in fade-in duration-150"
     >
-      <div className="w-full max-w-xl h-[620px] max-h-[92vh] bg-[#0c0c0e] border border-[#27272a] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+      <div className="w-full max-w-xl h-[620px] max-h-[92vh] bg-zinc-950 border border-zinc-800 rounded-2xl shadow-xl flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="px-5 py-4 border-b border-[#1f1f23] bg-[#09090b] flex items-center justify-between shrink-0">
+        <div className="px-5 py-4 border-b border-zinc-800 bg-zinc-950/50 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-[#18181b] border border-[#27272a] flex items-center justify-center text-white">
+            <div className="w-8 h-8 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-white">
               <Sliders className="w-4 h-4 text-white" />
             </div>
             <div>
               <h3 className="text-sm font-semibold text-white tracking-tight">
                 Settings
               </h3>
-              <p className="text-[11px] text-[#71717a]">
-                Audio synthesis, call studio quality, and network preferences
+              <p className="text-[11px] text-zinc-500">
+                Audio, call quality, and network preferences
               </p>
             </div>
           </div>
           <button
             id="close-settings-modal-btn"
             onClick={handleClose}
-            className="p-1.5 text-[#71717a] hover:text-white hover:bg-[#18181b] rounded-lg transition-colors"
+            className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-900 rounded-lg transition-colors"
+            aria-label="Close settings"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Tab Navigation */}
-        <div className="grid grid-cols-3 border-b border-[#1f1f23] bg-[#09090b] p-1.5 gap-1.5 text-center shrink-0">
+        <div className="grid grid-cols-3 border-b border-zinc-800 bg-zinc-950/50 p-1.5 gap-1.5 text-center shrink-0">
           <button
             id="tab-audio-settings"
             onClick={() => setActiveTab('audio')}
-            className={`py-2 rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${
+            className={`py-2 rounded-xl text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'audio'
-                ? 'bg-[#18181b] text-white border border-[#27272a] font-semibold'
-                : 'text-[#71717a] hover:text-white'
+                ? 'bg-zinc-900 text-white border border-zinc-800 font-semibold shadow-sm'
+                : 'text-zinc-500 hover:text-white'
             }`}
+            aria-label="Audio & Sounds"
           >
             <Volume2 className="w-3.5 h-3.5" />
             <span>Audio &amp; Sounds</span>
@@ -183,11 +184,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <button
             id="tab-calls-settings"
             onClick={() => setActiveTab('calls')}
-            className={`py-2 rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${
+            className={`py-2 rounded-xl text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'calls'
-                ? 'bg-[#18181b] text-white border border-[#27272a] font-semibold'
-                : 'text-[#71717a] hover:text-white'
+                ? 'bg-zinc-900 text-white border border-zinc-800 font-semibold shadow-sm'
+                : 'text-zinc-500 hover:text-white'
             }`}
+            aria-label="Call & Media"
           >
             <Mic className="w-3.5 h-3.5" />
             <span>Call &amp; Media</span>
@@ -195,11 +197,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <button
             id="tab-privacy-settings"
             onClick={() => setActiveTab('privacy')}
-            className={`py-2 rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${
+            className={`py-2 rounded-xl text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'privacy'
-                ? 'bg-[#18181b] text-white border border-[#27272a] font-semibold'
-                : 'text-[#71717a] hover:text-white'
+                ? 'bg-zinc-900 text-white border border-zinc-800 font-semibold shadow-sm'
+                : 'text-zinc-500 hover:text-white'
             }`}
+            aria-label="Network & Status"
           >
             <Radio className="w-3.5 h-3.5" />
             <span>Network &amp; Status</span>
@@ -212,19 +215,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {activeTab === 'audio' && (
             <div className="space-y-4">
               {/* Master Volume Toggle */}
-              <div className="p-4 bg-[#09090b] border border-[#1f1f23] rounded-xl flex items-center justify-between">
+              <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl flex items-center justify-between">
                 <div>
-                  <div className="font-semibold text-white text-xs">Audio Feedback &amp; Synthesizer</div>
-                  <div className="text-[11px] text-[#71717a] mt-0.5">
-                    Real-time procedural audio synthesis without external files
+                  <div className="font-semibold text-white text-xs">Audio Feedback</div>
+                  <div className="text-[11px] text-zinc-500 mt-0.5">
+                    Real-time procedural audio synthesis
                   </div>
                 </div>
                 <button
                   id="toggle-sound-enabled-btn"
                   onClick={() => updateSetting('soundEnabled', !settings.soundEnabled)}
                   className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 ${
-                    settings.soundEnabled ? 'bg-white' : 'bg-[#27272a]'
+                    settings.soundEnabled ? 'bg-emerald-400' : 'bg-zinc-800'
                   }`}
+                  aria-label={settings.soundEnabled ? 'Disable sounds' : 'Enable sounds'}
+                  aria-pressed={settings.soundEnabled}
                 >
                   <div
                     className={`w-5 h-5 rounded-full bg-black shadow-md transition-transform ${
@@ -235,15 +240,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
 
               {/* Volume Slider */}
-              <div className="p-4 bg-[#09090b] border border-[#1f1f23] rounded-xl space-y-2">
+              <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-white text-xs">Master Volume</span>
-                  <span className="font-mono text-[11px] text-[#71717a]">
+                  <span className="font-mono text-[11px] text-zinc-500">
                     {Math.round((settings.masterVolume || 0.85) * 100)}%
                   </span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <VolumeX className="w-4 h-4 text-[#71717a]" />
+                  <VolumeX className="w-4 h-4 text-zinc-500" />
                   <input
                     type="range"
                     min="0"
@@ -251,7 +256,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     step="0.05"
                     value={settings.masterVolume ?? 0.85}
                     onChange={(e) => updateSetting('masterVolume', parseFloat(e.target.value))}
-                    className="flex-1 accent-white h-1.5 bg-[#27272a] rounded-lg appearance-none cursor-pointer"
+                    className="flex-1 accent-emerald-400 h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                    aria-label="Master volume"
                   />
                   <Volume2 className="w-4 h-4 text-white" />
                 </div>
@@ -259,7 +265,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
               {/* Message Sound Presets */}
               <div className="space-y-2">
-                <label className="text-[11px] font-semibold uppercase tracking-wider text-[#a1a1aa] block">
+                <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 block">
                   Message Notification Tones
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -272,8 +278,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         onClick={() => updateSetting('messageSound', sound.id)}
                         className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-2 ${
                           isSelected
-                            ? 'bg-[#18181b] border-white/40 text-white shadow-sm'
-                            : 'bg-[#09090b] border-[#1f1f23] text-[#a1a1aa] hover:border-[#27272a] hover:text-white'
+                            ? 'bg-zinc-900 border-emerald-400/40 text-white shadow-sm'
+                            : 'bg-zinc-950/50 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-white'
                         }`}
                       >
                         <div className="min-w-0">
@@ -281,7 +287,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             {isSelected && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
                             <span>{sound.label}</span>
                           </div>
-                          <div className="text-[10px] text-[#71717a] truncate mt-0.5">{sound.desc}</div>
+                          <div className="text-[10px] text-zinc-500 truncate mt-0.5">{sound.desc}</div>
                         </div>
 
                         <button
@@ -292,10 +298,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           }}
                           className={`p-2 rounded-lg transition-colors shrink-0 ${
                             isTesting
-                              ? 'bg-emerald-500 text-black'
-                              : 'bg-[#18181b] text-white hover:bg-[#27272a]'
+                              ? 'bg-emerald-500 text-zinc-950'
+                              : 'bg-zinc-900 text-white hover:bg-zinc-800'
                           }`}
                           title="Test tone"
+                          aria-label={`Test ${sound.label}`}
                         >
                           <Play className="w-3 h-3" />
                         </button>
@@ -307,7 +314,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
               {/* Ringtone Presets */}
               <div className="space-y-2">
-                <label className="text-[11px] font-semibold uppercase tracking-wider text-[#a1a1aa] block">
+                <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 block">
                   Incoming Call Ringtones
                 </label>
                 <div className="space-y-2">
@@ -320,8 +327,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         onClick={() => updateSetting('ringtone', ring.id)}
                         className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-2 ${
                           isSelected
-                            ? 'bg-[#18181b] border-white/40 text-white shadow-sm'
-                            : 'bg-[#09090b] border-[#1f1f23] text-[#a1a1aa] hover:border-[#27272a] hover:text-white'
+                            ? 'bg-zinc-900 border-emerald-400/40 text-white shadow-sm'
+                            : 'bg-zinc-950/50 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-white'
                         }`}
                       >
                         <div className="min-w-0">
@@ -329,7 +336,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             {isSelected && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
                             <span>{ring.label}</span>
                           </div>
-                          <div className="text-[10px] text-[#71717a] truncate mt-0.5">{ring.desc}</div>
+                          <div className="text-[10px] text-zinc-500 truncate mt-0.5">{ring.desc}</div>
                         </div>
 
                         <button
@@ -342,8 +349,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors shrink-0 ${
                             isTestingThis
                               ? 'bg-rose-600 text-white animate-pulse'
-                              : 'bg-[#18181b] text-white hover:bg-[#27272a]'
+                              : 'bg-zinc-900 text-white hover:bg-zinc-800'
                           }`}
+                          aria-label={isTestingThis ? `Stop ${ring.label}` : `Test ${ring.label}`}
                         >
                           {isTestingThis ? <Square className="w-3 h-3" /> : <Play className="w-3 h-3" />}
                           <span>{isTestingThis ? 'Stop' : 'Test'}</span>
@@ -360,19 +368,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {activeTab === 'calls' && (
             <div className="space-y-4">
               {/* Studio Voice Engine */}
-              <div className="p-4 bg-[#09090b] border border-[#1f1f23] rounded-xl space-y-3">
+              <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="font-semibold text-white text-xs">Studio Voice &amp; Noise Isolation</div>
-                    <div className="text-[11px] text-[#71717a] mt-0.5">
+                    <div className="text-[11px] text-zinc-500 mt-0.5">
                       DSP dynamic voice gate &amp; active background noise filtering
                     </div>
                   </div>
                   <button
                     onClick={() => updateSetting('studioVoiceGate', !settings.studioVoiceGate)}
                     className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 ${
-                      settings.studioVoiceGate ? 'bg-emerald-500' : 'bg-[#27272a]'
+                      settings.studioVoiceGate ? 'bg-emerald-400' : 'bg-zinc-800'
                     }`}
+                    aria-label={settings.studioVoiceGate ? 'Disable voice gate' : 'Enable voice gate'}
+                    aria-pressed={settings.studioVoiceGate}
                   >
                     <div
                       className={`w-5 h-5 rounded-full bg-black shadow-md transition-transform ${
@@ -382,17 +392,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </button>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2 pt-1 border-t border-[#1f1f23]">
-                  <div className="flex items-center justify-between p-2 bg-[#141418] rounded-lg">
-                    <span className="text-[10px] text-[#a1a1aa]">Echo Cancellation</span>
+                <div className="grid grid-cols-3 gap-2 pt-1 border-t border-zinc-800">
+                  <div className="flex items-center justify-between p-2 bg-zinc-900 rounded-lg">
+                    <span className="text-[10px] text-zinc-500">Echo Cancellation</span>
                     <span className="text-emerald-400 font-bold text-[10px]">ON</span>
                   </div>
-                  <div className="flex items-center justify-between p-2 bg-[#141418] rounded-lg">
-                    <span className="text-[10px] text-[#a1a1aa]">Noise Suppression</span>
+                  <div className="flex items-center justify-between p-2 bg-zinc-900 rounded-lg">
+                    <span className="text-[10px] text-zinc-500">Noise Suppression</span>
                     <span className="text-emerald-400 font-bold text-[10px]">ON</span>
                   </div>
-                  <div className="flex items-center justify-between p-2 bg-[#141418] rounded-lg">
-                    <span className="text-[10px] text-[#a1a1aa]">Auto Gain Control</span>
+                  <div className="flex items-center justify-between p-2 bg-zinc-900 rounded-lg">
+                    <span className="text-[10px] text-zinc-500">Auto Gain Control</span>
                     <span className="text-emerald-400 font-bold text-[10px]">ON</span>
                   </div>
                 </div>
@@ -400,7 +410,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
               {/* Audio Fidelity Preset */}
               <div className="space-y-2">
-                <label className="text-[11px] font-semibold uppercase tracking-wider text-[#a1a1aa] block">
+                <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 block">
                   Audio Codec Quality
                 </label>
                 <div className="grid grid-cols-3 gap-2">
@@ -415,9 +425,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       onClick={() => updateSetting('audioPreset', preset.id as any)}
                       className={`p-3 rounded-xl border text-left transition-all ${
                         settings.audioPreset === preset.id
-                          ? 'bg-[#18181b] border-white text-white font-semibold'
-                          : 'bg-[#09090b] border-[#1f1f23] text-[#71717a] hover:text-white'
+                          ? 'bg-zinc-900 border-emerald-400/40 text-white font-semibold shadow-sm'
+                          : 'bg-zinc-950/50 border-zinc-800 text-zinc-500 hover:text-white'
                       }`}
+                      aria-label={preset.label}
                     >
                       <div className="text-xs font-semibold text-white">{preset.label}</div>
                       <div className="text-[10px] opacity-70 mt-0.5">{preset.desc}</div>
@@ -428,7 +439,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
               {/* Video Resolution */}
               <div className="space-y-2">
-                <label className="text-[11px] font-semibold uppercase tracking-wider text-[#a1a1aa] block">
+                <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 block">
                   Video Call Resolution
                 </label>
                 <div className="grid grid-cols-3 gap-2">
@@ -443,9 +454,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       onClick={() => updateSetting('videoQuality', v.id as any)}
                       className={`p-3 rounded-xl border text-left transition-all ${
                         settings.videoQuality === v.id
-                          ? 'bg-[#18181b] border-white text-white font-semibold'
-                          : 'bg-[#09090b] border-[#1f1f23] text-[#71717a] hover:text-white'
+                          ? 'bg-zinc-900 border-emerald-400/40 text-white font-semibold shadow-sm'
+                          : 'bg-zinc-950/50 border-zinc-800 text-zinc-500 hover:text-white'
                       }`}
+                      aria-label={v.label}
                     >
                       <div className="text-xs font-semibold text-white">{v.label}</div>
                       <div className="text-[10px] opacity-70 mt-0.5">{v.desc}</div>
@@ -455,23 +467,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
 
               {/* Call & Video Call Blocking List */}
-              <div className="p-4 bg-[#09090b] border border-[#1f1f23] rounded-xl space-y-3">
+              <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-3">
                 <div>
                   <div className="font-semibold text-white text-xs flex items-center gap-1.5">
-                    <PhoneOff className="w-3.5 h-3.5 text-red-400" />
+                    <PhoneOff className="w-3.5 h-3.5 text-rose-400" />
                     <span>Call &amp; Video Call Blocking</span>
                   </div>
-                  <p className="text-[11px] text-[#71717a] mt-0.5">
-                    Prevent specific contacts from calling or video calling your device.
+                  <p className="text-[11px] text-zinc-500 mt-0.5">
+                    Prevent specific contacts from calling your device.
                   </p>
                 </div>
 
                 {contacts.length === 0 ? (
-                  <p className="text-[11px] text-[#52525b] italic py-1">
-                    No contacts paired yet. Pair with devices to manage call restrictions.
+                  <p className="text-[11px] text-zinc-600 italic py-1">
+                    No contacts paired yet.
                   </p>
                 ) : (
-                  <div className="space-y-2 pt-1 border-t border-[#1f1f23] max-h-48 overflow-y-auto pr-1">
+                  <div className="space-y-2 pt-1 border-t border-zinc-800 max-h-48 overflow-y-auto pr-1">
                     {contacts.map((c) => {
                       const cSet = contactSettingsMap[c.deviceId] || getChatSettings(c.deviceId);
                       const isVoiceBlocked = !!cSet.blockVoiceCalls;
@@ -479,13 +491,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       return (
                         <div
                           key={c.deviceId}
-                          className="flex items-center justify-between p-2.5 bg-[#141418] border border-[#1f1f23] rounded-lg gap-2"
+                          className="flex items-center justify-between p-2.5 bg-zinc-950 border border-zinc-800 rounded-xl gap-2"
                         >
                           <div className="min-w-0 flex-1">
                             <div className="font-medium text-white text-xs truncate">
                               {c.alias || c.deviceId}
                             </div>
-                            <div className="font-mono text-[10px] text-[#71717a] truncate">
+                            <div className="font-mono text-[10px] text-zinc-500 truncate">
                               {c.deviceId}
                             </div>
                           </div>
@@ -496,10 +508,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               onClick={() => toggleContactBlock(c.deviceId, 'blockVoiceCalls')}
                               className={`px-2 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1 ${
                                 isVoiceBlocked
-                                  ? 'bg-red-950/80 text-red-400 border border-red-800/60'
-                                  : 'bg-[#1e1e24] text-[#a1a1aa] border border-[#2e2e38] hover:text-white'
+                                  ? 'bg-rose-950/40 text-rose-400 border border-rose-800/60'
+                                  : 'bg-zinc-900 text-zinc-500 border border-zinc-800 hover:text-white'
                               }`}
                               title={isVoiceBlocked ? 'Unblock Voice Calls' : 'Block Voice Calls'}
+                              aria-label={isVoiceBlocked ? 'Unblock voice calls' : 'Block voice calls'}
                             >
                               <PhoneOff className="w-3 h-3" />
                               <span>{isVoiceBlocked ? 'Calls Blocked' : 'Block Calls'}</span>
@@ -510,10 +523,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               onClick={() => toggleContactBlock(c.deviceId, 'blockVideoCalls')}
                               className={`px-2 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1 ${
                                 isVideoBlocked
-                                  ? 'bg-red-950/80 text-red-400 border border-red-800/60'
-                                  : 'bg-[#1e1e24] text-[#a1a1aa] border border-[#2e2e38] hover:text-white'
+                                  ? 'bg-rose-950/40 text-rose-400 border border-rose-800/60'
+                                  : 'bg-zinc-900 text-zinc-500 border border-zinc-800 hover:text-white'
                               }`}
                               title={isVideoBlocked ? 'Unblock Video Calls' : 'Block Video Calls'}
+                              aria-label={isVideoBlocked ? 'Unblock video calls' : 'Block video calls'}
                             >
                               <VideoOff className="w-3 h-3" />
                               <span>{isVideoBlocked ? 'Video Blocked' : 'Block Video'}</span>
@@ -531,9 +545,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* TAB 3: NETWORK & STATUS */}
           {activeTab === 'privacy' && (
             <div className="space-y-4">
-              <div className="p-4 bg-[#09090b] border border-[#1f1f23] rounded-xl space-y-3">
+              <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-[#a1a1aa]">Signaling Server Status</span>
+                  <span className="text-xs font-medium text-zinc-500">Signaling Server Status</span>
                   <div className="flex items-center gap-2">
                     <div
                       className={`w-2 h-2 rounded-full ${
@@ -549,8 +563,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
 
                 {relayPingMs !== null && relayPingMs !== undefined && (
-                  <div className="flex items-center justify-between pt-2 border-t border-[#1f1f23]">
-                    <span className="text-xs text-[#a1a1aa]">Signaling Latency</span>
+                  <div className="flex items-center justify-between pt-2 border-t border-zinc-800">
+                    <span className="text-xs text-zinc-500">Signaling Latency</span>
                     <span className="font-mono text-xs text-emerald-400 font-semibold">
                       {relayPingMs} ms
                     </span>
@@ -558,9 +572,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 )}
               </div>
 
-              <div className="p-4 bg-[#09090b] border border-[#1f1f23] rounded-xl space-y-2">
-                <div className="font-medium text-white text-xs">Direct Zero-Knowledge Mesh</div>
-                <p className="text-[11px] text-[#71717a] leading-relaxed">
+              <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-2">
+                <div className="font-semibold text-white text-xs">Direct Zero-Knowledge Mesh</div>
+                <p className="text-[11px] text-zinc-500 leading-relaxed">
                   All audio, video, and file streams connect directly P2P through WebSockets/WebRTC with AES-256-GCM encryption. The signaling server never decrypts or retains communication keys.
                 </p>
               </div>
@@ -569,7 +583,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <button
                   type="button"
                   onClick={handleResetDefaults}
-                  className="flex items-center justify-center gap-2 w-full py-2.5 bg-[#18181b] hover:bg-[#27272a] text-white border border-[#27272a] rounded-xl text-xs font-medium transition-colors"
+                  className="flex items-center justify-center gap-2 w-full py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white border border-zinc-800 rounded-xl text-xs font-medium transition-colors"
+                  aria-label="Restore factory defaults"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   <span>Restore Factory Defaults</span>

@@ -68,20 +68,20 @@ export const CodeBlockCard: React.FC<CodeBlockCardProps> = ({
     });
   };
 
-  const visibleLines = isExpanded ? lines : lines.slice(0, 8);
+  const visibleLines = isExpanded ? lines : lines.slice(0, 12);
 
   return (
-    <div className="w-full min-w-0 sm:min-w-[320px] max-w-full bg-[#070709] border border-[#27272a] rounded-xl overflow-hidden font-mono text-xs shadow-md my-1 select-text">
+    <div className="w-full min-w-0 sm:min-w-[320px] max-w-full bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden font-mono text-xs shadow-sm my-1 select-text">
       {/* Top Header Bar */}
-      <div className="px-3 py-2 bg-[#0e0e12] border-b border-[#222226] flex items-center justify-between gap-2 select-none">
+      <div className="px-3 py-2 bg-zinc-950 border-b border-zinc-800 flex items-center justify-between gap-2 select-none">
         <div className="flex items-center gap-2 min-w-0">
-          <div className="w-6 h-6 rounded-md bg-[#18181c] border border-[#2c2c34] flex items-center justify-center shrink-0">
+          <div className="w-6 h-6 rounded-md bg-zinc-900 border border-zinc-800 flex items-center justify-center shrink-0">
             <FileCode className="w-3.5 h-3.5 text-emerald-400" />
           </div>
           <span className="text-white font-medium text-[11px] truncate tracking-tight">
             {displayTitle}
           </span>
-          <span className="px-1.5 py-0.5 rounded text-[10px] uppercase font-bold bg-[#18181c] text-emerald-400 border border-[#27272a] shrink-0">
+          <span className="px-1.5 py-0.5 rounded text-[10px] uppercase font-bold bg-zinc-900 text-emerald-400 border border-zinc-800 shrink-0">
             {language}
           </span>
         </div>
@@ -96,10 +96,12 @@ export const CodeBlockCard: React.FC<CodeBlockCardProps> = ({
             }}
             className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
               isSearchOpen
-                ? 'bg-white text-black'
-                : 'text-[#a1a1aa] hover:text-white hover:bg-[#1f1f24]'
+                ? 'bg-white text-zinc-950'
+                : 'text-zinc-500 hover:text-white hover:bg-zinc-900'
             }`}
             title="Search inside code"
+            aria-label="Search in code"
+            aria-pressed={isSearchOpen}
           >
             <Search className="w-3.5 h-3.5" />
           </button>
@@ -107,8 +109,9 @@ export const CodeBlockCard: React.FC<CodeBlockCardProps> = ({
           <button
             type="button"
             onClick={handleCopy}
-            className="p-1.5 rounded-lg text-[#a1a1aa] hover:text-white hover:bg-[#1f1f24] transition-colors cursor-pointer flex items-center gap-1 text-[10px] font-sans"
+            className="p-1.5 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-900 transition-colors cursor-pointer flex items-center gap-1 text-[10px] font-sans"
             title="Copy code"
+            aria-label="Copy code"
           >
             {copied ? (
               <>
@@ -126,8 +129,9 @@ export const CodeBlockCard: React.FC<CodeBlockCardProps> = ({
           <button
             type="button"
             onClick={handleDownload}
-            className="p-1.5 rounded-lg text-[#a1a1aa] hover:text-white hover:bg-[#1f1f24] transition-colors cursor-pointer"
+            className="p-1.5 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-900 transition-colors cursor-pointer"
             title="Download file"
+            aria-label="Download code"
           >
             <Download className="w-3.5 h-3.5" />
           </button>
@@ -136,8 +140,9 @@ export const CodeBlockCard: React.FC<CodeBlockCardProps> = ({
             <button
               type="button"
               onClick={handleOpenFullscreen}
-              className="p-1.5 rounded-lg text-[#a1a1aa] hover:text-white hover:bg-[#1f1f24] transition-colors cursor-pointer"
+              className="p-1.5 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-900 transition-colors cursor-pointer"
               title="Fullscreen viewer"
+              aria-label="Open fullscreen"
             >
               <Maximize2 className="w-3.5 h-3.5" />
             </button>
@@ -145,20 +150,21 @@ export const CodeBlockCard: React.FC<CodeBlockCardProps> = ({
         </div>
       </div>
 
-      {/* Inline Search Bar if Open */}
+      {/* Inline Search Bar */}
       {isSearchOpen && (
-        <div className="px-3 py-1.5 bg-[#09090c] border-b border-[#222226] flex items-center gap-2">
-          <Search className="w-3 h-3 text-[#71717a] shrink-0" />
+        <div className="px-3 py-1.5 bg-zinc-950 border-b border-zinc-800 flex items-center gap-2">
+          <Search className="w-3 h-3 text-zinc-500 shrink-0" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Filter lines in code..."
+            placeholder="Filter lines..."
             autoFocus
-            className="flex-1 bg-transparent text-[11px] text-white placeholder-[#71717a] focus:outline-none"
+            className="flex-1 bg-transparent text-[11px] text-white placeholder-zinc-500 focus:outline-none"
+            aria-label="Search in code"
           />
           {searchQuery && (
-            <span className="text-[10px] text-[#a1a1aa] shrink-0">
+            <span className="text-[10px] text-zinc-500 shrink-0">
               {filteredLineIndices ? `${filteredLineIndices.length} matches` : ''}
             </span>
           )}
@@ -166,7 +172,7 @@ export const CodeBlockCard: React.FC<CodeBlockCardProps> = ({
       )}
 
       {/* Code Lines Body */}
-      <div className="p-2.5 sm:p-3 overflow-x-auto max-h-[380px] overflow-y-auto bg-[#070709] text-[11px] leading-relaxed">
+      <div className="p-2.5 sm:p-3 overflow-x-auto max-h-[400px] overflow-y-auto bg-zinc-950 text-[11px] leading-relaxed">
         <table className="w-full border-collapse">
           <tbody>
             {visibleLines.map((lineText, idx) => {
@@ -181,14 +187,14 @@ export const CodeBlockCard: React.FC<CodeBlockCardProps> = ({
               return (
                 <tr
                   key={idx}
-                  className={`hover:bg-[#131318] transition-colors ${
-                    isMatch ? 'bg-amber-500/15' : ''
+                  className={`hover:bg-zinc-900/50 transition-colors ${
+                    isMatch ? 'bg-amber-400/10' : ''
                   }`}
                 >
-                  <td className="w-8 pr-3 text-right text-[#52525b] select-none font-mono text-[10px] align-top">
+                  <td className="w-8 pr-3 text-right text-zinc-600 select-none font-mono text-[10px] align-top">
                     {lineNumber}
                   </td>
-                  <td className="text-[#d4d4d8] whitespace-pre font-mono select-text break-normal">
+                  <td className="text-zinc-300 whitespace-pre font-mono select-text break-normal">
                     {lineText || ' '}
                   </td>
                 </tr>
@@ -199,8 +205,8 @@ export const CodeBlockCard: React.FC<CodeBlockCardProps> = ({
       </div>
 
       {/* Expand / Collapse Footer */}
-      {lines.length > 8 && (
-        <div className="px-3 py-1.5 bg-[#0c0c10] border-t border-[#1f1f24] flex items-center justify-between text-[11px] text-[#71717a] select-none">
+      {lines.length > 12 && (
+        <div className="px-3 py-1.5 bg-zinc-950 border-t border-zinc-800 flex items-center justify-between text-[11px] text-zinc-500 select-none">
           <span className="font-mono text-[10px]">
             {totalLines} lines • {code.length} chars
           </span>
@@ -209,15 +215,16 @@ export const CodeBlockCard: React.FC<CodeBlockCardProps> = ({
               type="button"
               onClick={() => setIsExpanded(!isExpanded)}
               className="flex items-center gap-1 text-emerald-400 hover:text-emerald-300 font-sans font-medium transition-colors cursor-pointer"
+              aria-label={isExpanded ? 'Show less' : 'Show all'}
             >
-              <span>{isExpanded ? 'Show less' : `Show all (+${lines.length - 8} lines)`}</span>
+              <span>{isExpanded ? 'Show less' : `Show all (+${lines.length - 12} lines)`}</span>
               {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
             </button>
             {onOpenModal && (
               <button
                 type="button"
                 onClick={handleOpenFullscreen}
-                className="text-[#a1a1aa] hover:text-white font-sans transition-colors cursor-pointer pl-1 border-l border-[#27272a]"
+                className="text-zinc-500 hover:text-white font-sans transition-colors cursor-pointer pl-1 border-l border-zinc-800"
               >
                 Open Viewer →
               </button>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { FileRecord, ImageExifData, MessageRecord } from '../types/index';
 import {
   X,
@@ -40,14 +40,13 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [showInfo, setShowInfo] = useState<boolean>(false);
-  const [copiedHash, setCopiedHash] = useState<boolean>(false);
+  const [copiedHash, setCopiedHash] = useState(false);
   const [naturalDimensions, setNaturalDimensions] = useState<{ width: number; height: number } | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const touchStartDistRef = useRef<number | null>(null);
   const touchStartScaleRef = useRef<number>(1);
 
-  // Reset state when opening a new image
   useEffect(() => {
     if (isOpen) {
       setScale(1);
@@ -58,7 +57,6 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
     }
   }, [isOpen, fileRecord?.fileId]);
 
-  // Handle ESC key to close
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -77,7 +75,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
       } else if (e.key === 'r' || e.key === 'R') {
         handleRotate();
       } else if (e.key === 'i' || e.key === 'I') {
-        setShowInfo((prev) => !prev);
+        setShowInfo((prev) => !showInfo);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -113,7 +111,6 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
     setRotation((prev) => (prev + 90) % 360);
   };
 
-  // Wheel zoom centered on cursor
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     const delta = e.deltaY * -0.0015;
@@ -126,7 +123,6 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
     });
   };
 
-  // Double click to toggle 2x / fit
   const handleDoubleClick = () => {
     if (scale > 1.2) {
       handleResetZoom();
@@ -135,7 +131,6 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
     }
   };
 
-  // Mouse drag pan
   const handleMouseDown = (e: React.MouseEvent) => {
     if (scale <= 1) return;
     setIsDragging(true);
@@ -154,7 +149,6 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
     setIsDragging(false);
   };
 
-  // Touch drag & pinch-to-zoom
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 1) {
       if (scale > 1) {
@@ -226,16 +220,16 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
   return (
     <div
       id="fullscreen-image-viewer"
-      className="fixed inset-0 z-50 bg-[#09090b]/95 backdrop-blur-xl flex flex-col select-none font-sans overflow-hidden animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 bg-[#0a0a0b]/98 backdrop-blur-xl flex flex-col select-none font-sans overflow-hidden animate-in fade-in duration-200"
     >
       {/* Top Header Bar */}
-      <div className="h-14 px-4 sm:px-6 bg-[#101014]/90 border-b border-[#27272a] flex items-center justify-between shrink-0 z-20">
-        {/* Left: Close & Filename */}
+      <div className="h-14 px-4 sm:px-6 bg-[#0a0a0b]/80 border-b border-[#27272a]/60 flex items-center justify-between shrink-0 z-20">
         <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={onClose}
             className="p-2 text-[#a1a1aa] hover:text-white hover:bg-[#27272a] rounded-xl transition-colors cursor-pointer"
             title="Close (Esc)"
+            aria-label="Close"
           >
             <X className="w-5 h-5" />
           </button>
@@ -250,12 +244,13 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
         </div>
 
         {/* Center: Quick Zoom & Action Indicators (Desktop) */}
-        <div className="hidden md:flex items-center gap-1 bg-[#18181b] border border-[#27272a] rounded-xl p-1">
+        <div className="hidden md:flex items-center gap-1 bg-[#111114]/80 border border-[#27272a]/60 rounded-xl p-1">
           <button
             onClick={handleZoomOut}
             disabled={scale <= 0.4}
             className="p-1.5 text-[#a1a1aa] hover:text-white hover:bg-[#27272a] disabled:opacity-30 rounded-lg transition-colors cursor-pointer"
             title="Zoom Out (-)"
+            aria-label="Zoom out"
           >
             <ZoomOut className="w-4 h-4" />
           </button>
@@ -267,6 +262,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
             disabled={scale >= 5}
             className="p-1.5 text-[#a1a1aa] hover:text-white hover:bg-[#27272a] disabled:opacity-30 rounded-lg transition-colors cursor-pointer"
             title="Zoom In (+)"
+            aria-label="Zoom in"
           >
             <ZoomIn className="w-4 h-4" />
           </button>
@@ -275,6 +271,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
             onClick={handleResetZoom}
             className="px-2 py-1 text-[11px] font-medium text-[#a1a1aa] hover:text-white hover:bg-[#27272a] rounded-lg transition-colors cursor-pointer"
             title="Fit to Window (0)"
+            aria-label="Fit to window"
           >
             Fit
           </button>
@@ -282,6 +279,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
             onClick={handleSetActualSize}
             className="px-2 py-1 text-[11px] font-medium text-[#a1a1aa] hover:text-white hover:bg-[#27272a] rounded-lg transition-colors cursor-pointer"
             title="100% / 2x"
+            aria-label="Actual size"
           >
             100%
           </button>
@@ -290,6 +288,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
             onClick={handleRotate}
             className="p-1.5 text-[#a1a1aa] hover:text-white hover:bg-[#27272a] rounded-lg transition-colors cursor-pointer"
             title="Rotate 90° (R)"
+            aria-label="Rotate"
           >
             <RotateCw className="w-4 h-4" />
           </button>
@@ -297,27 +296,27 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
 
         {/* Right: Info Drawer Toggle & Download */}
         <div className="flex items-center gap-2">
-          {/* Info Toggle */}
           <button
             onClick={() => setShowInfo(!showInfo)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
               showInfo
-                ? 'bg-blue-600 border-blue-500 text-white shadow-sm'
-                : 'bg-[#18181b] border-[#27272a] text-[#d4d4d8] hover:text-white hover:bg-[#27272a]'
+                ? 'bg-emerald-400/15 border-emerald-400/30 text-emerald-400 shadow-sm'
+                : 'bg-[#111114]/80 border-[#27272a]/60 text-[#d4d4d8] hover:text-white hover:bg-[#27272a]'
             }`}
             title="Image Info & EXIF (I)"
+            aria-label="Toggle info panel"
           >
             <Info className="w-4 h-4" />
             <span className="hidden sm:inline">Info</span>
           </button>
 
-          {/* Download Button */}
           {blobUrl && (
             <a
               href={blobUrl}
               download={fileRecord.name}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-neutral-200 text-black text-xs font-semibold rounded-xl transition-all shadow-sm active:scale-95 cursor-pointer"
               title="Download Original Image"
+              aria-label="Download original image"
             >
               <Download className="w-4 h-4" />
               <span>Download</span>
@@ -371,11 +370,12 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
           )}
 
           {/* Floating Mobile Controls Pill */}
-          <div className="flex md:hidden absolute bottom-5 left-1/2 -translate-x-1/2 z-20 items-center gap-1 bg-[#18181b]/90 backdrop-blur-md border border-[#27272a] rounded-full p-1.5 shadow-2xl">
+          <div className="flex md:hidden absolute bottom-5 left-1/2 -translate-x-1/2 z-20 items-center gap-1 bg-[#111114]/90 backdrop-blur-md border border-[#27272a]/60 rounded-full p-1.5 shadow-2xl">
             <button
               onClick={handleZoomOut}
               className="p-2 text-[#a1a1aa] hover:text-white rounded-full"
               title="Zoom Out"
+              aria-label="Zoom out"
             >
               <ZoomOut className="w-4 h-4" />
             </button>
@@ -386,6 +386,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
               onClick={handleZoomIn}
               className="p-2 text-[#a1a1aa] hover:text-white rounded-full"
               title="Zoom In"
+              aria-label="Zoom in"
             >
               <ZoomIn className="w-4 h-4" />
             </button>
@@ -394,6 +395,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
               onClick={handleRotate}
               className="p-2 text-[#a1a1aa] hover:text-white rounded-full"
               title="Rotate"
+              aria-label="Rotate"
             >
               <RotateCw className="w-4 h-4" />
             </button>
@@ -401,6 +403,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
               onClick={handleResetZoom}
               className="px-2.5 py-1 text-xs font-semibold text-[#a1a1aa] hover:text-white rounded-full"
               title="Reset"
+              aria-label="Reset zoom"
             >
               Reset
             </button>
@@ -409,15 +412,16 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
 
         {/* Sliding Info / EXIF Details Drawer */}
         {showInfo && (
-          <aside className="w-full sm:w-88 md:w-96 h-full bg-[#101014] border-l border-[#27272a] flex flex-col z-30 shadow-2xl animate-in slide-in-from-right duration-200 overflow-y-auto">
-            <div className="p-4 border-b border-[#27272a] flex items-center justify-between shrink-0">
+          <aside className="w-full sm:w-88 lg:w-96 h-full bg-[#0c0c0e]/90 border-l border-[#27272a]/60 flex flex-col z-30 shadow-2xl animate-in slide-in-from-right duration-200 overflow-y-auto">
+            <div className="p-4 border-b border-[#27272a]/60 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">
-                <Info className="w-4 h-4 text-blue-400" />
+                <Info className="w-4 h-4 text-sky-400" />
                 <h4 className="text-sm font-semibold text-white">Image Information</h4>
               </div>
               <button
                 onClick={() => setShowInfo(false)}
-                className="p-1.5 text-[#71717a] hover:text-white hover:bg-[#18181b] rounded-lg transition-colors cursor-pointer"
+                className="p-1.5 text-[#71717a] hover:text-white hover:bg-[#27272a] rounded-lg transition-colors"
+                aria-label="Close info"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -425,9 +429,9 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
 
             <div className="p-4 space-y-4 text-xs text-[#a1a1aa]">
               {/* File Specs Box */}
-              <div className="p-3 bg-[#18181b] border border-[#27272a] rounded-xl space-y-2">
-                <div className="flex items-center gap-2 text-white font-medium">
-                  <HardDrive className="w-3.5 h-3.5 text-blue-400" />
+              <div className="p-3 bg-[#111114] border border-[#27272a]/60 rounded-xl space-y-2">
+                <div className="flex items-center gap-2 text-white font-medium text-xs">
+                  <HardDrive className="w-3.5 h-3.5 text-sky-400" />
                   <span>File Specifications</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
@@ -453,7 +457,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
               </div>
 
               {/* Cryptographic SHA-256 Hash Box */}
-              <div className="p-3 bg-[#18181b] border border-[#27272a] rounded-xl space-y-1.5">
+              <div className="p-3 bg-[#111114] border border-[#27272a]/60 rounded-xl space-y-1.5">
                 <div className="flex items-center justify-between text-white font-medium">
                   <div className="flex items-center gap-1.5">
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
@@ -461,7 +465,8 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
                   </div>
                   <button
                     onClick={copyHash}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#27272a] hover:bg-[#3f3f46] text-[#d4d4d8] text-[10px] transition-colors cursor-pointer"
+                    className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#27272a]/60 hover:bg-[#3f3f46] text-[#d4d4d8] text-[10px] transition-colors cursor-pointer"
+                    aria-label={copiedHash ? 'Copied' : 'Copy hash'}
                   >
                     {copiedHash ? (
                       <>
@@ -476,14 +481,14 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
                     )}
                   </button>
                 </div>
-                <p className="text-[10px] font-mono text-[#71717a] break-all bg-[#09090b] p-2 rounded-lg border border-[#27272a]/60">
+                <p className="text-[10px] font-mono text-[#71717a] break-all bg-[#0a0a0b] p-2 rounded-lg border border-[#27272a]/60">
                   {fileRecord.hashSHA256 || 'Calculated during transmission'}
                 </p>
               </div>
 
               {/* Camera & Optics (if EXIF present) */}
               {(exif.make || exif.model || exif.lensModel || exif.fNumber || exif.iso) && (
-                <div className="p-3 bg-[#18181b] border border-[#27272a] rounded-xl space-y-2">
+                <div className="p-3 bg-[#111114] border border-[#27272a]/60 rounded-xl space-y-2">
                   <div className="flex items-center gap-2 text-white font-medium">
                     <Camera className="w-3.5 h-3.5 text-amber-400" />
                     <span>Camera & Optics</span>
@@ -497,7 +502,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
                     </div>
                     <div>
                       <span className="text-[#71717a] block">Lens</span>
-                      <span className="text-white truncate block">{exif.lensModel || 'Standard'}</span>
+                      <span className="text-white truncate block">{exif.lensModel || 'Standard Lens'}</span>
                     </div>
                     <div>
                       <span className="text-[#71717a] block">Aperture</span>
@@ -520,7 +525,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
               )}
 
               {/* Capture Attributes */}
-              <div className="p-3 bg-[#18181b] border border-[#27272a] rounded-xl space-y-2">
+              <div className="p-3 bg-[#111114] border border-[#27272a]/60 rounded-xl space-y-2">
                 <div className="flex items-center gap-2 text-white font-medium">
                   <Layers className="w-3.5 h-3.5 text-purple-400" />
                   <span>Metadata Attributes</span>
@@ -539,7 +544,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
                     </div>
                   )}
                   {hasGps && mapUrl && (
-                    <div className="pt-2 border-t border-[#27272a] flex items-center justify-between">
+                    <div className="pt-2 border-t border-[#27272a]/60 flex items-center justify-between">
                       <div className="flex items-center gap-1 text-emerald-400">
                         <MapPin className="w-3.5 h-3.5" />
                         <span>GPS Coordinates</span>
@@ -548,7 +553,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
                         href={mapUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-blue-400 hover:underline font-mono text-[10px]"
+                        className="text-[11px] text-[#a1a1aa] hover:text-white underline"
                       >
                         {exif.latitude?.toFixed(4)}, {exif.longitude?.toFixed(4)} ↗
                       </a>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { ContactRecord, GroupRecord, MessageRecord } from '../types/index';
 import {
   Plus,
@@ -15,6 +15,8 @@ import {
   Info,
   Trash2,
   UserX,
+  Check,
+  Copy,
 } from 'lucide-react';
 
 interface PeerListProps {
@@ -69,78 +71,85 @@ export const PeerList: React.FC<PeerListProps> = ({
 
   const renderLastMessagePreview = (lastMsg?: MessageRecord) => {
     if (!lastMsg) {
-      return <span className="text-[#52525b] italic">No messages yet</span>;
+      return <span className="text-zinc-500 italic">No messages yet</span>;
     }
     if (lastMsg.mediaType === 'image') {
       return (
-        <span className="flex items-center gap-1 text-[#a1a1aa]">
-          <ImageIcon className="w-3 h-3 text-blue-400" />
+        <span className="flex items-center gap-1 text-zinc-400">
+          <ImageIcon className="w-3.5 h-3.5 text-blue-400" />
           <span>Photo</span>
         </span>
       );
     }
     if (lastMsg.mediaType === 'audio') {
       return (
-        <span className="flex items-center gap-1 text-[#a1a1aa]">
-          <Mic className="w-3 h-3 text-rose-400" />
+        <span className="flex items-center gap-1 text-zinc-400">
+          <Mic className="w-3.5 h-3.5 text-rose-400" />
           <span>Voice message</span>
         </span>
       );
     }
     if (lastMsg.mediaType === 'code' || lastMsg.codeSnippet) {
       return (
-        <span className="flex items-center gap-1 text-[#a1a1aa]">
-          <FileCode className="w-3 h-3 text-emerald-400" />
+        <span className="flex items-center gap-1 text-zinc-400">
+          <FileCode className="w-3.5 h-3.5 text-emerald-400" />
           <span>Code snippet</span>
         </span>
       );
     }
     if (lastMsg.fileId) {
       return (
-        <span className="flex items-center gap-1 text-[#a1a1aa]">
-          <FileText className="w-3 h-3 text-amber-400" />
+        <span className="flex items-center gap-1 text-zinc-400">
+          <FileText className="w-3.5 h-3.5 text-amber-400" />
           <span>Attachment</span>
         </span>
       );
     }
-    return <span className="truncate">{lastMsg.payloadText}</span>;
+    return <span className="truncate text-zinc-400">{lastMsg.payloadText}</span>;
+  };
+
+  const getAvatarInitial = (contact: ContactRecord) => {
+    const alias = contact.alias || contact.deviceId;
+    return alias.charAt(0).toUpperCase();
   };
 
   return (
-    <aside className="relative w-full md:w-80 h-full min-h-0 flex flex-col border-r border-[#27272a] bg-[#09090b] font-sans select-none">
+    <aside className="relative w-full md:w-80 h-full min-h-0 flex flex-col border-r border-zinc-800 bg-zinc-950 font-sans select-none">
       {/* Top Header */}
-      <div className="px-4 pt-3.5 pb-2 flex items-center justify-between">
+      <div className="px-4 py-3.5 flex items-center justify-between shrink-0">
         <h2 className="text-sm font-semibold text-white tracking-tight">
-          Chats & Groups
+          Chats
         </h2>
         <div className="flex items-center gap-1.5">
           {onOpenGroupCreator && (
             <button
               id="create-group-btn"
               onClick={onOpenGroupCreator}
-              className="p-1.5 bg-[#18181b] hover:bg-[#27272a] text-white rounded-lg border border-[#27272a] transition-all hover:scale-105 active:scale-95 flex items-center gap-1 text-xs font-medium"
+              className="p-1.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg border border-zinc-800 transition-all text-xs font-medium flex items-center gap-1"
               title="Create Group"
+              aria-label="Create Group"
             >
               <Users className="w-3.5 h-3.5 text-blue-400" />
-              <span className="text-[11px] pr-0.5">Group</span>
+              <span className="text-[11px]">Group</span>
             </button>
           )}
           <button
             id="add-contact-btn"
             onClick={onOpenPairing}
-            className="p-1.5 bg-[#18181b] hover:bg-[#27272a] text-white rounded-lg border border-[#27272a] transition-all hover:scale-105 active:scale-95 flex items-center gap-1 text-xs font-medium"
+            className="p-1.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg border border-zinc-800 transition-all text-xs font-medium flex items-center gap-1"
             title="Add Contact / Pair Device"
+            aria-label="Add Contact"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span className="text-[11px] pr-0.5">Pair</span>
+            <span className="text-[11px]">Pair</span>
           </button>
         </div>
       </div>
 
       {/* Search Bar */}
-      <div className="px-3 pb-2">
+      <div className="px-3 pb-2.5 shrink-0">
         <div className="relative">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#71717a]">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-zinc-500">
             <Search className="w-3.5 h-3.5" />
           </div>
           <input
@@ -148,44 +157,50 @@ export const PeerList: React.FC<PeerListProps> = ({
             type="text"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="Search chats or groups..."
-            className="w-full pl-9 pr-3 py-1.5 bg-[#141418] border border-[#222226] rounded-lg text-white placeholder-[#71717a] focus:outline-none focus:border-[#3f3f46] transition-colors text-xs"
+            placeholder="Search chats..."
+            className="w-full pl-9 pr-3 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-white placeholder-zinc-500 input-base text-xs focus:ring-1 focus:ring-emerald-400/20"
+            aria-label="Search chats"
           />
         </div>
       </div>
 
       {/* Filter Tabs */}
-      <div className="px-3 pb-2 flex items-center gap-1">
-        <button
-          onClick={() => setCurrentTab('all')}
-          className={`flex-1 py-1 rounded-md text-[11px] font-medium transition-colors ${
-            currentTab === 'all'
-              ? 'bg-[#18181b] text-white border border-[#27272a]'
-              : 'text-[#71717a] hover:text-[#a1a1aa]'
-          }`}
-        >
-          All
-        </button>
-        <button
-          onClick={() => setCurrentTab('direct')}
-          className={`flex-1 py-1 rounded-md text-[11px] font-medium transition-colors ${
-            currentTab === 'direct'
-              ? 'bg-[#18181b] text-white border border-[#27272a]'
-              : 'text-[#71717a] hover:text-[#a1a1aa]'
-          }`}
-        >
-          Direct ({contacts.length})
-        </button>
-        <button
-          onClick={() => setCurrentTab('groups')}
-          className={`flex-1 py-1 rounded-md text-[11px] font-medium transition-colors ${
-            currentTab === 'groups'
-              ? 'bg-[#18181b] text-white border border-[#27272a]'
-              : 'text-[#71717a] hover:text-[#a1a1aa]'
-          }`}
-        >
-          Groups ({groups.length})
-        </button>
+      <div className="px-3 pb-2.5 shrink-0">
+        <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-lg p-1">
+          <button
+            onClick={() => setCurrentTab('all')}
+            className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-all ${
+              currentTab === 'all'
+                ? 'bg-zinc-950 text-white shadow-sm'
+                : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+            aria-label="All chats"
+          >
+            All
+          </button>
+          <button
+            onClick={() => setCurrentTab('direct')}
+            className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-all ${
+              currentTab === 'direct'
+                ? 'bg-zinc-950 text-white shadow-sm'
+                : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+            aria-label={`Direct messages (${contacts.length})`}
+          >
+            Direct ({contacts.length})
+          </button>
+          <button
+            onClick={() => setCurrentTab('groups')}
+            className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-all ${
+              currentTab === 'groups'
+                ? 'bg-zinc-950 text-white shadow-sm'
+                : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+            aria-label={`Groups (${groups.length})`}
+          >
+            Groups ({groups.length})
+          </button>
+        </div>
       </div>
 
       {/* List Content */}
@@ -194,7 +209,7 @@ export const PeerList: React.FC<PeerListProps> = ({
         {(currentTab === 'all' || currentTab === 'groups') && filteredGroups.length > 0 && (
           <div className="space-y-0.5 mb-2">
             {currentTab === 'all' && (
-              <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[#71717a]">
+              <div className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
                 Groups
               </div>
             )}
@@ -206,11 +221,12 @@ export const PeerList: React.FC<PeerListProps> = ({
                 <div
                   key={group.groupId}
                   onClick={() => onSelectGroup?.(group)}
-                  className={`p-2 rounded-xl cursor-pointer transition-all flex items-center justify-between gap-2.5 group ${
+                  className={`p-2.5 rounded-xl cursor-pointer transition-all flex items-center gap-2.5 group ${
                     isSelected
-                      ? 'bg-[#18181b] border border-[#27272a]'
-                      : 'hover:bg-[#121215]'
+                      ? 'bg-zinc-950 border border-zinc-800'
+                      : 'hover:bg-zinc-900/50'
                   }`}
+                  aria-label={group.name}
                 >
                   <div
                     className="relative shrink-0 cursor-pointer"
@@ -221,7 +237,7 @@ export const PeerList: React.FC<PeerListProps> = ({
                     title="View Group info"
                   >
                     <div
-                      className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-xs shadow-sm hover:ring-2 hover:ring-[#3f3f46] transition-all"
+                      className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-xs shadow-sm"
                       style={{ backgroundColor: group.avatarColor || '#2563eb' }}
                     >
                       {group.name.charAt(0).toUpperCase()}
@@ -230,14 +246,14 @@ export const PeerList: React.FC<PeerListProps> = ({
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-1 mb-0.5">
-                      <span className="font-semibold text-xs text-white truncate">
+                      <span className="font-medium text-xs text-white truncate">
                         {group.name}
                       </span>
-                      <span className="text-[10px] text-[#71717a] font-mono">
+                      <span className="text-[10px] text-zinc-500 font-mono">
                         {group.memberDeviceIds.length} members
                       </span>
                     </div>
-                    <div className="text-[11px] text-[#a1a1aa] truncate font-sans">
+                    <div className="text-[11px] text-zinc-400 truncate font-sans">
                       {renderLastMessagePreview(lastMsg)}
                     </div>
                   </div>
@@ -248,225 +264,231 @@ export const PeerList: React.FC<PeerListProps> = ({
         )}
 
         {/* Direct Contacts Section */}
-        {(currentTab === 'all' || currentTab === 'direct') && (
-          <div className="space-y-0.5">
-            {currentTab === 'all' && filteredGroups.length > 0 && (
-              <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[#71717a]">
-                Direct Messages
-              </div>
-            )}
+        <div className="space-y-0.5">
+          {currentTab === 'all' && filteredGroups.length > 0 && (
+            <div className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+              Direct Messages
+            </div>
+          )}
 
-            {filteredContacts.length === 0 && filteredGroups.length === 0 ? (
-              <div className="p-6 text-center mt-6">
-                <p className="text-xs text-[#71717a] mb-3">No conversations yet</p>
-                <button
-                  onClick={onOpenPairing}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-neutral-200 text-black font-semibold rounded-lg text-xs transition-colors shadow-sm"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Pair Device</span>
-                </button>
-              </div>
-            ) : (
-              filteredContacts.map((contact) => {
-                const isConnected = connectedPeerId === contact.deviceId;
-                const isSelected = activeContactId === contact.deviceId && !activeGroupId;
-                const lastMsg = lastMessages?.get(contact.deviceId);
-                const avatarColor = contact.avatarColor || '#3b82f6';
-                const initial = (contact.alias || contact.deviceId.slice(4, 6)).charAt(0).toUpperCase();
+          {filteredContacts.length === 0 && filteredGroups.length === 0 ? (
+            <div className="p-6 text-center mt-6">
+              <p className="text-xs text-zinc-500 mb-3">No conversations yet</p>
+              <button
+                onClick={onOpenPairing}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-white hover:bg-neutral-200 text-black font-semibold rounded-lg text-xs transition-colors shadow-sm"
+                aria-label="Pair Device"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Pair Device</span>
+              </button>
+            </div>
+          ) : currentTab !== 'groups' ? (
+            filteredContacts.map((contact) => {
+              const isConnected = connectedPeerId === contact.deviceId;
+              const isSelected = activeContactId === contact.deviceId && !activeGroupId;
+              const lastMsg = lastMessages?.get(contact.deviceId);
+              const avatarColor = contact.avatarColor || '#3b82f6';
+              const initial = getAvatarInitial(contact);
 
-                let timeDisplay = '';
-                if (lastMsg) {
-                  const d = new Date(lastMsg.timestamp);
-                  const now = new Date();
-                  if (d.toDateString() === now.toDateString()) {
-                    timeDisplay = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                  } else {
-                    timeDisplay = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-                  }
+              let timeDisplay = '';
+              if (lastMsg) {
+                const d = new Date(lastMsg.timestamp);
+                const now = new Date();
+                if (d.toDateString() === now.toDateString()) {
+                  timeDisplay = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                } else {
+                  timeDisplay = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
                 }
+              }
 
-                return (
+              return (
+                <div
+                  key={contact.deviceId}
+                  id={`peer-item-${contact.deviceId}`}
+                  onClick={() => onSelectPeer(contact)}
+                  className={`p-2.5 rounded-xl cursor-pointer transition-all flex items-center justify-between gap-2.5 group ${
+                    isSelected
+                      ? 'bg-zinc-950 border border-zinc-800'
+                      : 'hover:bg-zinc-900/50'
+                  }`}
+                  aria-label={contact.alias || contact.deviceId}
+                >
                   <div
-                    key={contact.deviceId}
-                    id={`peer-item-${contact.deviceId}`}
-                    onClick={() => onSelectPeer(contact)}
-                    className={`p-2 rounded-xl cursor-pointer transition-all flex items-center justify-between gap-2.5 group ${
-                      isSelected
-                        ? 'bg-[#18181b] border border-[#27272a]'
-                        : 'hover:bg-[#121215]'
-                    }`}
+                    className="relative shrink-0 cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenContactDetails(contact);
+                    }}
+                    title="View contact profile"
                   >
                     <div
-                      className="relative shrink-0 cursor-pointer"
+                      className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-medium text-xs shadow-sm"
+                      style={{ backgroundColor: avatarColor }}
+                    >
+                      {initial}
+                    </div>
+                    <div
+                      className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-[#0a0a0b] ${
+                        isConnected || contact.isOnline ? 'bg-emerald-400' : 'bg-zinc-600'
+                      }`}
+                    />
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-1 mb-0.5">
+                      <span className="font-medium text-xs text-white truncate">
+                        {contact.alias || contact.deviceId}
+                      </span>
+                      {timeDisplay && (
+                        <span className="text-[10px] text-zinc-500 font-mono shrink-0">
+                          {timeDisplay}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="text-[11px] text-zinc-400 truncate font-sans flex items-center gap-1">
+                      {contact.verificationStatus === 'VERIFIED' ? (
+                        <span className="text-emerald-400 mr-0.5">✓</span>
+                      ) : null}
+                      {renderLastMessagePreview(lastMsg)}
+                    </div>
+                  </div>
+
+                  {/* Quick Contact Actions */}
+                  <div className="relative shrink-0 flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                    {onStartCall && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onStartCall(contact.deviceId, contact.alias, 'audio');
+                        }}
+                        className="p-1.5 rounded-lg text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 transition-colors cursor-pointer"
+                        title="Voice Call"
+                        aria-label="Voice Call"
+                      >
+                        <Phone className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+
+                    <button
                       onClick={(e) => {
                         e.stopPropagation();
                         onOpenContactDetails(contact);
                       }}
-                      title="View contact profile"
+                      className="p-1.5 rounded-lg text-zinc-400 hover:text-blue-400 hover:bg-zinc-800 transition-colors cursor-pointer"
+                      title="Contact Info"
+                      aria-label="Contact Info"
                     >
+                      <Info className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setContactMenuOpenId(contactMenuOpenId === contact.deviceId ? null : contact.deviceId);
+                      }}
+                      className="p-1.5 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+                      title="More options"
+                      aria-label="More options"
+                    >
+                      <MoreVertical className="w-3.5 h-3.5" />
+                    </button>
+
+                    {/* Contact Menu Popup */}
+                    {contactMenuOpenId === contact.deviceId && (
                       <div
-                        className="w-9 h-9 rounded-full flex items-center justify-center text-white font-medium text-xs shadow-sm hover:ring-2 hover:ring-[#3f3f46] transition-all"
-                        style={{ backgroundColor: avatarColor }}
+                        className="absolute right-0 top-full mt-1 w-48 bg-zinc-950 border border-zinc-800 rounded-xl shadow-xl py-1 z-30 animate-in animate-scale-in"
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        {initial}
-                      </div>
-                      <div
-                        className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-[#09090b] ${
-                          isConnected ? 'bg-emerald-400' : contact.isOnline ? 'bg-emerald-500' : 'bg-[#52525b]'
-                        }`}
-                      />
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-1 mb-0.5">
-                        <span className="font-medium text-xs text-white truncate">
-                          {contact.alias || contact.deviceId}
-                        </span>
-                        {timeDisplay && (
-                          <span className="text-[10px] text-[#71717a] font-mono shrink-0">
-                            {timeDisplay}
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="text-[11px] text-[#a1a1aa] truncate font-sans">
-                        {renderLastMessagePreview(lastMsg)}
-                      </div>
-                    </div>
-
-                    {/* Quick Contact Actions: Call, Info, Options Menu */}
-                    <div className="relative shrink-0 flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
-                      {onStartCall && (
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onStartCall(contact.deviceId, contact.alias, 'audio');
+                          onClick={() => {
+                            setContactMenuOpenId(null);
+                            onOpenContactDetails(contact);
                           }}
-                          className="p-1 rounded-lg text-[#a1a1aa] hover:text-emerald-400 hover:bg-[#27272a] transition-colors cursor-pointer"
-                          title="Call contact"
+                          className="w-full px-3 py-2 text-left text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors flex items-center gap-2 cursor-pointer"
                         >
-                          <Phone className="w-3.5 h-3.5" />
+                          <Info className="w-3.5 h-3.5 text-blue-400" />
+                          <span>View Profile</span>
                         </button>
-                      )}
 
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpenContactDetails(contact);
-                        }}
-                        className="p-1 rounded-lg text-[#a1a1aa] hover:text-blue-400 hover:bg-[#27272a] transition-colors cursor-pointer"
-                        title="Contact Info"
-                      >
-                        <Info className="w-3.5 h-3.5" />
-                      </button>
+                        {onStartCall && (
+                          <>
+                            <button
+                              onClick={() => {
+                                setContactMenuOpenId(null);
+                                onStartCall(contact.deviceId, contact.alias, 'audio');
+                              }}
+                              className="w-full px-3 py-2 text-left text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors flex items-center gap-2 cursor-pointer"
+                            >
+                              <Phone className="w-3.5 h-3.5 text-emerald-400" />
+                              <span>Voice Call</span>
+                            </button>
+                            <button
+                              onClick={() => {
+                                setContactMenuOpenId(null);
+                                onStartCall(contact.deviceId, contact.alias, 'video');
+                              }}
+                              className="w-full px-3 py-2 text-left text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors flex items-center gap-2 cursor-pointer"
+                            >
+                              <Video className="w-3.5 h-3.5 text-blue-400" />
+                              <span>Video Call</span>
+                            </button>
+                          </>
+                        )}
 
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setContactMenuOpenId(contactMenuOpenId === contact.deviceId ? null : contact.deviceId);
-                        }}
-                        className="p-1 rounded-lg text-[#71717a] hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer"
-                        title="More options"
-                      >
-                        <MoreVertical className="w-3.5 h-3.5" />
-                      </button>
+                        <div className="my-1 border-t border-zinc-800" />
 
-                      {/* Contact Menu Popup */}
-                      {contactMenuOpenId === contact.deviceId && (
-                        <div
-                          className="absolute right-0 top-full mt-1 w-44 bg-[#18181b] border border-[#27272a] rounded-xl shadow-2xl py-1 z-30 animate-in fade-in zoom-in-95 font-sans text-xs"
-                          onClick={(e) => e.stopPropagation()}
+                        <button
+                          onClick={() => {
+                            setContactMenuOpenId(null);
+                            setContactToDelete(contact);
+                          }}
+                          className="w-full px-3 py-2 text-left text-rose-400 hover:bg-rose-950/30 rounded-lg transition-colors flex items-center gap-2 cursor-pointer"
                         >
-                          <button
-                            onClick={() => {
-                              setContactMenuOpenId(null);
-                              onOpenContactDetails(contact);
-                            }}
-                            className="w-full px-3 py-2 text-left text-white hover:bg-[#27272a] flex items-center gap-2 transition-colors cursor-pointer"
-                          >
-                            <Info className="w-3.5 h-3.5 text-blue-400" />
-                            <span>Contact Info</span>
-                          </button>
-
-                          {onStartCall && (
-                            <>
-                              <button
-                                onClick={() => {
-                                  setContactMenuOpenId(null);
-                                  onStartCall(contact.deviceId, contact.alias, 'audio');
-                                }}
-                                className="w-full px-3 py-2 text-left text-white hover:bg-[#27272a] flex items-center gap-2 transition-colors cursor-pointer"
-                              >
-                                <Phone className="w-3.5 h-3.5 text-emerald-400" />
-                                <span>Voice Call</span>
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setContactMenuOpenId(null);
-                                  onStartCall(contact.deviceId, contact.alias, 'video');
-                                }}
-                                className="w-full px-3 py-2 text-left text-white hover:bg-[#27272a] flex items-center gap-2 transition-colors cursor-pointer"
-                              >
-                                <Video className="w-3.5 h-3.5 text-blue-400" />
-                                <span>Video Call</span>
-                              </button>
-                            </>
-                          )}
-
-                          <div className="my-1 border-t border-[#27272a]" />
-
-                          <button
-                            onClick={() => {
-                              setContactMenuOpenId(null);
-                              setContactToDelete(contact);
-                            }}
-                            className="w-full px-3 py-2 text-left text-red-400 hover:bg-red-950/40 flex items-center gap-2 transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            <span>Delete Contact</span>
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Delete Contact</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
-                );
-              })
-            )}
-          </div>
-        )}
+                </div>
+              );
+            })
+          ) : null}
+        </div>
       </div>
 
-      {/* Delete Contact Confirmation Modal */}
+      {/* Delete Contact Confirmation */}
       {contactToDelete && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 font-sans text-xs"
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 select-none font-sans"
           onClick={() => setContactToDelete(null)}
         >
           <div
-            className="w-full max-w-sm bg-[#18181b] border border-[#27272a] rounded-2xl p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in-95"
+            className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-2xl p-6 shadow-xl space-y-4 animate-in animate-scale-in"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center gap-2.5 text-red-400">
-              <div className="p-2 rounded-xl bg-red-950/50 border border-red-900/50">
+            <div className="flex items-center gap-3 text-rose-400">
+              <div className="p-2 rounded-xl bg-rose-950/30 border border-rose-900/40">
                 <UserX className="w-5 h-5" />
               </div>
               <div>
                 <h4 className="font-semibold text-white text-sm">Delete Contact?</h4>
-                <p className="text-[11px] text-[#a1a1aa]">
+                <p className="text-[11px] text-zinc-400">
                   {contactToDelete.alias || contactToDelete.deviceId}
                 </p>
               </div>
             </div>
 
-            <p className="text-xs text-[#a1a1aa] leading-relaxed">
-              This contact and their entire chat history will be removed. Contact removal is automatically synchronized with the peer device.
+            <p className="text-xs text-zinc-400 leading-relaxed">
+              This contact and their entire chat history will be removed.
             </p>
 
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 onClick={() => setContactToDelete(null)}
-                className="px-3.5 py-1.5 bg-[#27272a] hover:bg-[#3f3f46] text-[#a1a1aa] hover:text-white rounded-lg text-xs font-medium transition-colors cursor-pointer"
+                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-lg text-xs font-medium transition-colors cursor-pointer"
               >
                 Cancel
               </button>
@@ -477,7 +499,7 @@ export const PeerList: React.FC<PeerListProps> = ({
                   }
                   setContactToDelete(null);
                 }}
-                className="px-3.5 py-1.5 bg-red-600 hover:bg-red-500 text-white font-medium rounded-lg flex items-center gap-1.5 transition-colors text-xs shadow-sm cursor-pointer"
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-medium rounded-lg flex items-center gap-1.5 transition-colors text-xs cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>Delete</span>

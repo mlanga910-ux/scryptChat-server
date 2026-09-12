@@ -50,7 +50,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>(initialCode ? 'enter' : 'my_code');
 
-  // Host code state (MANUAL ONLY)
+  // Host code state
   const [roomCode, setRoomCode] = useState('');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
@@ -179,7 +179,6 @@ export const PairingModal: React.FC<PairingModalProps> = ({
     countdownIntervalRef.current = setInterval(updateTime, 1000);
   };
 
-  // 1. MANUAL ROOM GENERATION (User-triggered only)
   const handleGenerateRoom = async () => {
     if (isGeneratingRoom) return;
     try {
@@ -187,10 +186,8 @@ export const PairingModal: React.FC<PairingModalProps> = ({
       setErrorMsg('');
       setStatusMessage('Generating keys and pairing code...');
 
-      // Create ECDH/ECDSA offer
       const offer = await peerManager.createOffer();
 
-      // Register room on signaling (15 min TTL or Permanent)
       const res = await peerManager.fetchRelay('/api/signaling/room/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -214,7 +211,6 @@ export const PairingModal: React.FC<PairingModalProps> = ({
       setExpiresAt(newExpiry);
       setRemainingSeconds(Math.max(0, Math.floor((newExpiry - Date.now()) / 1000)));
 
-      // Generate clean QR code
       const origin = typeof window !== 'undefined' ? window.location.origin : '';
       const pairingUrl = `${origin}/?room=${newCode}`;
       const dataUrl = await generateQrDataUrl(pairingUrl);
@@ -232,7 +228,6 @@ export const PairingModal: React.FC<PairingModalProps> = ({
     }
   };
 
-  // Host: Poll for peer's answer
   const startHostPolling = (code: string) => {
     stopPolling();
     pollIntervalRef.current = setInterval(async () => {
@@ -268,7 +263,6 @@ export const PairingModal: React.FC<PairingModalProps> = ({
     }, 1500);
   };
 
-  // 2. JOIN ROOM WITH CODE
   const handleJoinRoom = async (codeToJoin?: string) => {
     const rawCode = codeToJoin || joinInput;
     const cleanCode = extractRoomCodeFromScannedText(rawCode).trim().toUpperCase();
@@ -302,10 +296,9 @@ export const PairingModal: React.FC<PairingModalProps> = ({
         throw new Error('Key exchange offer was not found.');
       }
 
-      // Check if this peer is already in our contacts
       const existingContact = await db.contacts.get(data.offer.deviceId);
       if (existingContact) {
-        setAlreadyAddedNotice(`Tento kontakt (${existingContact.alias || existingContact.deviceId}) už máte pridaný v zozname kontaktov.`);
+        setAlreadyAddedNotice(`This contact (${existingContact.alias || existingContact.deviceId}) is already in your contacts list.`);
       }
 
       setStatusMessage('Generating answer and safety keys...');
@@ -369,7 +362,6 @@ export const PairingModal: React.FC<PairingModalProps> = ({
     });
   };
 
-  // 3. QR CAMERA SCANNER
   const startCamera = async () => {
     stopCamera();
     setCameraError('');
@@ -437,7 +429,6 @@ export const PairingModal: React.FC<PairingModalProps> = ({
     scanAnimFrameRef.current = requestAnimationFrame(scanLoop);
   };
 
-  // 4. LAN DISCOVERY
   const handleToggleLanScan = () => {
     if (!lanDiscoveryRef.current) return;
     const next = !isLanScanning;
@@ -487,49 +478,54 @@ export const PairingModal: React.FC<PairingModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-150 font-sans select-none">
+    <div
+      id="pairing-modal-backdrop"
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150 font-sans select-none"
+    >
       <div
         id="pairing-modal-container"
-        className="w-full max-w-md h-[580px] max-h-[92vh] bg-[#09090b] border border-[#27272a] rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+        className="w-full max-w-md h-[560px] max-h-[92vh] bg-zinc-950 border border-zinc-800 rounded-2xl shadow-xl flex flex-col overflow-hidden"
       >
         {/* Top Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#1f1f23] bg-[#0c0c0e]">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 bg-zinc-950/50 shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-[#18181b] border border-[#27272a] flex items-center justify-center text-white">
-              <Shield className="w-4 h-4" />
+            <div className="w-8 h-8 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-white">
+              <Shield className="w-4 h-4 text-emerald-400" />
             </div>
             <div>
               <h3 className="text-sm font-semibold text-white tracking-tight">
                 Pair New Device
               </h3>
-              <p className="text-[11px] text-[#71717a]">
-                Direct end-to-end encrypted P2P pairing
+              <p className="text-[11px] text-zinc-500">
+                Direct end-to-end encrypted pairing
               </p>
             </div>
           </div>
           <button
             id="close-pairing-modal-btn"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-[#a1a1aa] hover:text-white hover:bg-[#18181b] transition-colors cursor-pointer"
+            className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-900 rounded-lg transition-colors"
+            aria-label="Close"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Minimalist Segmented Tabs */}
-        <div className="p-2 border-b border-[#1f1f23] bg-[#09090b]">
-          <div className="flex p-1 bg-[#141418] border border-[#222226] rounded-xl gap-1">
+        {/* Segmented Tabs */}
+        <div className="p-2.5 border-b border-zinc-800 bg-zinc-950/50 shrink-0">
+          <div className="flex p-1 bg-zinc-900 border border-zinc-800 rounded-xl gap-1">
             <button
               id="tab-my-code-btn"
               onClick={() => setActiveTab('my_code')}
               className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                 activeTab === 'my_code'
-                  ? 'bg-white text-black font-semibold shadow-sm'
-                  : 'text-[#a1a1aa] hover:text-white'
+                  ? 'bg-white text-zinc-950 font-semibold shadow-sm'
+                  : 'text-zinc-500 hover:text-white'
               }`}
+              aria-label="My Code"
             >
               <QrCode className="w-3.5 h-3.5" />
-              <span>My Code</span>
+              <span>Code</span>
             </button>
 
             <button
@@ -537,12 +533,13 @@ export const PairingModal: React.FC<PairingModalProps> = ({
               onClick={() => setActiveTab('enter')}
               className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                 activeTab === 'enter'
-                  ? 'bg-white text-black font-semibold shadow-sm'
-                  : 'text-[#a1a1aa] hover:text-white'
+                  ? 'bg-white text-zinc-950 font-semibold shadow-sm'
+                  : 'text-zinc-500 hover:text-white'
               }`}
+              aria-label="Enter Code"
             >
               <Key className="w-3.5 h-3.5" />
-              <span>Enter Code</span>
+              <span>Enter</span>
             </button>
 
             <button
@@ -550,12 +547,13 @@ export const PairingModal: React.FC<PairingModalProps> = ({
               onClick={() => setActiveTab('scan')}
               className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                 activeTab === 'scan'
-                  ? 'bg-white text-black font-semibold shadow-sm'
-                  : 'text-[#a1a1aa] hover:text-white'
+                  ? 'bg-white text-zinc-950 font-semibold shadow-sm'
+                  : 'text-zinc-500 hover:text-white'
               }`}
+              aria-label="Scan QR"
             >
               <Camera className="w-3.5 h-3.5" />
-              <span>Scan QR</span>
+              <span>Scan</span>
             </button>
 
             <button
@@ -563,9 +561,10 @@ export const PairingModal: React.FC<PairingModalProps> = ({
               onClick={() => setActiveTab('lan')}
               className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                 activeTab === 'lan'
-                  ? 'bg-white text-black font-semibold shadow-sm'
-                  : 'text-[#a1a1aa] hover:text-white'
+                  ? 'bg-white text-zinc-950 font-semibold shadow-sm'
+                  : 'text-zinc-500 hover:text-white'
               }`}
+              aria-label="LAN"
             >
               <Wifi className="w-3.5 h-3.5" />
               <span>LAN</span>
@@ -575,21 +574,21 @@ export const PairingModal: React.FC<PairingModalProps> = ({
 
         {/* Status / Alert Banners */}
         {alreadyAddedNotice && (
-          <div className="mx-4 mt-3 p-2.5 rounded-xl bg-blue-950/40 border border-blue-900/50 flex items-center gap-2 text-blue-300 text-xs animate-in fade-in">
+          <div className="mx-4 mt-3 p-2.5 rounded-xl bg-blue-950/40 border border-blue-800/60 flex items-center gap-2 text-blue-300 text-xs animate-in fade-in">
             <Info className="w-4 h-4 flex-shrink-0 text-blue-400" />
             <div className="flex-1 font-medium">{alreadyAddedNotice}</div>
           </div>
         )}
 
         {errorMsg && (
-          <div className="mx-4 mt-3 p-2.5 rounded-xl bg-red-950/40 border border-red-900/50 flex items-center gap-2 text-red-300 text-xs animate-in fade-in">
-            <AlertCircle className="w-4 h-4 flex-shrink-0 text-red-400" />
+          <div className="mx-4 mt-3 p-2.5 rounded-xl bg-rose-950/40 border border-rose-800/60 flex items-center gap-2 text-rose-300 text-xs animate-in fade-in">
+            <AlertCircle className="w-4 h-4 flex-shrink-0 text-rose-400" />
             <div className="flex-1 font-medium">{errorMsg}</div>
           </div>
         )}
 
         {statusMessage && !errorMsg && (
-          <div className="mx-4 mt-3 p-2.5 rounded-xl bg-[#141418] border border-[#27272a] flex items-center gap-2 text-[#e4e4e7] text-xs">
+          <div className="mx-4 mt-3 p-2.5 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center gap-2 text-zinc-200 text-xs">
             <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span>{statusMessage}</span>
           </div>
@@ -601,8 +600,10 @@ export const PairingModal: React.FC<PairingModalProps> = ({
           {activeTab === 'my_code' && (
             <div className="space-y-4">
               {/* Link Expiry Type Selector */}
-              <div className="p-3 bg-[#121215] rounded-xl border border-[#222226] space-y-2">
-                <div className="text-[11px] font-medium text-[#a1a1aa] uppercase tracking-wider">Pairing Link Type:</div>
+              <div className="p-3 bg-zinc-900/50 rounded-xl border border-zinc-800 space-y-2">
+                <div className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+                  Pairing Link Type
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
@@ -612,15 +613,16 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                     }}
                     className={`p-2 rounded-lg text-xs font-medium border text-left transition-all cursor-pointer ${
                       !isPermanentMode
-                        ? 'bg-[#1e1e24] border-white/20 text-white'
-                        : 'bg-[#18181b] border-transparent text-[#71717a] hover:text-[#a1a1aa]'
+                        ? 'bg-zinc-950 border-emerald-400/40 text-white'
+                        : 'bg-zinc-900 border-transparent text-zinc-500'
                     }`}
+                    aria-label="One-time link"
                   >
                     <div className="flex items-center gap-1.5 font-semibold text-emerald-400 mb-0.5">
                       <Clock className="w-3.5 h-3.5" />
-                      <span>One-Time Link</span>
+                      <span>One-Time</span>
                     </div>
-                    <p className="text-[10px] text-[#a1a1aa] leading-tight">Valid 15 minutes / 1 pairing (Default &amp; Secure)</p>
+                    <p className="text-[10px] text-zinc-500 leading-tight">15 min / 1 pairing</p>
                   </button>
 
                   <button
@@ -631,39 +633,41 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                     }}
                     className={`p-2 rounded-lg text-xs font-medium border text-left transition-all cursor-pointer ${
                       isPermanentMode
-                        ? 'bg-[#1e1e24] border-purple-500/40 text-white'
-                        : 'bg-[#18181b] border-transparent text-[#71717a] hover:text-[#a1a1aa]'
+                        ? 'bg-zinc-950 border-purple-500/40 text-white'
+                        : 'bg-zinc-900 border-transparent text-zinc-500'
                     }`}
+                    aria-label="Permanent link"
                   >
                     <div className="flex items-center gap-1.5 font-semibold text-purple-400 mb-0.5">
                       <InfinityIcon className="w-3.5 h-3.5" />
-                      <span>Permanent Link</span>
+                      <span>Permanent</span>
                     </div>
-                    <p className="text-[10px] text-[#a1a1aa] leading-tight">Reusable for multiple contacts (Optional)</p>
+                    <p className="text-[10px] text-zinc-500 leading-tight">Reusable</p>
                   </button>
                 </div>
               </div>
 
               {!roomCode ? (
-                <div className="text-center py-6 px-4 bg-[#121215] rounded-xl border border-[#222226] space-y-3">
-                  <div className="w-10 h-10 rounded-xl bg-[#1a1a20] border border-[#2e2e38] text-white flex items-center justify-center mx-auto shadow-inner">
-                    <Key className="w-5 h-5 text-[#a1a1aa]" />
+                <div className="text-center py-6 px-4 bg-zinc-900/50 rounded-xl border border-zinc-800 space-y-3">
+                  <div className="w-10 h-10 rounded-xl bg-zinc-900 border border-zinc-800 text-white flex items-center justify-center mx-auto shadow-inner">
+                    <Key className="w-5 h-5 text-zinc-500" />
                   </div>
                   <div className="space-y-1">
                     <h4 className="text-sm font-semibold text-white">
-                      {isPermanentMode ? 'Create Permanent Profile Link' : 'Generate 15-Minute Code'}
+                      {isPermanentMode ? 'Create Permanent Link' : 'Generate 15-Minute Code'}
                     </h4>
-                    <p className="text-xs text-[#71717a] max-w-xs mx-auto">
+                    <p className="text-xs text-zinc-500 max-w-xs mx-auto">
                       {isPermanentMode
-                        ? 'Creates a reusable shareable link that allows multiple contacts to pair with you.'
-                        : 'Creates a secure single-use code and link that expires in 15 minutes.'}
+                        ? 'Reusable shareable link for multiple contacts.'
+                        : 'Single-use code and link that expires in 15 minutes.'}
                     </p>
                   </div>
                   <button
                     id="generate-code-submit-btn"
                     onClick={handleGenerateRoom}
                     disabled={isGeneratingRoom}
-                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white hover:bg-neutral-200 text-black font-semibold text-xs shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white hover:bg-neutral-200 text-zinc-950 font-semibold text-xs shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                    aria-label="Create code and link"
                   >
                     {isGeneratingRoom ? (
                       <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -676,8 +680,8 @@ export const PairingModal: React.FC<PairingModalProps> = ({
               ) : (
                 <div className="space-y-3 animate-in fade-in">
                   {/* Code Card */}
-                  <div className="p-4 bg-[#121215] rounded-xl border border-[#222226] flex flex-col items-center text-center space-y-3">
-                    <div className="flex items-center justify-between w-full text-xs text-[#a1a1aa]">
+                  <div className="p-4 bg-zinc-900/50 rounded-xl border border-zinc-800 flex flex-col items-center text-center space-y-3">
+                    <div className="flex items-center justify-between w-full text-xs text-zinc-500">
                       <span>{isPermanentMode ? 'Permanent Pairing Code' : 'One-Time Pairing Code'}</span>
                       {isPermanentMode ? (
                         <div className="flex items-center gap-1 font-mono text-purple-400 text-[11px]">
@@ -687,20 +691,26 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                       ) : (
                         <div className="flex items-center gap-1 font-mono text-emerald-400 text-[11px]">
                           <Clock className="w-3.5 h-3.5" />
-                          <span>{Math.floor(remainingSeconds / 60)}:{(remainingSeconds % 60).toString().padStart(2, '0')}</span>
+                          <span>
+                            {Math.floor(remainingSeconds / 60)}:{(remainingSeconds % 60).toString().padStart(2, '0')}
+                          </span>
                         </div>
                       )}
                     </div>
 
-                    <div className="text-3xl font-black font-mono tracking-widest text-white bg-[#09090b] px-6 py-2.5 rounded-xl border border-[#27272a] shadow-inner select-all">
+                    <div className="text-3xl font-black font-mono tracking-widest text-white bg-zinc-950 px-6 py-2.5 rounded-xl border border-zinc-800 shadow-inner select-all">
                       {roomCode}
                     </div>
 
                     {/* Shareable URL Section */}
-                    <div className="w-full bg-[#09090b] p-2.5 rounded-xl border border-[#27272a] flex flex-col gap-2">
-                      <div className="flex items-center gap-1.5 text-[11px] text-[#a1a1aa]">
+                    <div className="w-full bg-zinc-950 p-2.5 rounded-xl border border-zinc-800 flex flex-col gap-2">
+                      <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
                         <LinkIcon className="w-3 h-3 text-emerald-400" />
-                        <span className="truncate">{typeof window !== 'undefined' ? `${window.location.origin}/?room=${roomCode}` : `/?room=${roomCode}`}</span>
+                        <span className="truncate">
+                          {typeof window !== 'undefined'
+                            ? `${window.location.origin}/?room=${roomCode}`
+                            : `/?room=${roomCode}`}
+                        </span>
                       </div>
 
                       <div className="flex items-center gap-2">
@@ -711,9 +721,14 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                             setCopiedUrl(true);
                             setTimeout(() => setCopiedUrl(false), 2000);
                           }}
-                          className="flex-1 py-1.5 px-2.5 rounded-lg bg-[#1c1c22] hover:bg-[#27272a] text-white text-xs font-medium flex items-center justify-center gap-1.5 transition-colors border border-[#2c2c36] cursor-pointer"
+                          className="flex-1 py-1.5 px-2.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-medium flex items-center justify-center gap-1.5 transition-colors border border-zinc-800 cursor-pointer"
+                          aria-label="Copy link"
                         >
-                          {copiedUrl ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-[#a1a1aa]" />}
+                          {copiedUrl ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5 text-zinc-500" />
+                          )}
                           <span>{copiedUrl ? 'Link Copied' : 'Copy Link'}</span>
                         </button>
 
@@ -729,7 +744,8 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                                 });
                               } catch {}
                             }}
-                            className="py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+                            className="py-1.5 px-3 rounded-lg bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+                            aria-label="Share link"
                           >
                             <Share2 className="w-3.5 h-3.5" />
                             <span>Share</span>
@@ -742,9 +758,14 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                       <button
                         id="copy-room-code-btn"
                         onClick={() => handleCopy(roomCode)}
-                        className="flex-1 py-2 px-3 rounded-lg bg-[#1c1c22] hover:bg-[#27272a] text-white text-xs font-medium flex items-center justify-center gap-1.5 transition-colors border border-[#2c2c36] cursor-pointer"
+                        className="flex-1 py-2 px-3 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-medium flex items-center justify-center gap-1.5 transition-colors border border-zinc-800 cursor-pointer"
+                        aria-label="Copy code only"
                       >
-                        {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-[#a1a1aa]" />}
+                        {copied ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        ) : (
+                          <Copy className="w-3.5 h-3.5 text-zinc-500" />
+                        )}
                         <span>{copied ? 'Code Copied' : 'Copy Code Only'}</span>
                       </button>
 
@@ -752,7 +773,8 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                         onClick={handleGenerateRoom}
                         disabled={isGeneratingRoom}
                         title="Generate new code"
-                        className="p-2 rounded-lg bg-[#1c1c22] hover:bg-[#27272a] text-[#a1a1aa] hover:text-white transition-colors border border-[#2c2c36] cursor-pointer"
+                        className="p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-500 hover:text-white transition-colors border border-zinc-800 cursor-pointer"
+                        aria-label="Regenerate code"
                       >
                         <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingRoom ? 'animate-spin' : ''}`} />
                       </button>
@@ -761,12 +783,12 @@ export const PairingModal: React.FC<PairingModalProps> = ({
 
                   {/* QR Code */}
                   {qrDataUrl && (
-                    <div className="p-4 bg-[#121215] rounded-xl border border-[#222226] flex flex-col items-center text-center space-y-2">
+                    <div className="p-4 bg-zinc-900/50 rounded-xl border border-zinc-800 flex flex-col items-center text-center space-y-2">
                       <div className="p-3 bg-white rounded-xl shadow-md">
                         <img src={qrDataUrl} alt="Pairing QR Code" className="w-40 h-40 object-contain" />
                       </div>
-                      <p className="text-[11px] text-[#71717a]">
-                        Scan this QR code using the camera on the other device
+                      <p className="text-[11px] text-zinc-500">
+                        Scan this QR code on the other device
                       </p>
                     </div>
                   )}
@@ -778,9 +800,9 @@ export const PairingModal: React.FC<PairingModalProps> = ({
           {/* TAB 2: ENTER CODE */}
           {activeTab === 'enter' && (
             <div className="space-y-4">
-              <div className="p-4 bg-[#121215] rounded-xl border border-[#222226] space-y-3">
-                <label className="block text-xs font-medium text-[#e4e4e7]">
-                  Enter Peer's 6-character Code
+              <div className="p-4 bg-zinc-900/50 rounded-xl border border-zinc-800 space-y-3">
+                <label className="block text-xs font-medium text-zinc-300">
+                  Enter 6-character Code
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -793,13 +815,15 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                     }}
                     placeholder="e.g. 7K9N2P"
                     maxLength={32}
-                    className="flex-1 bg-[#09090b] border border-[#27272a] rounded-lg px-3.5 py-2 text-sm font-mono tracking-widest text-white placeholder:text-[#52525b] focus:outline-none focus:border-white uppercase"
+                    className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3.5 py-2 text-sm font-mono tracking-widest text-white placeholder-zinc-600 input-base focus:ring-1 focus:ring-emerald-400/20"
+                    aria-label="Enter pairing code"
                   />
                   <button
                     id="join-code-submit-btn"
                     onClick={() => handleJoinRoom()}
                     disabled={isConnecting || !joinInput.trim()}
-                    className="px-4 py-2 bg-white hover:bg-neutral-200 disabled:opacity-40 text-black font-semibold rounded-lg text-xs flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
+                    className="px-4 py-2 bg-white hover:bg-neutral-200 disabled:opacity-40 text-zinc-950 font-semibold rounded-lg text-xs flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
+                    aria-label="Connect"
                   >
                     {isConnecting ? (
                       <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -809,8 +833,8 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                     <span>{isConnecting ? 'Connecting...' : 'Connect'}</span>
                   </button>
                 </div>
-                <p className="text-[11px] text-[#71717a]">
-                  Generate this code on the other device in the "My Code" tab.
+                <p className="text-[11px] text-zinc-500">
+                  Generate this code in the "Code" tab on the other device.
                 </p>
               </div>
             </div>
@@ -819,24 +843,25 @@ export const PairingModal: React.FC<PairingModalProps> = ({
           {/* TAB 3: CAMERA SCANNER */}
           {activeTab === 'scan' && (
             <div className="space-y-3">
-              <div className="relative aspect-square max-h-[260px] w-full mx-auto rounded-xl overflow-hidden bg-black border border-[#27272a] flex items-center justify-center">
+              <div className="relative aspect-square max-h-[260px] w-full mx-auto rounded-xl overflow-hidden bg-black border border-zinc-800 flex items-center justify-center">
                 {cameraError ? (
-                  <div className="p-4 text-center space-y-2 text-red-400 text-xs">
+                  <div className="p-4 text-center space-y-2 text-rose-400 text-xs">
                     <AlertCircle className="w-6 h-6 mx-auto opacity-80" />
                     <p>{cameraError}</p>
                     <button
                       onClick={startCamera}
-                      className="px-3 py-1.5 rounded-lg bg-[#18181b] text-white text-xs font-medium hover:bg-[#27272a] border border-[#27272a] cursor-pointer"
+                      className="px-3 py-1.5 rounded-lg bg-zinc-900 text-white text-xs font-medium hover:bg-zinc-800 border border-zinc-800 cursor-pointer"
+                      aria-label="Try again"
                     >
                       Try Again
                     </button>
                   </div>
                 ) : (
                   <>
-                    <video ref={videoRef} className="w-full h-full object-cover" />
+                    <video ref={videoRef} className="w-full h-full object-cover" playsInline />
                     <canvas ref={scanCanvasRef} className="hidden" />
                     {/* Minimalist target frame */}
-                    <div className="absolute inset-8 border border-white/40 rounded-xl pointer-events-none">
+                    <div className="absolute inset-8 border border-white/30 rounded-xl pointer-events-none">
                       <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-white" />
                       <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-white" />
                       <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-white" />
@@ -845,7 +870,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                   </>
                 )}
               </div>
-              <p className="text-center text-xs text-[#71717a]">
+              <p className="text-center text-xs text-zinc-500">
                 Point camera at partner's QR code
               </p>
             </div>
@@ -854,10 +879,10 @@ export const PairingModal: React.FC<PairingModalProps> = ({
           {/* TAB 4: LOCAL NETWORK (LAN) */}
           {activeTab === 'lan' && (
             <div className="space-y-3">
-              <div className="p-3.5 bg-[#121215] rounded-xl border border-[#222226] flex items-center justify-between">
+              <div className="p-3.5 bg-zinc-900/50 rounded-xl border border-zinc-800 flex items-center justify-between">
                 <div className="space-y-0.5">
                   <div className="text-xs font-semibold text-white">Local Network Visibility</div>
-                  <div className="text-[11px] text-[#71717a]">
+                  <div className="text-[11px] text-zinc-500">
                     {isLanVisible ? 'Your device is visible on the LAN' : 'Your device is hidden on the LAN'}
                   </div>
                 </div>
@@ -867,19 +892,21 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
                     isLanVisible
                       ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/60'
-                      : 'bg-[#1c1c22] text-[#a1a1aa] hover:text-white border border-[#2c2c36]'
+                      : 'bg-zinc-900 text-zinc-500 border border-zinc-800 hover:text-white'
                   }`}
+                  aria-label={isLanVisible ? 'Hide device' : 'Show device'}
                 >
                   {isLanVisible ? 'Visible' : 'Hidden'}
                 </button>
               </div>
 
               <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs text-[#71717a] px-1">
+                <div className="flex items-center justify-between text-xs text-zinc-500 px-1">
                   <span>Nearby Devices ({lanPeers.length})</span>
                   <button
                     onClick={handleToggleLanScan}
-                    className="text-white hover:text-neutral-300 font-medium flex items-center gap-1 text-[11px] cursor-pointer"
+                    className="text-white hover:text-zinc-300 font-medium flex items-center gap-1 text-[11px] cursor-pointer"
+                    aria-label={isLanScanning ? 'Stop scanning' : 'Scan'}
                   >
                     <RefreshCw className={`w-3 h-3 ${isLanScanning ? 'animate-spin' : ''}`} />
                     <span>{isLanScanning ? 'Scanning...' : 'Scan'}</span>
@@ -887,30 +914,31 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                 </div>
 
                 {lanPeers.length === 0 ? (
-                  <div className="p-5 text-center bg-[#121215] rounded-xl border border-[#222226] text-xs text-[#71717a]">
-                    No devices found on local network. Ensure visibility is enabled on both devices.
+                  <div className="p-5 text-center bg-zinc-900/50 rounded-xl border border-zinc-800 text-xs text-zinc-500">
+                    No devices found on local network.
                   </div>
                 ) : (
                   <div className="space-y-1.5">
                     {lanPeers.map((peer) => (
                       <div
                         key={peer.deviceId}
-                        className="p-3 bg-[#121215] rounded-xl border border-[#222226] flex items-center justify-between hover:border-[#33333b] transition-colors"
+                        className="p-3 bg-zinc-900/50 rounded-xl border border-zinc-800 flex items-center justify-between hover:border-zinc-700 transition-colors"
                       >
                         <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-full bg-[#1c1c22] border border-[#2e2e38] flex items-center justify-center font-bold text-white text-xs">
+                          <div className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center font-bold text-white text-xs">
                             {peer.displayName.charAt(0).toUpperCase()}
                           </div>
                           <div>
                             <div className="text-xs font-medium text-white">{peer.displayName}</div>
-                            <div className="text-[10px] text-[#71717a] font-mono">{peer.deviceId.slice(0, 16)}...</div>
+                            <div className="text-[10px] text-zinc-500 font-mono">{peer.deviceId.slice(0, 16)}...</div>
                           </div>
                         </div>
 
                         <button
                           onClick={() => handleConnectLanPeer(peer)}
                           disabled={lanConnectingPeerId === peer.deviceId}
-                          className="px-3 py-1.5 bg-white hover:bg-neutral-200 disabled:opacity-50 text-black rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                          className="px-3 py-1.5 bg-white hover:bg-neutral-200 disabled:opacity-50 text-zinc-950 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                          aria-label={`Connect to ${peer.displayName}`}
                         >
                           {lanConnectingPeerId === peer.deviceId ? 'Connecting...' : 'Connect'}
                         </button>
@@ -922,24 +950,26 @@ export const PairingModal: React.FC<PairingModalProps> = ({
 
               {/* Incoming LAN Invite Alert */}
               {incomingInvite && (
-                <div className="p-3.5 bg-[#141418] border border-emerald-500/30 rounded-xl space-y-2.5 animate-in zoom-in-95">
+                <div className="p-3.5 bg-zinc-900/50 border border-emerald-400/30 rounded-xl space-y-2.5 animate-in zoom-in-95">
                   <div className="flex items-center gap-2 text-emerald-400 text-xs font-medium">
                     <Radio className="w-3.5 h-3.5 animate-pulse" />
                     <span>Incoming LAN Pairing Request</span>
                   </div>
-                  <p className="text-xs text-[#e4e4e7]">
+                  <p className="text-xs text-zinc-200">
                     Device <strong className="text-white">{incomingInvite.fromDisplayName}</strong> wants to pair.
                   </p>
                   <div className="flex gap-2">
                     <button
                       onClick={() => handleAcceptIncomingInvite(incomingInvite)}
-                      className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                      className="flex-1 py-1.5 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                      aria-label="Accept invite"
                     >
                       Accept
                     </button>
                     <button
                       onClick={() => setIncomingInvite(null)}
-                      className="px-3 py-1.5 bg-[#1f1f26] hover:bg-[#282832] text-[#a1a1aa] hover:text-white rounded-lg text-xs transition-colors cursor-pointer"
+                      className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs transition-colors cursor-pointer"
+                      aria-label="Decline invite"
                     >
                       Decline
                     </button>

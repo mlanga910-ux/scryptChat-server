@@ -448,7 +448,7 @@ export default function App() {
   };
 
   return (
-    <div className="h-[100dvh] w-screen max-w-full flex flex-col bg-[#09090b] text-[#f4f4f5] overflow-hidden select-none font-sans">
+    <div className="h-[100dvh] w-screen max-w-full flex flex-col bg-[#0a0a0b] text-[#fafafa] overflow-hidden select-none font-sans">
       {/* Top Header Bar */}
       <TerminalHeader
         identity={identity}

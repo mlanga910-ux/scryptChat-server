@@ -10,7 +10,6 @@ import {
   Check,
   Trash2,
   Edit2,
-  CheckCircle,
   UserX,
   Key,
   Calendar,
@@ -83,8 +82,7 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
 
   const handleSaveAlias = () => {
     if (!aliasInput.trim()) return;
-    const trimmed = aliasInput.trim();
-    onUpdateAlias(contact.deviceId, trimmed);
+    onUpdateAlias(contact.deviceId, aliasInput.trim());
     setIsEditingAlias(false);
   };
 
@@ -106,21 +104,22 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
   return (
     <div
       id="contact-details-modal-backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-150 font-sans select-none"
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 select-none font-sans animate-in fade-in duration-150"
     >
       <div
         id="contact-details-modal"
-        className="w-full max-w-md h-[580px] max-h-[92vh] bg-[#0c0c0e] border border-[#27272a] rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+        className="w-full max-w-md h-[560px] max-h-[92vh] bg-zinc-950 border border-zinc-800 rounded-2xl shadow-xl flex flex-col overflow-hidden"
       >
         {/* Top Header */}
-        <div className="relative px-5 py-4 border-b border-[#1f1f23] bg-[#09090b] flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2 text-xs font-semibold text-[#a1a1aa] uppercase tracking-wider">
-            <span>Contact Profile</span>
-          </div>
+        <div className="px-5 py-4 border-b border-zinc-800 bg-zinc-950/50 flex items-center justify-between shrink-0">
+          <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+            Contact Profile
+          </h2>
           <button
             id="close-contact-modal-btn"
             onClick={onClose}
-            className="p-1.5 text-[#71717a] hover:text-white hover:bg-[#18181b] rounded-lg transition-colors cursor-pointer"
+            className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-900 rounded-lg transition-colors"
+            aria-label="Close"
           >
             <X className="w-4 h-4" />
           </button>
@@ -136,6 +135,7 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
               onChange={handleAvatarFileSelect}
               accept="image/*"
               className="hidden"
+              aria-label="Upload avatar"
             />
             <div
               className="relative group cursor-pointer"
@@ -156,8 +156,8 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
                 <Camera className="w-5 h-5" />
               </div>
               <div
-                className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-[#0c0c0e] ${
-                  isConnected ? 'bg-emerald-400' : contact.isOnline ? 'bg-emerald-500' : 'bg-[#52525b]'
+                className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-zinc-950 ${
+                  isConnected || contact.isOnline ? 'bg-emerald-400' : 'bg-zinc-600'
                 }`}
               />
             </div>
@@ -166,7 +166,8 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="text-[10px] text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
+                className="text-[11px] text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
+                aria-label={contact.avatarUrl ? 'Change photo' : 'Add photo'}
               >
                 <Upload className="w-3 h-3" />
                 <span>{contact.avatarUrl ? 'Change Photo' : 'Set Photo'}</span>
@@ -175,7 +176,8 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
                 <button
                   type="button"
                   onClick={handleRemoveAvatar}
-                  className="text-[10px] text-rose-400 hover:underline cursor-pointer"
+                  className="text-[11px] text-rose-400 hover:underline cursor-pointer"
+                  aria-label="Remove photo"
                 >
                   Remove
                 </button>
@@ -185,7 +187,7 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
             {/* Editable Alias */}
             <div className="space-y-1 w-full max-w-xs">
               {isEditingAlias ? (
-                <div className="flex items-center gap-2 justify-center">
+                <div className="flex items-center justify-center gap-2">
                   <input
                     type="text"
                     value={aliasInput}
@@ -196,38 +198,46 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
                     }}
                     autoFocus
                     placeholder="Contact Name"
-                    className="px-2.5 py-1 bg-[#18181b] border border-[#3f3f46] rounded-lg text-sm text-white text-center focus:outline-none focus:border-white"
+                    className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-center text-white focus:outline-none focus:border-emerald-400/40"
+                    aria-label="Edit contact name"
                   />
                   <button
                     onClick={handleSaveAlias}
-                    className="p-1.5 bg-white text-black rounded-lg text-xs font-semibold hover:bg-neutral-200"
+                    className="p-1.5 bg-emerald-400 text-zinc-950 rounded-lg text-xs font-semibold hover:bg-emerald-300"
+                    aria-label="Save name"
                   >
                     <Check className="w-3.5 h-3.5" />
                   </button>
                   <button
                     onClick={() => setIsEditingAlias(false)}
-                    className="p-1.5 bg-[#18181b] text-[#a1a1aa] rounded-lg text-xs hover:text-white"
+                    className="p-1.5 bg-zinc-900 text-zinc-500 rounded-lg text-xs hover:text-white"
+                    aria-label="Cancel"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
               ) : (
                 <div className="flex items-center justify-center gap-1.5">
-                  <h3 className="text-base font-semibold text-white truncate">{contact.alias}</h3>
+                  <h3 className="text-base font-semibold text-white truncate" title={contact.alias}>
+                    {contact.alias}
+                  </h3>
                   <button
                     onClick={() => {
                       setAliasInput(contact.alias);
                       setIsEditingAlias(true);
                     }}
-                    className="p-1 text-[#71717a] hover:text-white transition-colors"
+                    className="p-1 text-zinc-500 hover:text-white transition-colors"
                     title="Rename contact"
+                    aria-label="Rename contact"
                   >
                     <Edit2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               )}
 
-              <p className="font-mono text-[11px] text-[#71717a] truncate">{contact.deviceId}</p>
+              <p className="font-mono text-[11px] text-zinc-500 truncate" title={contact.deviceId}>
+                {contact.deviceId}
+              </p>
             </div>
           </div>
 
@@ -239,7 +249,8 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
                 onStartChat(contact);
                 onClose();
               }}
-              className="flex flex-col items-center justify-center p-3 rounded-xl bg-[#141418] hover:bg-[#1c1c22] border border-[#27272a] text-white transition-all"
+              className="flex flex-col items-center justify-center p-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-white transition-colors"
+              aria-label="Message"
             >
               <MessageSquare className="w-4 h-4 mb-1 text-blue-400" />
               <span className="text-xs font-medium">Message</span>
@@ -251,7 +262,8 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
                 onStartCall?.(contact.deviceId, contact.alias, 'audio');
                 onClose();
               }}
-              className="flex flex-col items-center justify-center p-3 rounded-xl bg-[#141418] hover:bg-[#1c1c22] border border-[#27272a] text-white transition-all"
+              className="flex flex-col items-center justify-center p-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-white transition-colors"
+              aria-label="Voice call"
             >
               <Phone className="w-4 h-4 mb-1 text-emerald-400" />
               <span className="text-xs font-medium">Voice</span>
@@ -263,7 +275,8 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
                 onStartCall?.(contact.deviceId, contact.alias, 'video');
                 onClose();
               }}
-              className="flex flex-col items-center justify-center p-3 rounded-xl bg-[#141418] hover:bg-[#1c1c22] border border-[#27272a] text-white transition-all"
+              className="flex flex-col items-center justify-center p-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-white transition-colors"
+              aria-label="Video call"
             >
               <Video className="w-4 h-4 mb-1 text-blue-400" />
               <span className="text-xs font-medium">Video</span>
@@ -271,44 +284,46 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
           </div>
 
           {/* Security & Details */}
-          <div className="space-y-2 bg-[#121215] border border-[#1f1f23] rounded-xl p-3.5 text-xs">
-            <div className="flex items-center justify-between py-1 border-b border-[#1f1f23]">
-              <span className="text-[#a1a1aa] flex items-center gap-1.5">
-                <Key className="w-3.5 h-3.5 text-[#71717a]" />
+          <div className="space-y-2 bg-zinc-900/50 border border-zinc-800 rounded-xl p-3.5 text-xs">
+            <div className="flex items-center justify-between py-1 border-b border-zinc-800">
+              <span className="text-zinc-500 flex items-center gap-1.5">
+                <Key className="w-3.5 h-3.5 text-zinc-600" />
                 Device ID
               </span>
               <div className="flex items-center gap-1.5 font-mono text-[11px] text-white">
                 <span className="truncate max-w-[140px]">{contact.deviceId}</span>
                 <button
                   onClick={copyDeviceId}
-                  className="p-1 text-[#71717a] hover:text-white transition-colors"
+                  className="p-1 text-zinc-500 hover:text-white transition-colors"
                   title="Copy Device ID"
+                  aria-label="Copy device ID"
                 >
-                  {copiedId ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-[#a1a1aa]" />}
+                  {copiedId ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-zinc-500" />}
                 </button>
               </div>
             </div>
 
-            <div className="flex items-center justify-between py-1 border-b border-[#1f1f23]">
-              <span className="text-[#a1a1aa] flex items-center gap-1.5">
-                <ShieldCheck className="w-3.5 h-3.5 text-[#71717a]" />
+            <div className="flex items-center justify-between py-1 border-b border-zinc-800">
+              <span className="text-zinc-500 flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-zinc-600" />
                 Verification Status
               </span>
               <button
                 onClick={handleToggleVerification}
-                className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+                className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
                   isVerified
                     ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/60 hover:bg-emerald-900/50'
-                    : 'bg-[#1e1e24] text-[#a1a1aa] border border-[#33333b] hover:text-white'
+                    : 'bg-zinc-800 text-zinc-500 border border-zinc-700 hover:text-white'
                 }`}
+                aria-label={isVerified ? 'Unmark as verified' : 'Mark as verified'}
               >
                 {isVerified ? 'Verified' : 'Unverified'}
               </button>
             </div>
 
             {contact.safetyNumber && (
-              <div className="flex items-center justify-between py-1 border-b border-[#1f1f23]">
-                <span className="text-[#a1a1aa]">Safety Number</span>
+              <div className="flex items-center justify-between py-1 border-b border-zinc-800">
+                <span className="text-zinc-500">Safety Number</span>
                 <span className="font-mono text-emerald-400 text-[11px] tracking-wider font-semibold">
                   {contact.safetyNumber}
                 </span>
@@ -316,31 +331,33 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
             )}
 
             <div className="flex items-center justify-between py-1">
-              <span className="text-[#a1a1aa] flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-[#71717a]" />
+              <span className="text-zinc-500 flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-zinc-600" />
                 Connected Since
               </span>
-              <span className="text-[#71717a]">
+              <span className="text-zinc-500">
                 {contact.addedAt ? new Date(contact.addedAt).toLocaleDateString() : 'Recently'}
               </span>
             </div>
           </div>
 
           {/* Danger Zone */}
-          <div className="space-y-2 pt-1 border-t border-[#1f1f23]">
+          <div className="space-y-2 pt-1 border-t border-zinc-800">
             {showClearConfirm ? (
-              <div className="p-3 bg-red-950/30 border border-red-900/40 rounded-xl space-y-2">
-                <p className="text-xs text-red-200 font-medium">Are you sure you want to clear message history?</p>
+              <div className="p-3 bg-rose-950/30 border border-rose-900/40 rounded-xl space-y-2">
+                <p className="text-xs text-rose-200 font-medium">Clear message history?</p>
                 <div className="flex gap-2">
                   <button
                     onClick={handleExecuteClearHistory}
-                    className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white text-xs font-semibold rounded-lg transition-colors"
+                    className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg transition-colors"
+                    aria-label="Clear history"
                   >
                     Yes, Clear
                   </button>
                   <button
                     onClick={() => setShowClearConfirm(false)}
-                    className="px-3 py-1 bg-[#18181b] text-xs text-[#a1a1aa] hover:text-white rounded-lg"
+                    className="px-3 py-1 bg-zinc-800 text-zinc-400 rounded-lg text-xs hover:text-white"
+                    aria-label="Cancel"
                   >
                     Cancel
                   </button>
@@ -349,26 +366,29 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
             ) : (
               <button
                 onClick={() => setShowClearConfirm(true)}
-                className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-[#141418] hover:bg-[#1b1b20] border border-[#1f1f23] text-xs text-[#a1a1aa] hover:text-white transition-colors"
+                className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-400 hover:text-white transition-colors"
+                aria-label="Clear chat history"
               >
                 <span>Clear Chat History</span>
-                <Trash2 className="w-3.5 h-3.5 text-[#71717a]" />
+                <Trash2 className="w-3.5 h-3.5 text-zinc-500" />
               </button>
             )}
 
             {showDeleteConfirm ? (
-              <div className="p-3 bg-red-950/40 border border-red-900/50 rounded-xl space-y-2">
-                <p className="text-xs text-red-200 font-medium">Are you sure you want to remove this contact?</p>
+              <div className="p-3 bg-rose-950/40 border border-rose-900/50 rounded-xl space-y-2">
+                <p className="text-xs text-rose-200 font-medium">Remove this contact?</p>
                 <div className="flex gap-2">
                   <button
                     onClick={handleExecuteDelete}
-                    className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white text-xs font-semibold rounded-lg transition-colors"
+                    className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg transition-colors"
+                    aria-label="Delete contact"
                   >
                     Yes, Delete
                   </button>
                   <button
                     onClick={() => setShowDeleteConfirm(false)}
-                    className="px-3 py-1 bg-[#18181b] text-xs text-[#a1a1aa] hover:text-white rounded-lg"
+                    className="px-3 py-1 bg-zinc-800 text-zinc-400 rounded-lg text-xs hover:text-white"
+                    aria-label="Cancel"
                   >
                     Cancel
                   </button>
@@ -377,7 +397,8 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
             ) : (
               <button
                 onClick={() => setShowDeleteConfirm(true)}
-                className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-red-950/20 hover:bg-red-950/40 border border-red-900/30 text-xs text-red-400 transition-colors"
+                className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-rose-950/20 hover:bg-rose-950/40 border border-rose-900/30 text-xs text-rose-400 transition-colors"
+                aria-label="Delete contact"
               >
                 <span>Delete Contact</span>
                 <UserX className="w-3.5 h-3.5" />

@@ -30,15 +30,15 @@ interface ProfileModalProps {
 }
 
 const AVATAR_COLORS = [
-  '#27272a', // Zinc Dark
-  '#3f3f46', // Zinc
-  '#2563eb', // Royal Blue
-  '#059669', // Emerald
-  '#d97706', // Amber
-  '#dc2626', // Red
-  '#0891b2', // Cyan
-  '#7c3aed', // Purple
-  '#db2777', // Pink
+  '#27272a',
+  '#3f3f46',
+  '#2563eb',
+  '#059669',
+  '#d97706',
+  '#dc2626',
+  '#0891b2',
+  '#7c3aed',
+  '#db2777',
 ];
 
 export const ProfileModal: React.FC<ProfileModalProps> = ({
@@ -120,38 +120,40 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   return (
     <div
       id="profile-modal-backdrop"
-      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 select-none font-sans animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 select-none font-sans animate-in fade-in duration-150"
     >
-      <div className="w-full max-w-md h-[600px] max-h-[92vh] bg-[#0c0c0e] border border-[#27272a] rounded-2xl shadow-2xl overflow-hidden text-xs flex flex-col">
+      <div className="w-full max-w-md h-[600px] max-h-[92vh] bg-zinc-950 border border-zinc-800 rounded-2xl shadow-xl overflow-hidden text-xs flex flex-col">
         {/* Header */}
-        <div className="px-5 py-3.5 border-b border-[#1f1f23] bg-[#09090b] flex items-center justify-between shrink-0">
+        <div className="px-5 py-3.5 border-b border-zinc-800 bg-zinc-950/50 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-[#18181b] border border-[#27272a] flex items-center justify-center text-white">
+            <div className="w-8 h-8 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-white">
               <User className="w-4 h-4" />
             </div>
             <div>
               <h2 className="text-sm font-semibold text-white tracking-tight">Profile &amp; Identity</h2>
-              <p className="text-[11px] text-[#71717a]">Manage your profile and optional contact details</p>
+              <p className="text-[11px] text-zinc-500">Manage your profile and optional contact details</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-[#71717a] hover:text-white hover:bg-[#18181b] rounded-lg transition-colors"
+            className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-900 rounded-lg transition-colors"
+            aria-label="Close profile"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Tab switcher */}
-        <div className="flex items-center px-4 pt-2 border-b border-[#1f1f23] bg-[#09090b] gap-2 shrink-0">
+        <div className="flex items-center px-4 pt-2 border-b border-zinc-800 bg-zinc-950/50 gap-2 shrink-0">
           <button
             type="button"
             onClick={() => setActiveTab('general')}
             className={`pb-2 px-2 text-xs font-medium border-b-2 transition-colors ${
               activeTab === 'general'
                 ? 'border-white text-white'
-                : 'border-transparent text-[#71717a] hover:text-[#a1a1aa]'
+                : 'border-transparent text-zinc-500 hover:text-zinc-300'
             }`}
+            aria-label="General profile"
           >
             General Profile
           </button>
@@ -161,11 +163,12 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             className={`pb-2 px-2 text-xs font-medium border-b-2 transition-colors flex items-center gap-1.5 ${
               activeTab === 'optional'
                 ? 'border-white text-white'
-                : 'border-transparent text-[#71717a] hover:text-[#a1a1aa]'
+                : 'border-transparent text-zinc-500 hover:text-zinc-300'
             }`}
+            aria-label="Optional info"
           >
             <span>Optional Info &amp; Socials</span>
-            <span className="text-[10px] px-1.5 py-0.2 bg-[#27272a] text-[#a1a1aa] rounded-full">
+            <span className="text-[10px] px-1.5 py-0.2 bg-zinc-800 text-zinc-400 rounded-full">
               Voluntary
             </span>
           </button>
@@ -176,18 +179,19 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
           {activeTab === 'general' ? (
             <div className="space-y-4">
               {/* Avatar Preview & Custom Photo Upload */}
-              <div className="flex flex-col items-center gap-3 p-3.5 bg-[#09090b] border border-[#1f1f23] rounded-xl">
+              <div className="flex flex-col items-center gap-3 p-3.5 bg-zinc-950/50 border border-zinc-800 rounded-xl">
                 <input
                   type="file"
                   ref={fileInputRef}
                   onChange={handleAvatarFileSelect}
                   accept="image/*"
                   className="hidden"
+                  aria-label="Upload avatar"
                 />
 
                 <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
                   <div
-                    className="w-16 h-16 rounded-2xl flex items-center justify-center text-white font-bold text-xl shadow-lg ring-2 ring-[#27272a] overflow-hidden"
+                    className="w-16 h-16 rounded-2xl flex items-center justify-center text-white font-bold text-xl shadow-lg ring-2 ring-zinc-800 overflow-hidden"
                     style={{ backgroundColor: avatarUrl ? '#18181b' : avatarColor }}
                   >
                     {avatarUrl ? (
@@ -206,9 +210,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="px-2.5 py-1 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] text-white rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                    className="px-2.5 py-1 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                    aria-label={avatarUrl ? 'Change photo' : 'Upload photo'}
                   >
-                    <Upload className="w-3.5 h-3.5 text-blue-400" />
+                    <Upload className="w-3.5 h-3.5 text-emerald-400" />
                     <span>{avatarUrl ? 'Change Photo' : 'Upload Photo'}</span>
                   </button>
                   {avatarUrl && (
@@ -217,6 +222,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                       onClick={handleRemoveAvatar}
                       className="p-1.5 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-900/50 text-rose-300 rounded-lg text-xs transition-colors cursor-pointer"
                       title="Remove custom photo"
+                      aria-label="Remove avatar"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -224,18 +230,20 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 </div>
 
                 {/* Color Palette fallback */}
-                <div className="flex items-center gap-1.5 flex-wrap justify-center pt-1 border-t border-[#1f1f23] w-full">
-                  <span className="text-[10px] text-[#71717a] mr-1">Fallback Color:</span>
+                <div className="flex items-center gap-1.5 flex-wrap justify-center pt-1 border-t border-zinc-800 w-full">
+                  <span className="text-[10px] text-zinc-500 mr-1">Fallback:</span>
                   {AVATAR_COLORS.map((color) => (
                     <button
                       key={color}
                       type="button"
                       onClick={() => setAvatarColor(color)}
                       className={`w-4 h-4 rounded-full transition-transform cursor-pointer ${
-                        avatarColor === color ? 'scale-125 ring-2 ring-white shadow-md' : 'hover:scale-110 opacity-70 hover:opacity-100'
+                        avatarColor === color
+                          ? 'scale-125 ring-2 ring-white shadow-md'
+                          : 'hover:scale-110 opacity-70 hover:opacity-100'
                       }`}
                       style={{ backgroundColor: color }}
-                      title={color}
+                      aria-label={`Color ${color}`}
                     />
                   ))}
                 </div>
@@ -244,45 +252,53 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               {/* Form Fields */}
               <div className="space-y-3">
                 <div>
-                  <label className="block text-[#a1a1aa] mb-1 font-medium text-xs">Display Name *</label>
+                  <label className="block text-zinc-400 mb-1 font-medium text-xs">
+                    Display Name
+                  </label>
                   <input
                     type="text"
                     value={displayName}
                     onChange={(e) => setDisplayName(e.target.value)}
                     maxLength={32}
                     placeholder="e.g. Alice, Bob..."
-                    className="w-full bg-[#09090b] border border-[#27272a] rounded-xl px-3 py-2 text-white placeholder-[#52525b] focus:outline-none focus:border-white transition-colors text-xs"
-                    required
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-white placeholder-zinc-500 input-base focus:ring-1 focus:ring-emerald-400/20"
+                    aria-label="Display name"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[#a1a1aa] mb-1 font-medium text-xs">Status message</label>
+                  <label className="block text-zinc-400 mb-1 font-medium text-xs">
+                    Status message
+                  </label>
                   <input
                     type="text"
                     value={status}
                     onChange={(e) => setStatus(e.target.value)}
                     maxLength={40}
-                    placeholder="e.g. Available, In a meeting, Busy..."
-                    className="w-full bg-[#09090b] border border-[#27272a] rounded-xl px-3 py-2 text-white placeholder-[#52525b] focus:outline-none focus:border-white transition-colors text-xs"
+                    placeholder="e.g. Available, In a meeting..."
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-white placeholder-zinc-500 input-base focus:ring-1 focus:ring-emerald-400/20"
+                    aria-label="Status message"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[#a1a1aa] mb-1 font-medium text-xs">Bio description</label>
+                  <label className="block text-zinc-400 mb-1 font-medium text-xs">
+                    Bio description
+                  </label>
                   <input
                     type="text"
                     value={statusBio}
                     onChange={(e) => setStatusBio(e.target.value)}
                     maxLength={80}
                     placeholder="e.g. Software engineer, Privacy enthusiast..."
-                    className="w-full bg-[#09090b] border border-[#27272a] rounded-xl px-3 py-2 text-white placeholder-[#52525b] focus:outline-none focus:border-white transition-colors text-xs"
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-white placeholder-zinc-500 input-base focus:ring-1 focus:ring-emerald-400/20"
+                    aria-label="Bio description"
                   />
                 </div>
 
                 {/* Device ID Box */}
-                <div className="p-2.5 bg-[#09090b] border border-[#1f1f23] rounded-xl space-y-1">
-                  <div className="flex items-center justify-between text-[#a1a1aa]">
+                <div className="p-2.5 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-1">
+                  <div className="flex items-center justify-between text-zinc-400">
                     <span className="flex items-center gap-1.5 font-medium text-[11px]">
                       <Fingerprint className="w-3.5 h-3.5 text-white" />
                       Your Permanent Device ID
@@ -290,22 +306,18 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                     <button
                       type="button"
                       onClick={copyDeviceId}
-                      className="flex items-center gap-1 text-white hover:text-emerald-400 font-medium transition-colors text-xs"
+                      className="flex items-center gap-1 text-white hover:text-emerald-400 font-medium"
+                      aria-label={copied ? 'Copied' : 'Copy Device ID'}
                     >
                       {copied ? (
-                        <>
-                          <Check className="w-3 h-3 text-emerald-400" />
-                          <span className="text-emerald-400">Copied</span>
-                        </>
+                        <Check className="w-3 h-3 text-emerald-400" />
                       ) : (
-                        <>
-                          <Copy className="w-3 h-3" />
-                          <span>Copy</span>
-                        </>
+                        <Copy className="w-3 h-3" />
                       )}
+                      <span className="text-[10px]">{copied ? 'Copied' : 'Copy'}</span>
                     </button>
                   </div>
-                  <div className="font-mono text-[11px] text-[#71717a] break-all select-all">
+                  <div className="font-mono text-[11px] text-zinc-500 break-all select-all">
                     {identity.deviceId}
                   </div>
                 </div>
@@ -313,7 +325,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             </div>
           ) : (
             <div className="space-y-3.5">
-              <div className="p-2.5 bg-[#18181b]/50 border border-[#27272a] rounded-xl flex items-start gap-2 text-[#a1a1aa] text-[11px]">
+              <div className="p-2.5 bg-zinc-900/30 border border-zinc-800 rounded-xl flex items-start gap-2 text-zinc-400 text-[11px]">
                 <Shield className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                 <p>
                   All information below is completely optional. It is never transmitted without your consent and is preserved securely in your local E2EE vault.
@@ -323,8 +335,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               {/* Phone & Email */}
               <div className="space-y-2.5">
                 <div>
-                  <label className="flex items-center gap-1.5 text-[#a1a1aa] mb-1 font-medium text-xs">
-                    <Phone className="w-3.5 h-3.5 text-[#71717a]" />
+                  <label className="flex items-center gap-1.5 text-zinc-400 mb-1 font-medium text-xs">
+                    <Phone className="w-3.5 h-3.5 text-zinc-500" />
                     <span>Phone Number (Optional)</span>
                   </label>
                   <input
@@ -332,13 +344,14 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     placeholder="e.g. +421 900 123 456"
-                    className="w-full bg-[#09090b] border border-[#27272a] rounded-xl px-3 py-2 text-white placeholder-[#52525b] focus:outline-none focus:border-white transition-colors text-xs"
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-white placeholder-zinc-500 input-base focus:ring-1 focus:ring-emerald-400/20"
+                    aria-label="Phone number"
                   />
                 </div>
 
                 <div>
-                  <label className="flex items-center gap-1.5 text-[#a1a1aa] mb-1 font-medium text-xs">
-                    <Mail className="w-3.5 h-3.5 text-[#71717a]" />
+                  <label className="flex items-center gap-1.5 text-zinc-400 mb-1 font-medium text-xs">
+                    <Mail className="w-3.5 h-3.5 text-zinc-500" />
                     <span>Email Address (Optional)</span>
                   </label>
                   <input
@@ -346,33 +359,35 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="e.g. yourname@example.com"
-                    className="w-full bg-[#09090b] border border-[#27272a] rounded-xl px-3 py-2 text-white placeholder-[#52525b] focus:outline-none focus:border-white transition-colors text-xs"
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-white placeholder-zinc-500 input-base focus:ring-1 focus:ring-emerald-400/20"
+                    aria-label="Email address"
                   />
                 </div>
               </div>
 
               {/* Social Profiles */}
               <div className="space-y-2 pt-1">
-                <div className="text-[11px] font-semibold text-[#a1a1aa] uppercase tracking-wider">
+                <div className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">
                   Social Media Links
                 </div>
 
                 <div className="grid grid-cols-1 gap-2">
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-[#71717a]">
+                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-zinc-500">
                       <Send className="w-3.5 h-3.5 text-blue-400" />
                     </div>
                     <input
                       type="text"
                       value={socialLinks.telegram || ''}
                       onChange={(e) => setSocialLinks({ ...socialLinks, telegram: e.target.value })}
-                      placeholder="Telegram username (@user)"
-                      className="w-full pl-8 pr-3 py-1.5 bg-[#09090b] border border-[#27272a] rounded-xl text-white placeholder-[#52525b] focus:outline-none focus:border-white transition-colors text-xs"
+                      placeholder="Telegram (@user)"
+                      className="w-full pl-8 pr-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-xl text-white placeholder-zinc-500 input-base focus:ring-1 focus:ring-emerald-400/20"
+                      aria-label="Telegram username"
                     />
                   </div>
 
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-[#71717a]">
+                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-zinc-500">
                       <AtSign className="w-3.5 h-3.5 text-sky-400" />
                     </div>
                     <input
@@ -380,12 +395,13 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                       value={socialLinks.twitter || ''}
                       onChange={(e) => setSocialLinks({ ...socialLinks, twitter: e.target.value })}
                       placeholder="Twitter / X (@handle)"
-                      className="w-full pl-8 pr-3 py-1.5 bg-[#09090b] border border-[#27272a] rounded-xl text-white placeholder-[#52525b] focus:outline-none focus:border-white transition-colors text-xs"
+                      className="w-full pl-8 pr-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-xl text-white placeholder-zinc-500 input-base focus:ring-1 focus:ring-emerald-400/20"
+                      aria-label="Twitter handle"
                     />
                   </div>
 
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-[#71717a]">
+                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-zinc-500">
                       <Github className="w-3.5 h-3.5 text-zinc-300" />
                     </div>
                     <input
@@ -393,20 +409,22 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                       value={socialLinks.github || ''}
                       onChange={(e) => setSocialLinks({ ...socialLinks, github: e.target.value })}
                       placeholder="GitHub username"
-                      className="w-full pl-8 pr-3 py-1.5 bg-[#09090b] border border-[#27272a] rounded-xl text-white placeholder-[#52525b] focus:outline-none focus:border-white transition-colors text-xs"
+                      className="w-full pl-8 pr-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-xl text-white placeholder-zinc-500 input-base focus:ring-1 focus:ring-emerald-400/20"
+                      aria-label="GitHub username"
                     />
                   </div>
 
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-[#71717a]">
+                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-zinc-500">
                       <Globe className="w-3.5 h-3.5 text-emerald-400" />
                     </div>
                     <input
                       type="url"
                       value={socialLinks.website || ''}
                       onChange={(e) => setSocialLinks({ ...socialLinks, website: e.target.value })}
-                      placeholder="Personal website URL (https://...)"
-                      className="w-full pl-8 pr-3 py-1.5 bg-[#09090b] border border-[#27272a] rounded-xl text-white placeholder-[#52525b] focus:outline-none focus:border-white transition-colors text-xs"
+                      placeholder="Personal website (https://...)"
+                      className="w-full pl-8 pr-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-xl text-white placeholder-zinc-500 input-base focus:ring-1 focus:ring-emerald-400/20"
+                      aria-label="Website URL"
                     />
                   </div>
                 </div>
@@ -415,11 +433,12 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
           )}
 
           {/* Footer Actions */}
-          <div className="pt-3 flex items-center justify-end gap-2 border-t border-[#1f1f23]">
+          <div className="pt-3 flex items-center justify-end gap-2 border-t border-zinc-800">
             <button
               type="button"
               onClick={onClose}
-              className="px-3.5 py-1.5 text-[#a1a1aa] hover:text-white hover:bg-[#18181b] rounded-xl transition-colors font-medium text-xs"
+              className="px-3.5 py-1.5 text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-xl transition-colors font-medium text-xs"
+              aria-label="Cancel"
             >
               Cancel
             </button>
@@ -428,14 +447,15 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               disabled={isSaved}
               className={`px-4 py-1.5 rounded-xl font-medium transition-all flex items-center gap-1.5 text-xs ${
                 isSaved
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-white text-black hover:bg-neutral-200'
+                  ? 'bg-emerald-400 text-zinc-950'
+                  : 'btn-primary'
               }`}
+              aria-label={isSaved ? 'Saved' : 'Save changes'}
             >
               {isSaved ? (
                 <>
                   <Check className="w-3.5 h-3.5" />
-                  <span>Saved!</span>
+                  <span>Saved</span>
                 </>
               ) : (
                 <>
