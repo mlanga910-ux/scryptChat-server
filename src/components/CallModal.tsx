@@ -136,7 +136,8 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
   // 2. ACTIVE / CALLING SCREEN - Standard Native Mobile & Desktop Overlay
   const isVideo = session.callType === 'video';
 
-      <div
+  return (
+    <div
       className={`fixed z-50 bg-[#0a0a0b] text-white flex flex-col transition-all duration-300 select-none font-sans ${
         isFullscreen
           ? 'inset-0'
