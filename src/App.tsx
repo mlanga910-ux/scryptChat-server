@@ -223,10 +223,12 @@ export default function App() {
   }, []);
 
   const reloadLastMessages = async () => {
-    const allMsgs = await db.messages.orderBy('timestamp').toArray();
+    const allMsgs = await db.messages.orderBy('timestamp').reverse().toArray();
     const map = new Map<string, MessageRecord>();
     for (const msg of allMsgs) {
-      map.set(msg.chatDeviceId, msg);
+      if (!map.has(msg.chatDeviceId)) {
+        map.set(msg.chatDeviceId, msg);
+      }
     }
     setLastMessagesMap(map);
   };

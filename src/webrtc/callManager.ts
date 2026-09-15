@@ -118,7 +118,7 @@ export class CallManager {
       await this.mediaPeerConnection!.setLocalDescription(offer);
 
       // Gather ICE candidates briefly
-      await this.waitForIceCandidates(this.mediaPeerConnection!, 1000);
+      await this.waitForIceCandidates(this.mediaPeerConnection!, 2000);
 
       const localDesc = this.mediaPeerConnection!.localDescription;
       if (!localDesc) throw new Error('Failed to generate local media description');
@@ -177,7 +177,7 @@ export class CallManager {
       const answer = await this.mediaPeerConnection!.createAnswer();
       await this.mediaPeerConnection!.setLocalDescription(answer);
 
-      await this.waitForIceCandidates(this.mediaPeerConnection!, 800);
+      await this.waitForIceCandidates(this.mediaPeerConnection!, 2000);
 
       const localDesc = this.mediaPeerConnection!.localDescription;
       if (!localDesc) throw new Error('Failed to generate answer description');
@@ -371,6 +371,29 @@ export class CallManager {
         }
         break;
       }
+
+      case 'CALL_RESTART': {
+        if (!this.currentSession || this.currentSession.callId !== payload.callId) return;
+
+        const prevState = this.currentSession.state;
+        this.currentSession.state = 'RECONNECTING';
+        this.events.onCallStateChange({ ...this.currentSession });
+
+        if (payload.sdp && this.mediaPeerConnection) {
+          try {
+            await this.mediaPeerConnection.setRemoteDescription(
+              new RTCSessionDescription(payload.sdp as RTCSessionDescriptionInit)
+            );
+            await this.flushPendingIceCandidates();
+          } catch (err) {
+            console.warn('ICE restart remote description error:', err);
+          }
+        }
+
+        this.currentSession.state = 'CONNECTED';
+        this.events.onCallStateChange({ ...this.currentSession });
+        break;
+      }
     }
   }
 
@@ -434,7 +457,7 @@ export class CallManager {
     }
   }
 
-  public async toggleScreenShare(): Promise<boolean> {
+   public async toggleScreenShare(): Promise<boolean> {
     if (this.screenStream) {
       this.screenStream.getTracks().forEach((t) => t.stop());
       this.screenStream = null;
@@ -444,6 +467,23 @@ export class CallManager {
         const sender = this.mediaPeerConnection.getSenders().find((s) => s.track?.kind === 'video');
         if (sender && videoTrack) {
           await sender.replaceTrack(videoTrack);
+        }
+      }
+
+      // Remove screen audio track from local stream and stop any screen audio senders
+      if (this.mediaPeerConnection) {
+        const senders = this.mediaPeerConnection.getSenders();
+        for (const s of senders) {
+          if (s.track?.id.startsWith('screen-audio-')) {
+            try { s.track?.stop(); } catch {}
+            try { s.replaceTrack(null); } catch {}
+          }
+        }
+      }
+      if (this.localStream) {
+        const screenAudio = this.localStream.getAudioTracks().find((t) => t.id.startsWith('screen-audio-'));
+        if (screenAudio) {
+          this.localStream.removeTrack(screenAudio);
         }
       }
 
@@ -457,17 +497,32 @@ export class CallManager {
         const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
         this.screenStream = stream;
         const screenTrack = stream.getVideoTracks()[0];
+        const screenAudioTrack = stream.getAudioTracks()[0];
+
+        if (screenAudioTrack) {
+          screenAudioTrack.id = `screen-audio-${Date.now()}`;
+        }
+        if (screenTrack) {
+          screenTrack.id = `screen-video-${Date.now()}`;
+        }
 
         screenTrack.onended = () => {
           this.toggleScreenShare();
         };
 
         if (this.mediaPeerConnection) {
-          const sender = this.mediaPeerConnection.getSenders().find((s) => s.track?.kind === 'video');
-          if (sender) {
-            await sender.replaceTrack(screenTrack);
-          } else if (this.localStream) {
+          const vidSender = this.mediaPeerConnection.getSenders().find((s) => s.track?.kind === 'video');
+          if (vidSender && screenTrack) {
+            await vidSender.replaceTrack(screenTrack);
+          } else if (this.localStream && screenTrack) {
             this.mediaPeerConnection.addTrack(screenTrack, this.localStream);
+          }
+
+          // Add screen audio track if the peer connection isn't already receiving audio
+          const audioSenderExists = this.mediaPeerConnection.getSenders().some((s) => s.track?.kind === 'audio');
+          if (!audioSenderExists && screenAudioTrack && this.localStream) {
+            this.mediaPeerConnection.addTrack(screenAudioTrack, this.localStream);
+            this.localStream.addTrack(screenAudioTrack);
           }
         }
 
@@ -514,9 +569,10 @@ export class CallManager {
     this.mediaPeerConnection.onconnectionstatechange = () => {
       const state = this.mediaPeerConnection?.connectionState;
       if (state === 'failed') {
-        if (this.currentSession?.state === 'CONNECTED') {
-          this.endCall();
-        }
+        // Attempt ICE restart before terminating
+        this.attemptIceRestart().catch((err) => {
+          console.warn('ICE restart failed, ending call:', err);
+        });
       } else if (state === 'disconnected') {
         // Give 6 seconds to recover before terminating call
         if (this.disconnectTimeout) clearTimeout(this.disconnectTimeout);
@@ -532,6 +588,41 @@ export class CallManager {
         }
       }
     };
+  }
+
+  private async attemptIceRestart(): Promise<void> {
+    if (!this.mediaPeerConnection || !this.currentSession) return;
+
+    const oldState = this.currentSession.state;
+    this.currentSession.state = 'RECONNECTING';
+    this.events.onCallStateChange({ ...this.currentSession });
+
+    try {
+      const offer = await this.mediaPeerConnection.createOffer({
+        iceRestart: true,
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: this.currentSession.callType === 'video',
+      });
+      await this.mediaPeerConnection.setLocalDescription(offer);
+      await this.waitForIceCandidates(this.mediaPeerConnection, 2000);
+
+      const localDesc = this.mediaPeerConnection.localDescription;
+      if (!localDesc) throw new Error('ICE restart failed: no local description');
+
+      const payload: CallSignalPayload = {
+        action: 'CALL_RESTART',
+        callId: this.currentSession.callId,
+        sdp: {
+          type: localDesc.type,
+          sdp: localDesc.sdp,
+        },
+      };
+      await this.sendCallSignal(payload, this.currentSession.peerDeviceId);
+    } catch (err: any) {
+      console.warn('ICE restart error:', err);
+      this.currentSession.state = oldState;
+      this.events.onCallStateChange({ ...this.currentSession });
+    }
   }
 
   private async flushPendingIceCandidates(): Promise<void> {

@@ -979,7 +979,9 @@ export class PeerManager {
     await db.files.put(fileRecord);
 
     const mediaType = isImage ? 'image' : isAudio ? 'audio' : isVideo ? 'video' : 'file';
+    const messageId = `msg_${Date.now()}_${generateRandomHexId(8)}`;
     const msgRecord: MessageRecord = {
+      messageId,
       chatDeviceId: recipientId,
       direction: 'OUTBOUND',
       payloadText: file.name,
@@ -998,18 +1000,38 @@ export class PeerManager {
     let deliveredDirectly = false;
     if (this.isConnected() && this.cryptoSession && this.dataChannel && recipientId === this.remoteDeviceId) {
       deliveredDirectly = true;
-      fileTransferManager.sendFile(
+      // Fire the transfer in the background; onCompleted fires on the SENDER side
+      // to record transfer completion metadata. The receiver creates the INBOUND
+      // message record in handleIncomingDataChannelMessage's onCompleted callback.
+      void fileTransferManager.sendFile(
         file,
         this.dataChannel,
         this.cryptoSession,
         {
           onProgress: this.events.onFileProgress,
-          onCompleted: () => {},
+          onCompleted: async (fileRec, blob) => {
+            // Sender side: update the outbound message record with file metadata
+            const msgId = msgRecord.messageId;
+            if (msgId) {
+              await db.messages.where('messageId').equals(msgId).modify({
+                fileId: fileRec.fileId,
+                fileRecord: fileRec,
+                mediaType: fileRec.isImage ? 'image' : fileRec.isAudio ? 'audio' : fileRec.isVideo ? 'video' : 'file',
+                status: 'delivered',
+              });
+            }
+          },
           onError: (fId, err) => {
             this.events.onError(err);
+            // Update outbound message to failed status
+            void db.messages.where('fileId').equals(fId).modify({
+              status: 'failed',
+            });
           },
         }
-      ).catch(() => {});
+      ).catch((err) => {
+        console.warn('Direct file transfer error:', err);
+      });
     }
 
     // 2. Relay only when a direct channel is not available. The relay is
@@ -1302,7 +1324,7 @@ export class PeerManager {
       } catch {
         // The mailbox/SSE path remains available while the fast poll retries.
       }
-    }, 500);
+    }, 2500);
   }
 
   private startHeartbeat() {

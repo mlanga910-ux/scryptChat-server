@@ -45,52 +45,6 @@ All cryptographic operations run locally on the client using the Web Cryptograph
 
 ---
 
-## Getting Started
-
-### Prerequisites
-- Node.js 18+
-- npm or yarn
-
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/username/scryptchat.git
-cd scryptchat
-
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-```
-
-### Production Build
-
-```bash
-npm run build
-```
-
-The compiled static assets will be output to the `dist/` directory, ready to be deployed to any static hosting service or custom server.
-
----
-
-## Architecture Overview
-
-```
-[ Browser A: Client ] <==== Direct WebRTC P2P (DTLS / AES-256-GCM) ====> [ Browser B: Client ]
-         |                                                                      |
-    (Local Only)                                                           (Local Only)
-  [ IndexedDB + Keys ]                                                   [ IndexedDB + Keys ]
-         \                                                                      /
-          \--- (Ephemeral SDP / ICE exchange only via Signaling Relay) --------/
-```
-
-- Messages and files do not pass through the signaling server once the P2P connection is established.
-- If a direct peer connection cannot be established due to symmetric NATs, encrypted WebRTC relay channels preserve confidentiality because AES-GCM payload encryption occurs before transport.
-
----
-
 ## License
 
 MIT License. Free for personal and commercial use.

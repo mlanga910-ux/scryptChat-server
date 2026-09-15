@@ -207,7 +207,7 @@ export interface HandshakeFinalizeData {
   signature: string; // Base64 ECDSA signature over CanonicalTranscriptHash
 }
 
-export type CallState = 'IDLE' | 'CALLING' | 'INCOMING' | 'CONNECTED' | 'ENDED';
+export type CallState = 'IDLE' | 'CALLING' | 'INCOMING' | 'CONNECTED' | 'RECONNECTING' | 'ENDED';
 export type CallType = 'audio' | 'video';
 
 export interface CallSessionInfo {
@@ -234,7 +234,7 @@ export interface CallSessionInfo {
 }
 
 export interface CallSignalPayload {
-  action: 'CALL_OFFER' | 'CALL_ANSWER' | 'CALL_REJECT' | 'CALL_END' | 'CALL_MUTE_STATE' | 'CALL_ICE';
+  action: 'CALL_OFFER' | 'CALL_ANSWER' | 'CALL_REJECT' | 'CALL_END' | 'CALL_MUTE_STATE' | 'CALL_ICE' | 'CALL_RESTART';
   callId: string;
   callType?: CallType;
   callerDeviceId?: string;

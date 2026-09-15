@@ -130,8 +130,8 @@ export async function computeSafetyNumber(
   pubKeyA: Uint8Array,
   pubKeyB: Uint8Array
 ): Promise<string> {
-  // Sort keys lexicographically for symmetry
-  const cmp = pubKeyA.toString().localeCompare(pubKeyB.toString());
+  // Sort keys lexicographically for symmetry (byte-by-byte comparison)
+  const cmp = compareUint8Array(pubKeyA, pubKeyB);
   const combined = new Uint8Array(130);
   if (cmp <= 0) {
     combined.set(pubKeyA, 0);
@@ -146,4 +146,14 @@ export async function computeSafetyNumber(
   const num1 = (view.getUint32(0, false) % 1000).toString().padStart(3, '0');
   const num2 = (view.getUint32(4, false) % 1000).toString().padStart(3, '0');
   return `${num1} ${num2}`;
+}
+
+function compareUint8Array(a: Uint8Array, b: Uint8Array): number {
+  const len = Math.min(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    if (a[i] !== b[i]) {
+      return a[i] - b[i];
+    }
+  }
+  return a.length - b.length;
 }

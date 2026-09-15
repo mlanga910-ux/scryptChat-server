@@ -11,11 +11,11 @@ export class DevTChatDatabase extends Dexie {
   constructor() {
     super('DevTChatDB_v3.1');
 
-    this.version(3).stores({
+    this.version(4).stores({
       identity: 'deviceId',
       contacts: 'deviceId, verificationStatus, lastSeenAt',
       files: 'fileId, hashSHA256, mimeType',
-      messages: '++id, chatDeviceId, timestamp, fileId, status, groupId',
+      messages: '++id, chatDeviceId, chatDeviceId+timestamp, timestamp, fileId, status, groupId',
       groups: 'groupId, name, createdAt, adminDeviceId, lastActivityAt',
     });
   }

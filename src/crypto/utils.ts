@@ -1,11 +1,14 @@
 export function arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-  let binary = '';
+  const chunkLen = 0x8000; // Process in 32KB chunks to avoid call stack limits
   const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(bytes[i]);
+  const chunks: string[] = [];
+  for (let i = 0; i < len; i += chunkLen) {
+    const end = Math.min(i + chunkLen, len);
+    const chunk = bytes.subarray(i, end);
+    chunks.push(String.fromCharCode(...chunk));
   }
-  return btoa(binary);
+  return btoa(chunks.join(''));
 }
 
 export function base64ToArrayBuffer(base64: string): Uint8Array {

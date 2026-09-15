@@ -80,7 +80,12 @@ function getClientSubnetKey(req: Request): string {
   }
   const v6Parts = ip.split(':');
   if (v6Parts.length >= 4) {
-    return `${v6Parts[0]}:${v6Parts[1]}:${v6Parts[2]}:${v6Parts[3]}::/64`;
+    const full = ip.includes('::') ? ip.replace('::', ':' + '0:'.repeat(8 - v6Parts.length + 1)) : ip;
+    const expanded = full.split(':');
+    if (expanded.length >= 4) {
+      return `${expanded[0]}:${expanded[1]}:${expanded[2]}:${expanded[3]}::/64`;
+    }
+    return ip;
   }
   return ip;
 }
@@ -764,25 +769,29 @@ signalingRouter.post('/group/broadcast', (req: Request, res: Response) => {
     return;
   }
 
-  const now = Date.now();
+   const now = Date.now();
+   const envelope = {
+     id: `grp_${now}_${Math.random().toString(36).slice(2, 7)}`,
+     senderDeviceId,
+     packet: payload,
+     timestamp: now,
+   };
+   recipients.forEach((memberId: string) => {
+     if (memberId !== senderDeviceId) {
+       const list = mailboxes.get(memberId) || [];
+       list.push({
+         ...envelope,
+         recipientDeviceId: memberId,
+         encryptedEnvelope: JSON.stringify(payload),
+       });
+       mailboxes.set(memberId, list.slice(-50));
+     }
+   });
+
+  // Push to active SSE streams for real-time delivery
   recipients.forEach((memberId: string) => {
     if (memberId !== senderDeviceId) {
-      const envelope = {
-        id: `grp_${now}_${Math.random().toString(36).slice(2, 7)}`,
-        senderDeviceId,
-        recipientDeviceId: memberId,
-        packet: payload,
-        timestamp: now,
-      };
-      const list = mailboxes.get(memberId) || [];
-      list.push({
-        id: `grp_${now}_${Math.random().toString(36).slice(2, 7)}`,
-        senderDeviceId,
-        recipientDeviceId: memberId,
-        encryptedEnvelope: JSON.stringify(payload),
-        timestamp: now,
-      });
-      mailboxes.set(memberId, list.slice(-50));
+      pushSSEEventToDevice(memberId, 'mailbox_item', envelope);
     }
   });
 

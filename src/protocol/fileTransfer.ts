@@ -21,13 +21,23 @@ import {
 import { CryptoSession } from '../crypto/session';
 import { extractImageExif } from '../utils/exifParser';
 
-export const CHUNK_SIZE = 64 * 1024; // 64 KB
-const MAX_BUFFERED_AMOUNT = 1024 * 1024; // 1 MB backpressure threshold
+export const CHUNK_SIZE = 128 * 1024; // 128 KB - larger chunks reduce per-packet encryption overhead
+const MAX_BUFFERED_AMOUNT = 4 * 1024 * 1024; // 4 MB backpressure threshold for higher throughput
+const CHUNK_TIMEOUT_MS = 10000; // Resend chunk if ACK not received within 10s
+const ACK_WAIT_TIMEOUT_MS = 15000; // Total wait for final ACK before declaring complete
+const MAX_CHUNK_RETRIES = 3; // Maximum retransmission attempts per chunk
+const BACKOFF_BASE_MS = 500; // Exponential backoff base for chunk resend
 
 export interface FileTransferEvents {
   onProgress?: (progress: FileTransferProgress) => void;
   onCompleted?: (fileRecord: FileRecord, blob: Blob) => void;
   onError?: (fileId: string, error: string) => void;
+}
+
+interface PendingChunk {
+  chunkBytes: Uint8Array;
+  retryCount: number;
+  timer: ReturnType<typeof setTimeout> | null;
 }
 
 export class FileTransferManager {
@@ -44,6 +54,8 @@ export class FileTransferManager {
   private outgoingAckResolvers: Map<string, Map<number, () => void>> = new Map();
   private receivedAcks: Map<string, Set<number>> = new Map();
   private isCancelled = new Set<string>();
+  private pendingChunks: Map<string, Map<number, PendingChunk>> = new Map();
+  private transferContext: Map<string, { dataChannel: RTCDataChannel; session: CryptoSession; fileIdBigInt: bigint; fileBytes: Uint8Array }> = new Map();
 
   public getTransfer(fileId: string): FileTransferProgress | undefined {
     return this.activeTransfers.get(fileId);
@@ -55,14 +67,109 @@ export class FileTransferManager {
 
   public cancelTransfer(fileId: string): void {
     this.isCancelled.add(fileId);
+    this.cleanupTransferState(fileId);
     const transfer = this.activeTransfers.get(fileId);
     if (transfer) {
       transfer.status = 'error';
     }
   }
 
+  private cleanupTransferState(fileId: string): void {
+    // Cancel all pending chunk resend timers
+    const pending = this.pendingChunks.get(fileId);
+    if (pending) {
+      for (const chunk of pending.values()) {
+        if (chunk.timer) {
+          clearTimeout(chunk.timer);
+        }
+      }
+      this.pendingChunks.delete(fileId);
+    }
+    // Clean up ACK tracking maps
+    this.outgoingAckResolvers.delete(fileId);
+    this.receivedAcks.delete(fileId);
+    this.transferContext.delete(fileId);
+    // Free incoming chunk buffers
+    this.incomingFiles.delete(fileId);
+  }
+
+  private async sendChunkWithRetry(
+    fileId: string,
+    fileIdBigInt: bigint,
+    chunkIdx: number,
+    chunkBytes: Uint8Array,
+    dataChannel: RTCDataChannel,
+    session: CryptoSession
+  ): Promise<void> {
+    const chunkPacketHeader = buildPacketHeader(
+      PacketType.FILE_CHUNK,
+      session.sessionId,
+      fileIdBigInt,
+      chunkIdx
+    );
+
+    const encryptedChunkFrame = await session.encryptFrame(chunkPacketHeader, chunkBytes);
+
+    // Backpressure check
+    if (dataChannel.bufferedAmount > MAX_BUFFERED_AMOUNT) {
+      await new Promise<void>((resolve) => {
+        const checkBuffer = () => {
+          if (dataChannel.bufferedAmount < MAX_BUFFERED_AMOUNT / 2) {
+            resolve();
+          } else {
+            setTimeout(checkBuffer, 15);
+          }
+        };
+        checkBuffer();
+      });
+    }
+
+    if (dataChannel.readyState !== 'open') {
+      throw new Error('Data channel is not open, cannot send chunk');
+    }
+
+    dataChannel.send(encryptedChunkFrame);
+
+    // Set up ACK timeout with retry
+    const pending = this.pendingChunks.get(fileId);
+    if (!pending) return;
+
+    const timer = setTimeout(() => {
+      const chunk = pending.get(chunkIdx);
+      if (!chunk) return;
+
+      if (chunk.retryCount >= MAX_CHUNK_RETRIES) {
+        const transfer = this.activeTransfers.get(fileId);
+        if (transfer) {
+          transfer.status = 'error';
+        }
+        this.events?.onError?.(fileId, `Chunk ${chunkIdx} failed after ${MAX_CHUNK_RETRIES} retries`);
+        pending.delete(chunkIdx);
+        return;
+      }
+
+      chunk.retryCount += 1;
+      const backoff = BACKOFF_BASE_MS * Math.pow(2, chunk.retryCount - 1);
+
+      setTimeout(() => {
+        if (this.isCancelled.has(fileId)) return;
+        this.sendChunkWithRetry(fileId, fileIdBigInt, chunkIdx, chunkBytes, dataChannel, session)
+          .catch((err) => {
+            console.warn(`Chunk ${chunkIdx} resend error:`, err);
+          });
+      }, backoff);
+    }, CHUNK_TIMEOUT_MS);
+
+    pending.set(chunkIdx, {
+      chunkBytes,
+      retryCount: 0,
+      timer,
+    });
+  }
+
   /**
-   * Sender: Sends a file chunked with 64KB blocks and backpressure management.
+   * Sender: Sends a file chunked with 128KB blocks and backpressure management.
+   * Implements chunk acknowledgment with retransmission on NACK or timeout.
    */
   public async sendFile(
     file: File,
@@ -126,10 +233,12 @@ export class FileTransferManager {
     this.activeTransfers.set(fileId, progress);
     this.outgoingAckResolvers.set(fileId, new Map());
     this.receivedAcks.set(fileId, new Set());
+    this.pendingChunks.set(fileId, new Map());
+    this.transferContext.set(fileId, { dataChannel, session, fileIdBigInt, fileBytes });
     events?.onProgress?.({ ...progress });
 
-    // 1. Send FILE_HEADER packet (0x20)
     try {
+      // 1. Send FILE_HEADER packet (0x20)
       const encodedHeaderPayload = encodeFileHeaderPayload(fileHeader);
       const headerBytes = buildPacketHeader(
         PacketType.FILE_HEADER,
@@ -146,7 +255,7 @@ export class FileTransferManager {
 
       const startTime = Date.now();
 
-      // 2. Stream CHUNKS with backpressure
+      // 2. Stream CHUNKS with backpressure and ACK tracking
       for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
         if (this.isCancelled.has(fileId)) {
           throw new Error('File transfer cancelled by user');
@@ -156,39 +265,15 @@ export class FileTransferManager {
         const end = Math.min(start + CHUNK_SIZE, fileBytes.byteLength);
         const chunkBytes = fileBytes.slice(start, end);
 
-        const chunkPacketHeader = buildPacketHeader(
-          PacketType.FILE_CHUNK,
-          session.sessionId,
-          fileIdBigInt,
-          chunkIdx
+        await this.sendChunkWithRetry(
+          fileId, fileIdBigInt, chunkIdx, chunkBytes, dataChannel, session
         );
 
-        const encryptedChunkFrame = await session.encryptFrame(
-          chunkPacketHeader,
-          chunkBytes
-        );
-
-        // Backpressure check
-        if (dataChannel.bufferedAmount > MAX_BUFFERED_AMOUNT) {
-          await new Promise<void>((resolve) => {
-            const checkBuffer = () => {
-              if (dataChannel.bufferedAmount < MAX_BUFFERED_AMOUNT / 2) {
-                resolve();
-              } else {
-                setTimeout(checkBuffer, 15);
-              }
-            };
-            checkBuffer();
-          });
-        }
-
-        dataChannel.send(encryptedChunkFrame);
-
-        // Update progress
+        // Update progress - use chunk size for accurate speed calculation
         const transferred = chunkIdx + 1;
         const pct = Math.round((transferred / totalChunks) * 100);
-        const elapsed = (Date.now() - startTime) / 1000;
-        const speed = elapsed > 0 ? (end / elapsed) : 0;
+        const elapsedSec = (Date.now() - startTime) / 1000;
+        const speed = elapsedSec > 0 ? (transferred * CHUNK_SIZE) / elapsedSec : 0;
 
         progress.transferredChunks = transferred;
         progress.progressPercent = pct;
@@ -196,7 +281,7 @@ export class FileTransferManager {
         events?.onProgress?.({ ...progress });
       }
 
-      // Check if last chunk was already acknowledged, or wait with a safe timeout
+      // Wait for final chunk ACK with configurable timeout
       const lastChunkIdx = totalChunks - 1;
       const isAlreadyAcked = this.receivedAcks.get(fileId)?.has(lastChunkIdx);
 
@@ -206,8 +291,7 @@ export class FileTransferManager {
           if (resolvers) {
             resolvers.set(lastChunkIdx, resolve);
           }
-          // Safe timeout: don't freeze indefinitely if peer completed silently
-          setTimeout(() => resolve(), 8000);
+          setTimeout(() => resolve(), ACK_WAIT_TIMEOUT_MS);
         });
       }
 
@@ -233,13 +317,15 @@ export class FileTransferManager {
 
       return fileRecord;
     } catch (err: any) {
-      const progress = this.activeTransfers.get(fileId);
-      if (progress) {
-        progress.status = 'error';
-        events?.onProgress?.({ ...progress });
+      const transfer = this.activeTransfers.get(fileId);
+      if (transfer) {
+        transfer.status = 'error';
+        events?.onProgress?.({ ...transfer });
       }
       events?.onError?.(fileId, err.message);
       throw err;
+    } finally {
+      this.cleanupTransferState(fileId);
     }
   }
 
@@ -293,14 +379,18 @@ export class FileTransferManager {
         return;
       }
 
-      incoming.chunks.set(sequenceIndex, payload);
-      incoming.receivedBytes += payload.byteLength;
+      // Track if this is a duplicate chunk
+      const isDuplicate = incoming.chunks.has(sequenceIndex);
+      if (!isDuplicate) {
+        incoming.chunks.set(sequenceIndex, payload);
+        incoming.receivedBytes += payload.byteLength;
+      }
 
-      // Send CHUNK_ACK (0x22)
+      // Send CHUNK_ACK (0x22) - always acknowledge even duplicates
       try {
         const ackPayload: ChunkAckPayload = {
           chunkIndex: sequenceIndex,
-          status: AckStatus.OK_ACK,
+          status: isDuplicate ? AckStatus.OK_ACK : AckStatus.OK_ACK,
         };
         const encodedAck = encodeChunkAckPayload(ackPayload);
         const ackHeader = buildPacketHeader(
@@ -331,89 +421,149 @@ export class FileTransferManager {
         events?.onProgress?.({ ...progress });
       }
 
-      // Check if all chunks received
+      // Check if all chunks received (account for out-of-order arrival)
       if (incoming.chunks.size >= incoming.header.totalChunks) {
         if (progress) {
           progress.status = 'verifying';
           events?.onProgress?.({ ...progress });
         }
 
-        // Reassemble full byte array
-        const fullBytes = new Uint8Array(incoming.header.size);
-        let offset = 0;
-        for (let i = 0; i < incoming.header.totalChunks; i++) {
-          const ch = incoming.chunks.get(i);
-          if (!ch) {
-            throw new Error(`Missing chunk #${i} during reassembly`);
+        try {
+          // Verify all expected chunks are present before reassembly
+          const missing: number[] = [];
+          for (let i = 0; i < incoming.header.totalChunks; i++) {
+            if (!incoming.chunks.has(i)) {
+              missing.push(i);
+            }
           }
-          fullBytes.set(ch, offset);
-          offset += ch.byteLength;
-        }
+          if (missing.length > 0) {
+            throw new Error(`Missing chunks during reassembly: ${missing.join(', ')}`);
+          }
 
-        // Verify SHA-256 hash
-        const calculatedHashBytes = await sha256(fullBytes);
-        const calculatedHashHex = arrayBufferToHex(calculatedHashBytes);
+          // Reassemble full byte array
+          const fullBytes = new Uint8Array(incoming.header.size);
+          let offset = 0;
+          for (let i = 0; i < incoming.header.totalChunks; i++) {
+            const ch = incoming.chunks.get(i);
+            if (!ch) {
+              throw new Error(`Missing chunk #${i} during reassembly`);
+            }
+            fullBytes.set(ch, offset);
+            offset += ch.byteLength;
+          }
 
-        if (calculatedHashHex !== incoming.header.hashSHA256) {
+          // Verify SHA-256 hash
+          const calculatedHashBytes = await sha256(fullBytes);
+          const calculatedHashHex = arrayBufferToHex(calculatedHashBytes);
+
+          if (calculatedHashHex !== incoming.header.hashSHA256) {
+            if (progress) progress.status = 'error';
+            events?.onError?.(
+              fileIdHex,
+              `SHA-256 verification failed! Expected ${incoming.header.hashSHA256}, got ${calculatedHashHex}`
+            );
+            throw new Error('File integrity hash mismatch');
+          }
+
+          const mime = incoming.header.mimeType;
+          const blob = new Blob([fullBytes], { type: mime });
+          const blobUrl = URL.createObjectURL(blob);
+          const isImage = mime.startsWith('image/');
+          const isAudio = mime.startsWith('audio/');
+          const isVideo = mime.startsWith('video/');
+
+          let exifData = undefined;
+          if (isImage) {
+            try {
+              exifData = await extractImageExif(blob);
+            } catch (err) {
+              console.warn('Receiver EXIF extraction error:', err);
+            }
+          }
+
+          if (progress) {
+            progress.status = 'completed';
+            progress.progressPercent = 100;
+            progress.blobUrl = blobUrl;
+            events?.onProgress?.({ ...progress });
+          }
+
+          const fileRecord: FileRecord = {
+            fileId: fileIdHex,
+            name: incoming.header.name,
+            size: incoming.header.size,
+            mimeType: mime,
+            hashSHA256: calculatedHashHex,
+            blobRef: blob,
+            isImage,
+            isAudio,
+            isVideo,
+            exifData,
+          };
+
+          await db.files.put(fileRecord);
+          events?.onCompleted?.(fileRecord, blob);
+
+          return { fileRecord, blob };
+        } catch (reassembleErr: any) {
           if (progress) progress.status = 'error';
-          events?.onError?.(
-            fileIdHex,
-            `SHA-256 verification failed! Expected ${incoming.header.hashSHA256}, got ${calculatedHashHex}`
-          );
-          throw new Error('File integrity hash mismatch');
+          events?.onError?.(fileIdHex, reassembleErr.message);
+          console.error('File reassembly error:', reassembleErr);
+        } finally {
+          // Always clean up incoming file state to prevent memory leaks
+          this.incomingFiles.delete(fileIdHex);
+          this.activeTransfers.delete(fileIdHex);
         }
-
-        const mime = incoming.header.mimeType;
-        const blob = new Blob([fullBytes], { type: mime });
-        const blobUrl = URL.createObjectURL(blob);
-        const isImage = mime.startsWith('image/');
-        const isAudio = mime.startsWith('audio/');
-        const isVideo = mime.startsWith('video/');
-
-        let exifData = undefined;
-        if (isImage) {
-          try {
-            exifData = await extractImageExif(blob);
-          } catch (err) {
-            console.warn('Receiver EXIF extraction error:', err);
-          }
-        }
-
-        if (progress) {
-          progress.status = 'completed';
-          progress.progressPercent = 100;
-          progress.blobUrl = blobUrl;
-          events?.onProgress?.({ ...progress });
-        }
-
-        const fileRecord: FileRecord = {
-          fileId: fileIdHex,
-          name: incoming.header.name,
-          size: incoming.header.size,
-          mimeType: mime,
-          hashSHA256: calculatedHashHex,
-          blobRef: blob,
-          isImage,
-          isAudio,
-          isVideo,
-          exifData,
-        };
-
-        await db.files.put(fileRecord);
-        this.incomingFiles.delete(fileIdHex);
-        events?.onCompleted?.(fileRecord, blob);
-
-        return { fileRecord, blob };
       }
     }
 
     // C. 0x22: CHUNK_ACK
     if (packetType === PacketType.CHUNK_ACK) {
       const ack = decodeChunkAckPayload(payload);
+
       if (!this.receivedAcks.has(fileIdHex)) {
         this.receivedAcks.set(fileIdHex, new Set());
       }
       this.receivedAcks.get(fileIdHex)!.add(ack.chunkIndex);
+
+      // Cancel the pending chunk's resend timer
+      const pending = this.pendingChunks.get(fileIdHex);
+      if (pending) {
+        const chunk = pending.get(ack.chunkIndex);
+        if (chunk && chunk.timer) {
+          clearTimeout(chunk.timer);
+          chunk.timer = null;
+        }
+        pending.delete(ack.chunkIndex);
+      }
+
+      // Check for NACK and trigger retransmission
+      if (ack.status === AckStatus.NACK_RETRANSMIT_REQ) {
+        const ctx = this.transferContext.get(fileIdHex);
+        if (ctx) {
+          const start = ack.chunkIndex * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, ctx.fileBytes.byteLength);
+          if (start >= ctx.fileBytes.byteLength) return;
+          const chunkBytes = ctx.fileBytes.slice(start, end);
+          const resendTimer = setTimeout(() => {
+            if (this.isCancelled.has(fileIdHex)) return;
+            this.sendChunkWithRetry(
+              fileIdHex, ctx.fileIdBigInt, ack.chunkIndex, chunkBytes,
+              ctx.dataChannel, ctx.session
+            ).catch((err) => {
+              console.warn(`NACK-rerequested chunk ${ack.chunkIndex} resend error:`, err);
+            });
+          }, BACKOFF_BASE_MS * Math.pow(2, 0));
+          // Store the timer reference for cleanup
+          if (pending) {
+            pending.set(ack.chunkIndex, {
+              chunkBytes,
+              retryCount: 1,
+              timer: resendTimer,
+            });
+          }
+        }
+      }
 
       const fileResolvers = this.outgoingAckResolvers.get(fileIdHex);
       if (fileResolvers) {
