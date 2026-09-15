@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ConnectionState } from '../webrtc/peerManager';
-import { ContactRecord, IdentityRecord, RelayStatus } from '../types/index';
+import { IdentityRecord } from '../types/index';
 import {
   Check,
   ChevronDown,
@@ -18,12 +17,6 @@ import { useTheme } from '../utils/theme';
 
 interface TerminalHeaderProps {
   identity: IdentityRecord | null;
-  connectionState: ConnectionState;
-  relayStatus: RelayStatus;
-  relayPingMs?: number | null;
-  relayErrorReason?: string | null;
-  activeContact: ContactRecord | null;
-  latencyMs: number | null;
   currentMobileTab: 'peers' | 'chat';
   onMobileTabChange: (tab: 'peers' | 'chat') => void;
   onOpenPairing: () => void;
@@ -35,12 +28,6 @@ interface TerminalHeaderProps {
 
 export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   identity,
-  connectionState,
-  relayStatus,
-  relayPingMs,
-  relayErrorReason,
-  activeContact,
-  latencyMs,
   currentMobileTab,
   onMobileTabChange,
   onOpenPairing,
@@ -71,38 +58,6 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
   };
-
-  const status = (() => {
-    if (connectionState === 'CONNECTED') {
-      return {
-        label: latencyMs !== null && latencyMs !== undefined ? `Connected · ${latencyMs}ms` : 'Connected',
-        dot: 'bg-[var(--sc-e400)]',
-        hint: 'Direct peer connection',
-      };
-    }
-    if (connectionState === 'CONNECTING' || connectionState === 'HANDSHAKING') {
-      return {
-        label: 'Connecting',
-        dot: 'bg-amber-400 animate-pulse',
-        hint: activeContact ? `Linking with ${activeContact.alias || activeContact.deviceId}` : undefined,
-      };
-    }
-    if (relayStatus === 'ONLINE') {
-      return {
-        label: relayPingMs ? `Online · ${relayPingMs}ms` : 'Online',
-        dot: 'bg-[var(--sc-e400)]',
-        hint: 'Signaling reachable, nothing connected yet',
-      };
-    }
-    if (relayStatus === 'OFFLINE') {
-      return {
-        label: 'Offline',
-        dot: 'bg-rose-500',
-        hint: relayErrorReason || 'Signaling unreachable — LAN pairing still works',
-      };
-    }
-    return { label: 'Checking', dot: 'bg-amber-400 animate-pulse', hint: undefined };
-  })();
 
   const initial = (identity?.displayName || 'U').charAt(0).toUpperCase();
 
@@ -136,14 +91,6 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
 
       {/* Actions */}
       <div className="flex items-center gap-1.5">
-        <div
-          className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full border border-zinc-800 text-[11px] text-zinc-400"
-          title={status.hint}
-        >
-          <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`} />
-          <span className="tabular-nums">{status.label}</span>
-        </div>
-
         <button
           onClick={onOpenPairing}
           className="p-2 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-900 transition-colors cursor-pointer"

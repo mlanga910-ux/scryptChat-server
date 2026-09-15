@@ -11,7 +11,6 @@ import {
   GroupRecord,
   IdentityRecord,
   MessageRecord,
-  RelayServerStats,
   RelayStatus,
 } from './types/index';
 import { ConnectionState, PeerManager } from './webrtc/peerManager';
@@ -47,7 +46,6 @@ export default function App() {
   const [connectionState, setConnectionState] = useState<ConnectionState>('DISCONNECTED');
   const [relayStatus, setRelayStatus] = useState<RelayStatus>('CONNECTING');
   const [relayPingMs, setRelayPingMs] = useState<number | null>(null);
-  const [relayStats, setRelayStats] = useState<RelayServerStats | null>(null);
   const [relayErrorReason, setRelayErrorReason] = useState<string | null>(null);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
 
@@ -97,13 +95,11 @@ export default function App() {
         if (!isMounted) return;
         setIdentity(idRecord);
 
-        // First time this device is opened (or right after a data wipe):
-        // show the profile setup page instead of dropping straight into chat.
         let onboardingDone = false;
         try {
           onboardingDone = localStorage.getItem(ONBOARDING_FLAG) === 'true';
         } catch {}
-        if (!onboardingDone || !idRecord.displayName || idRecord.displayName.trim() === '') {
+        if (!onboardingDone) {
           setShowOnboarding(true);
         }
 
@@ -128,9 +124,8 @@ export default function App() {
               setMobileTab('chat');
             }
           },
-          onRelayStatusChange: (status, stats, pingMs, errorReason) => {
+          onRelayStatusChange: (status, _stats, pingMs, errorReason) => {
             setRelayStatus(status);
-            if (stats !== undefined) setRelayStats(stats || null);
             setRelayPingMs(pingMs !== undefined ? pingMs : null);
             setRelayErrorReason(errorReason || null);
           },
@@ -465,12 +460,6 @@ export default function App() {
       {/* Top Header Bar */}
       <TerminalHeader
         identity={identity}
-        connectionState={connectionState}
-        relayStatus={relayStatus}
-        relayPingMs={relayPingMs}
-        relayErrorReason={relayErrorReason}
-        activeContact={activeContact}
-        latencyMs={latencyMs}
         currentMobileTab={mobileTab}
         onMobileTabChange={setMobileTab}
         onOpenPairing={() => setIsPairingOpen(true)}

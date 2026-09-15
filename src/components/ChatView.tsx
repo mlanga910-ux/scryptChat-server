@@ -433,8 +433,16 @@ export const ChatView: React.FC<ChatViewProps> = ({
   };
 
   if (!activeContact && !activeGroup) {
-    // No conversation open: keep the pane empty instead of showing placeholder copy.
-    return <div className="flex-1 h-full bg-zinc-950" />;
+    return (
+      <div className="flex-1 h-full bg-zinc-950 flex flex-col items-center justify-center text-center px-6">
+        <div className="space-y-3 max-w-sm">
+          <h2 className="text-base font-medium text-white">Direct encrypted messenger</h2>
+          <p className="text-sm text-zinc-500 leading-relaxed">
+            Select a contact or group to start chatting. Or scan a QR code to pair a new device.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   const isGroup = !!activeGroup;
