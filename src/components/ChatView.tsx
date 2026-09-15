@@ -24,7 +24,6 @@ import {
   Music,
   Check,
   CheckCheck,
-  Lock,
   Phone,
   Video,
   Eye,
@@ -434,17 +433,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
   };
 
   if (!activeContact && !activeGroup) {
-    return (
-      <div className="flex-1 h-full flex flex-col items-center justify-center p-6 text-center text-zinc-500 font-sans select-none">
-        <div className="w-12 h-12 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-white mb-3 shadow-inner">
-          <Lock className="w-5 h-5 text-emerald-400" />
-        </div>
-        <h3 className="text-sm font-semibold text-white mb-1">Direct Encrypted Messenger</h3>
-        <p className="text-xs max-w-sm text-zinc-500">
-          Select a contact or group to start chatting. All messages and transfers are directly end-to-end encrypted.
-        </p>
-      </div>
-    );
+    // No conversation open: keep the pane empty instead of showing placeholder copy.
+    return <div className="flex-1 h-full bg-zinc-950" />;
   }
 
   const isGroup = !!activeGroup;
@@ -459,7 +449,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   return (
     <div className="flex-1 h-full min-h-0 flex flex-col bg-zinc-950 text-zinc-50 font-sans select-none overflow-hidden relative">
       {/* Top Header */}
-      <div className="px-4 py-3 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm flex items-center justify-between shrink-0 z-10">
+      <div className="shrink-0 mx-2 sm:mx-4 mt-1 mb-2 px-2.5 sm:px-3 py-2 rounded-2xl border border-zinc-800 bg-zinc-900 flex items-center justify-between gap-2 z-10">
         <div className="flex items-center gap-3 min-w-0">
           {onBackToPeers && (
             <button
@@ -494,7 +484,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
               )}
             </div>
 
-            <div className="flex items-center gap-2 text-[10px] text-zinc-500 font-mono">
+            <div className="flex items-center gap-1.5 text-[11px]">
               {isGroup ? (
                 <button
                   onClick={() => onOpenGroupDetails?.(activeGroup!)}
@@ -506,11 +496,18 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 </button>
               ) : (
                 <>
-                  <span className="truncate max-w-[140px] sm:max-w-[220px]">
-                    {activeContact!.deviceId}
-                  </span>
+                  {isConnected || activeContact!.isOnline ? (
+                    <span className="flex items-center gap-1.5 text-[var(--sc-e400)]">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[var(--sc-e400)]" />
+                      <span>Active now</span>
+                    </span>
+                  ) : (
+                    <span className="truncate max-w-[160px] sm:max-w-[240px] text-zinc-500">
+                      {activeContact!.deviceId}
+                    </span>
+                  )}
                   {latencyMs !== undefined && isConnected && (
-                    <span className="text-emerald-400 font-semibold">{latencyMs}ms</span>
+                    <span className="text-zinc-500">{latencyMs}ms</span>
                   )}
                 </>
               )}
@@ -529,8 +526,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 onStartCall?.(activeContact.deviceId, activeContact.alias || activeContact.deviceId, 'audio');
               }
             }}
-            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-lg transition-colors cursor-pointer"
-            title={isGroup ? 'Group Voice Call' : 'Encrypted Voice Call'}
+            className="p-2 rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+            title={isGroup ? 'Group voice call' : 'Voice call'}
             aria-label="Voice Call"
           >
             <Phone className="w-4 h-4" />
@@ -545,8 +542,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 onStartCall?.(activeContact.deviceId, activeContact.alias || activeContact.deviceId, 'video');
               }
             }}
-            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-lg transition-colors cursor-pointer"
-            title={isGroup ? 'Group Video Call' : 'Encrypted Video Call'}
+            className="p-2 rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+            title={isGroup ? 'Group video call' : 'Video call'}
             aria-label="Video Call"
           >
             <Video className="w-4 h-4" />
@@ -556,8 +553,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
           {isGroup ? (
             <button
               onClick={() => onOpenGroupDetails?.(activeGroup!)}
-              className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-lg transition-colors cursor-pointer"
-              title="Group Details"
+              className="p-2 rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+              title="Group details"
               aria-label="Group Details"
             >
               <Info className="w-4 h-4" />
@@ -567,8 +564,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
               {onVerifyContact && activeContact && (
                 <button
                   onClick={() => onVerifyContact(activeContact)}
-                  className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-lg transition-colors cursor-pointer"
-                  title="Security & Safety Number"
+                  className="p-2 rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+                  title="Safety number"
                   aria-label="Security"
                 >
                   <ShieldCheck className="w-4 h-4" />
@@ -576,8 +573,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
               )}
               <button
                 onClick={() => setIsChatSettingsOpen(true)}
-                className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-lg transition-colors cursor-pointer"
-                title="Chat Preferences"
+                className="p-2 rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+                title="Chat preferences"
                 aria-label="Chat Preferences"
               >
                 <Sliders className="w-4 h-4" />
@@ -593,17 +590,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
         onScroll={handleScroll}
         className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 py-4 space-y-4 select-text"
       >
-        {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-center p-6 text-zinc-500">
-            <div className="w-10 h-10 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-white mb-2 shadow-inner">
-              <Lock className="w-4 h-4 text-emerald-400" />
-            </div>
-            <p className="text-xs font-semibold text-white">No messages yet</p>
-            <p className="text-[11px] text-zinc-500 max-w-xs mt-0.5">
-              Send a message, file, photo, or code snippet to start communicating securely.
-            </p>
-          </div>
-        ) : (
+        {messages.length === 0 ? null : (
           messages.map((msg, idx) => {
             const isYou = msg.direction === 'OUTBOUND';
             const fileRec = msg.fileId ? fileRecordsMap.get(msg.fileId) || msg.fileRecord : undefined;
@@ -637,10 +624,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 )}
 
                 <div
-                  className={`w-fit max-w-[92%] sm:max-w-[80%] md:max-w-[72%] rounded-2xl overflow-hidden shadow-sm transition-all ${
-                    isYou
-                      ? 'bg-white text-black'
-                      : 'bg-zinc-900 border border-zinc-800 text-zinc-50'
+                  className={`w-fit max-w-[92%] sm:max-w-[80%] md:max-w-[72%] rounded-[20px] overflow-hidden shadow-sm transition-all ${
+                    isYou ? 'bubble-out' : 'bubble-in'
                   }`}
                 >
                   {/* Photo / Image View */}
@@ -964,10 +949,10 @@ export const ChatView: React.FC<ChatViewProps> = ({
       )}
 
       {/* Modern Message Composer Bar */}
-      <div className="shrink-0 bg-zinc-900 border-t border-zinc-800 px-3 sm:px-6 pt-3 pb-4 sm:pb-6 space-y-2">
+      <div className="shrink-0 px-3 sm:px-6 pt-3 pb-4 sm:pb-6 space-y-2">
         <form
           onSubmit={handleSend}
-          className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 focus-within:border-zinc-700 rounded-2xl p-1.5 sm:p-2 transition-all shadow-md"
+          className="flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-900 px-2 py-1.5 sm:px-2.5 sm:py-2 shadow-lg transition-colors focus-within:border-zinc-700"
         >
           <input
             type="file"
@@ -979,8 +964,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors cursor-pointer shrink-0"
-            title="Attach File or Image"
+            className="p-2 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer shrink-0"
+            title="Attach file or photo"
             aria-label="Attach file"
           >
             <Paperclip className="w-4 h-4" />
@@ -989,7 +974,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
           <button
             type="button"
             onClick={() => setShowCodeComposer(!showCodeComposer)}
-            className={`p-2 rounded-xl transition-colors cursor-pointer shrink-0 ${
+            className={`p-2 rounded-full transition-colors cursor-pointer shrink-0 ${
               showCodeComposer
                 ? 'bg-emerald-400 text-zinc-950'
                 : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
@@ -999,21 +984,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
             aria-pressed={showCodeComposer}
           >
             <Code2 className="w-4 h-4" />
-          </button>
-
-          <button
-            type="button"
-            onClick={isRecording ? () => stopRecording(false) : startRecording}
-            className={`p-2 rounded-xl transition-colors shrink-0 cursor-pointer ${
-              isRecording
-                ? 'bg-rose-600 text-white'
-                : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
-            }`}
-            title={isRecording ? 'Stop Recording' : 'Record Voice Note'}
-            aria-label={isRecording ? 'Stop recording' : 'Record voice note'}
-            aria-pressed={isRecording}
-          >
-            <Mic className="w-4 h-4" />
           </button>
 
           <input
@@ -1029,6 +999,21 @@ export const ChatView: React.FC<ChatViewProps> = ({
             className="flex-1 bg-transparent border-0 px-2.5 py-1.5 text-xs sm:text-sm text-white placeholder-zinc-500 focus:outline-none"
             aria-label="Message input"
           />
+
+          <button
+            type="button"
+            onClick={isRecording ? () => stopRecording(false) : startRecording}
+            className={`p-2 rounded-full transition-colors shrink-0 cursor-pointer ${
+              isRecording
+                ? 'bg-rose-600 text-white'
+                : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+            }`}
+            title={isRecording ? 'Stop recording' : 'Record voice note'}
+            aria-label={isRecording ? 'Stop recording' : 'Record voice note'}
+            aria-pressed={isRecording}
+          >
+            <Mic className="w-4 h-4" />
+          </button>
 
           <button
             type="submit"

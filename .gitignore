@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Environment files (never commit real keys)
+.env
+.env.*
+!.env.example
+
+# Logs and editor noise
+*.log
+npm-debug.log*
+yarn-error.log*
+.DS_Store
+.vscode/
+.idea/

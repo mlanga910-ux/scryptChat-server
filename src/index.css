@@ -1,12 +1,173 @@
 @import "tailwindcss";
 
+/*
+ * scryptChat theme
+ * ---------------------------------------------------------------------------
+ * The app is written with the zinc/emerald utility scales. Instead of touching
+ * hundreds of class names, those scales are re-pointed at live CSS variables
+ * here, so `bg-zinc-900`, `border-zinc-800`, `text-zinc-400`, ... automatically
+ * follow the active theme (`html.dark` or `html.light`).
+ *
+ * A few classes with inverted meaning (`text-white`, `bg-white`, `hover:text-white`)
+ * are re-declared below the Tailwind layers so that they flip too.
+ */
+
+@theme {
+  --font-sans: var(--sc-font-sans);
+  --font-mono: var(--sc-font-mono);
+
+  --color-zinc-50: var(--sc-z50);
+  --color-zinc-100: var(--sc-z100);
+  --color-zinc-200: var(--sc-z200);
+  --color-zinc-300: var(--sc-z300);
+  --color-zinc-400: var(--sc-z400);
+  --color-zinc-500: var(--sc-z500);
+  --color-zinc-600: var(--sc-z600);
+  --color-zinc-700: var(--sc-z700);
+  --color-zinc-800: var(--sc-z800);
+  --color-zinc-900: var(--sc-z900);
+  --color-zinc-950: var(--sc-z950);
+
+  --color-emerald-100: var(--sc-e100);
+  --color-emerald-200: var(--sc-e200);
+  --color-emerald-300: var(--sc-e300);
+  --color-emerald-400: var(--sc-e400);
+  --color-emerald-500: var(--sc-e500);
+  --color-emerald-600: var(--sc-e600);
+  --color-emerald-700: var(--sc-e700);
+  --color-emerald-800: var(--sc-e800);
+  --color-emerald-900: var(--sc-e900);
+  --color-emerald-950: var(--sc-e950);
+
+  --radius-lg: 0.875rem;
+  --radius-xl: 1.125rem;
+  --radius-2xl: 1.25rem;
+  --radius-3xl: 1.5rem;
+}
+
+/* ------------------------------- light ---------------------------------- */
+:root,
+html.light {
+  color-scheme: light;
+
+  --sc-z50: #0a0a0b;
+  --sc-z100: #131316;
+  --sc-z200: #27272a;
+  --sc-z300: #3f3f46;
+  --sc-z400: #52525b;
+  --sc-z500: #71717a;
+  --sc-z600: #a1a1aa;
+  --sc-z700: #d8d8dd;
+  --sc-z800: #e7e7ea;
+  --sc-z900: #f5f5f6;
+  --sc-z950: #ffffff;
+
+  --sc-e100: #d1fae5;
+  --sc-e200: #a7f3d0;
+  --sc-e300: #059669;
+  --sc-e400: #059669;
+  --sc-e500: #047857;
+  --sc-e600: #047857;
+  --sc-e700: #065f46;
+  --sc-e800: #064e3b;
+  --sc-e900: #064e3b;
+  --sc-e950: #ecfdf5;
+
+  --sc-app-bg: #fafafa;
+  --sc-panel: #ffffff;
+  --sc-panel-muted: #f5f5f6;
+  --sc-border: #e7e7ea;
+  --sc-border-strong: #d8d8dd;
+  --sc-fg: #111114;
+  --sc-fg-strong: #0a0a0b;
+  --sc-fg-muted: #71717a;
+  --sc-fg-subtle: #a1a1aa;
+  --sc-accent: #111114;
+  --sc-accent-hover: #2c2c31;
+  --sc-on-accent: #ffffff;
+  --sc-invert-bg: #111114;
+  --sc-on-invert: #ffffff;
+  --sc-danger: #e11d48;
+  --sc-warning: #d97706;
+
+  --sc-bubble-in-bg: #f4f4f6;
+  --sc-bubble-in-fg: #18181b;
+  --sc-bubble-out-bg: #111114;
+  --sc-bubble-out-fg: #ffffff;
+
+  --sc-shadow-sm: 0 1px 2px rgba(16, 16, 20, 0.06);
+  --sc-shadow-md: 0 2px 8px rgba(16, 16, 20, 0.08);
+  --sc-shadow-lg: 0 12px 32px rgba(16, 16, 20, 0.12);
+}
+
+/* -------------------------------- dark ---------------------------------- */
+html.dark {
+  color-scheme: dark;
+
+  --sc-z50: #f8f8fa;
+  --sc-z100: #ebecef;
+  --sc-z200: #d5d5da;
+  --sc-z300: #b9b9c0;
+  --sc-z400: #98989f;
+  --sc-z500: #6f6f78;
+  --sc-z600: #4a4a52;
+  --sc-z700: #2b2b31;
+  --sc-z800: #1f1f24;
+  --sc-z900: #141417;
+  --sc-z950: #0b0b0d;
+
+  --sc-e100: #d1fae5;
+  --sc-e200: #a7f3d0;
+  --sc-e300: #6ee7b7;
+  --sc-e400: #34d399;
+  --sc-e500: #10b981;
+  --sc-e600: #059669;
+  --sc-e700: #047857;
+  --sc-e800: #065f46;
+  --sc-e900: #064e3b;
+  --sc-e950: #022c22;
+
+  --sc-app-bg: #0b0b0d;
+  --sc-panel: #141417;
+  --sc-panel-muted: #101013;
+  --sc-border: #1f1f24;
+  --sc-border-strong: #2b2b31;
+  --sc-fg: #f4f4f6;
+  --sc-fg-strong: #ffffff;
+  --sc-fg-muted: #9b9ba3;
+  --sc-fg-subtle: #6f6f78;
+  --sc-accent: #f5f5f7;
+  --sc-accent-hover: #ffffff;
+  --sc-on-accent: #101014;
+  --sc-invert-bg: #f5f5f7;
+  --sc-on-invert: #101014;
+  --sc-danger: #f43f5e;
+  --sc-warning: #f59e0b;
+
+  --sc-bubble-in-bg: #1a1a1f;
+  --sc-bubble-in-fg: #f2f2f4;
+  --sc-bubble-out-bg: #f5f5f7;
+  --sc-bubble-out-fg: #101014;
+
+  --sc-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --sc-shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
+  --sc-shadow-lg: 0 18px 40px rgba(0, 0, 0, 0.55);
+}
+
 @layer base {
+  :root {
+    --sc-font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, sans-serif;
+    --sc-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sc-transition: 160ms cubic-bezier(0.2, 0, 0, 1);
+  }
+
   * {
     box-sizing: border-box;
   }
 
   html {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: var(--sc-font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
@@ -14,47 +175,40 @@
   }
 
   body {
-    background-color: #0a0a0b;
-    color: #fafafa;
+    background-color: var(--sc-app-bg);
+    color: var(--sc-fg);
     margin: 0;
     padding: 0;
-    overflow-x: hidden;
     min-height: 100vh;
+    overflow-x: hidden;
     line-height: 1.5;
+    transition: background-color var(--sc-transition), color var(--sc-transition);
   }
 
-  :root {
-    --color-bg: #0a0a0b;
-    --color-bg-elevated: #111113;
-    --color-bg-card: #141416;
-    --color-border: #27272a;
-    --color-border-strong: #3f3f46;
-    --color-fg: #fafafa;
-    --color-fg-muted: #a1a1aa;
-    --color-fg-subtle: #71717a;
-    --color-accent: #00d4aa;
-    --color-accent-hover: #00e5b8;
-    --color-accent-dim: #00d4aa33;
-    --color-danger: #ff4d6a;
-    --color-danger-dim: #ff4d6a33;
-    --color-warning: #ffb800;
-    --color-warning-dim: #ffb80033;
-    --color-info: #00c2ff;
-    --color-info-dim: #00c2ff33;
-    --radius-sm: 6px;
-    --radius-md: 10px;
-    --radius-lg: 14px;
-    --radius-xl: 18px;
-    --radius-2xl: 24px;
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
-    --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
-    --shadow-xl: 0 20px 48px rgba(0, 0, 0, 0.6);
-    --transition-fast: 120ms cubic-bezier(0.2, 0, 0, 1);
-    --transition-base: 180ms cubic-bezier(0.2, 0, 0, 1);
-    --transition-slow: 280ms cubic-bezier(0.2, 0, 0, 1);
-    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  ::selection {
+    background: color-mix(in oklab, var(--sc-fg-strong) 18%, transparent);
+    color: var(--sc-fg);
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--sc-border-strong);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--sc-fg-subtle);
+    background-clip: padding-box;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -68,50 +222,25 @@
   }
 }
 
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: #27272a;
-  border-radius: 3px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #3f3f46;
-}
-::-webkit-scrollbar-corner {
-  background: transparent;
-}
-
-::selection {
-  background: var(--color-accent-dim);
-  color: var(--color-fg);
-}
-
 @layer utilities {
   .text-balance {
     text-wrap: balance;
   }
 
   .animate-in {
-    animation: fadeIn var(--transition-base) ease-out forwards;
+    animation: fadeIn 160ms ease-out forwards;
   }
 
   .animate-slide-up {
-    animation: slideUp var(--transition-base) ease-out forwards;
+    animation: slideUp 160ms ease-out forwards;
   }
 
   .animate-slide-down {
-    animation: slideDown var(--transition-base) ease-out forwards;
+    animation: slideDown 160ms ease-out forwards;
   }
 
   .animate-scale-in {
-    animation: scaleIn var(--transition-fast) ease-out forwards;
+    animation: scaleIn 120ms ease-out forwards;
   }
 
   @keyframes fadeIn {
@@ -126,7 +255,7 @@
   @keyframes slideUp {
     from {
       opacity: 0;
-      transform: translateY(8px);
+      transform: translateY(6px);
     }
     to {
       opacity: 1;
@@ -137,7 +266,7 @@
   @keyframes slideDown {
     from {
       opacity: 0;
-      transform: translateY(-8px);
+      transform: translateY(-6px);
     }
     to {
       opacity: 1;
@@ -148,7 +277,7 @@
   @keyframes scaleIn {
     from {
       opacity: 0;
-      transform: scale(0.96);
+      transform: scale(0.98);
     }
     to {
       opacity: 1;
@@ -156,78 +285,73 @@
     }
   }
 
-  @keyframes pulseSoft {
-    0%, 100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.6;
-    }
-  }
-
-  @keyframes shimmer {
-    0% {
-      background-position: -200% 0;
-    }
-    100% {
-      background-position: 200% 0;
-    }
-  }
-
-  .focus-ring {
-    outline: none;
-    ring: 2px;
-    ring-offset: 2px;
-    ring-offset-color: var(--color-bg);
-  }
-
   .focus-ring:focus-visible {
-    ring-color: var(--color-accent);
+    outline: 2px solid var(--sc-fg-strong);
+    outline-offset: 2px;
   }
 
   .glass {
-    background: rgba(17, 17, 19, 0.8);
-    backdrop-filter: saturate(180%) blur(16px);
-    border: 1px solid rgba(39, 39, 42, 0.6);
+    background: color-mix(in oklab, var(--sc-panel) 82%, transparent);
+    backdrop-filter: saturate(150%) blur(14px);
+    border: 1px solid var(--sc-border);
   }
 
   .surface {
-    background: var(--color-bg-card);
-    border: 1px solid var(--color-border);
+    background: var(--sc-panel);
+    border: 1px solid var(--sc-border);
   }
 
   .surface-elevated {
-    background: var(--color-bg-elevated);
-    border: 1px solid var(--color-border);
+    background: var(--sc-panel);
+    border: 1px solid var(--sc-border);
+    box-shadow: var(--sc-shadow-md);
   }
 
-  .surface-hover {
-    transition: background-color var(--transition-fast), border-color var(--transition-fast);
+  /* Contact / conversation row */
+  .row-item {
+    border-radius: var(--radius-xl);
+    transition: background-color var(--sc-transition);
   }
 
-  .surface-hover:hover {
-    background: var(--color-bg-elevated);
-    border-color: var(--color-border-strong);
+  .row-item:hover {
+    background: color-mix(in oklab, var(--sc-fg-strong) 5%, transparent);
+  }
+
+  .row-item[data-selected="true"] {
+    background: color-mix(in oklab, var(--sc-fg-strong) 8%, transparent);
+  }
+
+  /* Message bubbles */
+  .bubble-in {
+    background: var(--sc-bubble-in-bg);
+    color: var(--sc-bubble-in-fg);
+  }
+
+  .bubble-out {
+    background: var(--sc-bubble-out-bg);
+    color: var(--sc-bubble-out-fg);
+  }
+
+  /* Wordmark */
+  .wordmark {
+    font-weight: 500;
+    letter-spacing: -0.03em;
+    font-size: 1.02rem;
+    color: var(--sc-fg-strong);
   }
 
   .btn-primary {
-    background: var(--color-accent);
-    color: #0a0a0b;
+    background: var(--sc-accent);
+    color: var(--sc-on-accent);
     font-weight: 600;
-    border-radius: var(--radius-md);
-    transition: all var(--transition-fast);
+    border-radius: 999px;
     border: none;
     cursor: pointer;
+    transition: background-color var(--sc-transition), opacity var(--sc-transition);
   }
 
   .btn-primary:hover:not(:disabled) {
-    background: var(--color-accent-hover);
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-md);
-  }
-
-  .btn-primary:active:not(:disabled) {
-    transform: translateY(0);
+    background: var(--sc-accent-hover);
   }
 
   .btn-primary:disabled {
@@ -236,101 +360,190 @@
   }
 
   .btn-secondary {
-    background: var(--color-bg-elevated);
-    color: var(--color-fg);
+    background: var(--sc-panel-muted);
+    color: var(--sc-fg);
     font-weight: 500;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--color-border);
-    transition: all var(--transition-fast);
+    border-radius: 999px;
+    border: 1px solid var(--sc-border);
     cursor: pointer;
+    transition: background-color var(--sc-transition), border-color var(--sc-transition);
   }
 
   .btn-secondary:hover:not(:disabled) {
-    background: var(--color-bg-card);
-    border-color: var(--color-border-strong);
-  }
-
-  .btn-secondary:active:not(:disabled) {
-    background: var(--color-border);
+    border-color: var(--sc-border-strong);
+    background: var(--sc-panel);
   }
 
   .btn-ghost {
     background: transparent;
-    color: var(--color-fg-muted);
+    color: var(--sc-fg-muted);
     font-weight: 500;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-lg);
     border: none;
-    transition: all var(--transition-fast);
     cursor: pointer;
+    transition: background-color var(--sc-transition), color var(--sc-transition);
   }
 
   .btn-ghost:hover:not(:disabled) {
-    background: var(--color-bg-card);
-    color: var(--color-fg);
-  }
-
-  .btn-ghost:active:not(:disabled) {
-    background: var(--color-border);
-  }
-
-  .btn-danger {
-    background: var(--color-danger);
-    color: white;
-    font-weight: 600;
-    border-radius: var(--radius-md);
-    border: none;
-    transition: all var(--transition-fast);
-    cursor: pointer;
-  }
-
-  .btn-danger:hover:not(:disabled) {
-    background: #ff3355;
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-md);
-  }
-
-  .btn-danger:active:not(:disabled) {
-    transform: translateY(0);
+    background: color-mix(in oklab, var(--sc-fg-strong) 6%, transparent);
+    color: var(--sc-fg-strong);
   }
 
   .input-base {
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    color: var(--color-fg);
-    font-size: 13px;
-    padding: 10px 12px;
-    transition: all var(--transition-fast);
+    background: transparent;
+    border: 1px solid var(--sc-border);
+    border-radius: var(--radius-xl);
+    color: var(--sc-fg);
+    font-size: 0.8125rem;
+    padding: 10px 14px;
     width: 100%;
+    transition: border-color var(--sc-transition), box-shadow var(--sc-transition);
   }
 
   .input-base::placeholder {
-    color: var(--color-fg-subtle);
+    color: var(--sc-fg-subtle);
   }
 
   .input-base:focus {
     outline: none;
-    border-color: var(--color-accent);
-    box-shadow: 0 0 0 3px var(--color-accent-dim);
-  }
-
-  .input-base:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+    border-color: var(--sc-border-strong);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--sc-fg-strong) 6%, transparent);
   }
 
   .card {
-    background: var(--color-bg-card);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
+    background: var(--sc-panel);
+    border: 1px solid var(--sc-border);
+    border-radius: var(--radius-2xl);
   }
+}
 
-  .card-hover {
-    transition: all var(--transition-base);
-  }
+/* ---------------------------------------------------------------------------
+ * Inverting helpers. Declared outside the Tailwind layers so they win over the
+ * generated utilities, and so the whole app follows the active theme.
+ * ------------------------------------------------------------------------- */
 
-  .card-hover:hover {
-    border-color: var(--color-border-strong);
-    box-shadow: var(--shadow-md);
+.text-white {
+  color: var(--sc-fg-strong);
+}
+
+.hover\:text-white:hover {
+  color: var(--sc-fg-strong);
+}
+
+.group:hover .group-hover\:text-white {
+  color: var(--sc-fg-strong);
+}
+
+.bg-white {
+  background-color: var(--sc-invert-bg);
+}
+
+.border-white {
+  border-color: var(--sc-fg-strong);
+}
+
+.text-black,
+.text-zinc-950 {
+  color: var(--sc-on-invert);
+}
+
+/*
+ * A handful of components use arbitrary hex utilities for panel greys.
+ * Re-point them at the live tokens so light mode stays coherent.
+ */
+.text-\[\#71717a\] {
+  color: var(--sc-z500);
+}
+
+.text-\[\#a1a1aa\] {
+  color: var(--sc-z400);
+}
+
+.text-\[\#d4d4d8\],
+.hover\:text-\[\#d4d4d8\]:hover {
+  color: var(--sc-z300);
+}
+
+.text-\[\#e4e4e7\] {
+  color: var(--sc-z200);
+}
+
+.text-\[\#52525b\] {
+  color: var(--sc-z600);
+}
+
+.bg-\[\#27272a\],
+.hover\:bg-\[\#27272a\]:hover {
+  background-color: var(--sc-z800);
+}
+
+.bg-\[\#27272a\]\/60,
+.hover\:bg-\[\#27272a\]\/60:hover {
+  background-color: color-mix(in oklab, var(--sc-z800) 60%, transparent);
+}
+
+.bg-\[\#3f3f46\],
+.hover\:bg-\[\#3f3f46\]:hover {
+  background-color: var(--sc-z700);
+}
+
+.bg-\[\#141418\],
+.hover\:bg-\[\#141418\]:hover {
+  background-color: var(--sc-z900);
+}
+
+.bg-\[\#111114\] {
+  background-color: var(--sc-z900);
+}
+
+.bg-\[\#111114\]\/80 {
+  background-color: color-mix(in oklab, var(--sc-z900) 80%, transparent);
+}
+
+.bg-\[\#111114\]\/90 {
+  background-color: color-mix(in oklab, var(--sc-z900) 90%, transparent);
+}
+
+.bg-\[\#0c0c0e\],
+.bg-\[\#0a0a0b\] {
+  background-color: var(--sc-z950);
+}
+
+.bg-\[\#0c0c0e\]\/90 {
+  background-color: color-mix(in oklab, var(--sc-z950) 90%, transparent);
+}
+
+.bg-\[\#0a0a0b\]\/80 {
+  background-color: color-mix(in oklab, var(--sc-z950) 80%, transparent);
+}
+
+.bg-\[\#0a0a0b\]\/92 {
+  background-color: color-mix(in oklab, var(--sc-z950) 92%, transparent);
+}
+
+.border-\[\#27272a\]\/60 {
+  border-color: color-mix(in oklab, var(--sc-z800) 60%, transparent);
+}
+
+.border-\[\#0a0a0b\] {
+  border-color: var(--sc-z950);
+}
+
+@media (width >= 40rem) {
+  .sm\:border-\[\#27272a\]\/60 {
+    border-color: color-mix(in oklab, var(--sc-z800) 60%, transparent);
   }
+}
+
+/* Bright fills keep white type in both themes. */
+:is(
+    .bg-rose-500,
+    .bg-rose-600,
+    .bg-rose-700,
+    .bg-emerald-500,
+    .bg-emerald-600,
+    .bg-amber-600,
+    .bg-blue-600
+  ).text-white {
+  color: #ffffff;
 }

@@ -30,6 +30,9 @@ import { ContactDetailsModal } from './components/ContactDetailsModal';
 import { GroupCreatorModal } from './components/GroupCreatorModal';
 import { GroupDetailsModal } from './components/GroupDetailsModal';
 
+// Marks that this device has completed the first-run profile setup.
+const ONBOARDING_FLAG = 'scryptchat_onboarding_done';
+
 export default function App() {
   const [identity, setIdentity] = useState<IdentityRecord | null>(null);
   const [contacts, setContacts] = useState<ContactRecord[]>([]);
@@ -94,8 +97,13 @@ export default function App() {
         if (!isMounted) return;
         setIdentity(idRecord);
 
-        // If user has not set a display name yet or first time visit, show onboarding
-        if (!idRecord.displayName || idRecord.displayName.trim() === '') {
+        // First time this device is opened (or right after a data wipe):
+        // show the profile setup page instead of dropping straight into chat.
+        let onboardingDone = false;
+        try {
+          onboardingDone = localStorage.getItem(ONBOARDING_FLAG) === 'true';
+        } catch {}
+        if (!onboardingDone || !idRecord.displayName || idRecord.displayName.trim() === '') {
           setShowOnboarding(true);
         }
 
@@ -424,6 +432,9 @@ export default function App() {
   const handleOnboardingComplete = (updatedId: IdentityRecord) => {
     setIdentity(updatedId);
     setShowOnboarding(false);
+    try {
+      localStorage.setItem(ONBOARDING_FLAG, 'true');
+    } catch {}
     if (peerManagerRef.current) {
       peerManagerRef.current.updateIdentity(updatedId);
     }
@@ -450,7 +461,7 @@ export default function App() {
   };
 
   return (
-    <div className="h-[100dvh] w-screen max-w-full flex flex-col bg-[#0a0a0b] text-[#fafafa] overflow-hidden select-none font-sans">
+    <div className="h-[100dvh] w-screen max-w-full flex flex-col bg-zinc-950 text-zinc-100 overflow-hidden select-none font-sans">
       {/* Top Header Bar */}
       <TerminalHeader
         identity={identity}
@@ -470,9 +481,9 @@ export default function App() {
       />
 
       {/* Main Workspace Layout */}
-      <div className="flex-1 min-h-0 flex overflow-hidden">
+      <div className="flex-1 min-h-0 flex overflow-hidden md:px-3 md:pb-3">
         {/* Desktop: Dual-Pane Master-Detail */}
-        <div className="hidden md:flex flex-1 min-h-0 h-full overflow-hidden">
+        <div className="hidden md:flex flex-1 min-h-0 h-full overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-900/40">
           <PeerList
             contacts={contacts}
             groups={groups}
@@ -663,6 +674,9 @@ export default function App() {
           setIsWipeOpen(false);
           const freshId = await getOrCreateIdentity();
           setIdentity(freshId);
+          try {
+            localStorage.removeItem(ONBOARDING_FLAG);
+          } catch {}
           setShowOnboarding(true);
         }}
       />

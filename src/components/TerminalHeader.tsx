@@ -1,18 +1,20 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ConnectionState } from '../webrtc/peerManager';
 import { ContactRecord, IdentityRecord, RelayStatus } from '../types/index';
 import {
-  Lock,
-  Trash2,
   Check,
-  Copy,
-  Shield,
-  User,
-  Sliders,
-  QrCode,
   ChevronDown,
-  Menu,
+  Copy,
+  Moon,
+  Plus,
+  Shield,
+  Sliders,
+  Sun,
+  Trash2,
+  User,
 } from 'lucide-react';
+import { ScryptChatLogo } from './ScryptChatLogo';
+import { useTheme } from '../utils/theme';
 
 interface TerminalHeaderProps {
   identity: IdentityRecord | null;
@@ -47,266 +49,198 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   onOpenSettings,
   onOpenWipe,
 }) => {
-  const isDirect = connectionState === 'CONNECTED';
-  const isConnecting = connectionState === 'CONNECTING' || connectionState === 'HANDSHAKING';
+  const { theme, toggleTheme } = useTheme();
   const [copied, setCopied] = useState(false);
-  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
-  const profileMenuRef = useRef<HTMLDivElement>(null);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!isMenuOpen) return;
     const handleClickOutside = (event: MouseEvent) => {
-      if (
-        profileMenuRef.current &&
-        !profileMenuRef.current.contains(event.target as Node)
-      ) {
-        setIsProfileMenuOpen(false);
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsMenuOpen(false);
       }
     };
-    if (isProfileMenuOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isProfileMenuOpen]);
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isMenuOpen]);
 
   const copyId = () => {
     if (!identity?.deviceId) return;
     navigator.clipboard.writeText(identity.deviceId);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setTimeout(() => setCopied(false), 1600);
   };
 
-  const initial = (identity?.displayName || 'U').charAt(0).toUpperCase();
-
-  const getStatusConfig = () => {
-    if (isDirect) {
+  const status = (() => {
+    if (connectionState === 'CONNECTED') {
       return {
-        dotColor: 'bg-emerald-400',
-        text: 'Direct P2P',
-        textColor: 'text-emerald-400',
-        subText: latencyMs !== null ? `${latencyMs}ms` : undefined,
+        label: latencyMs !== null && latencyMs !== undefined ? `Connected · ${latencyMs}ms` : 'Connected',
+        dot: 'bg-[var(--sc-e400)]',
+        hint: 'Direct peer connection',
       };
     }
-    if (isConnecting && activeContact) {
+    if (connectionState === 'CONNECTING' || connectionState === 'HANDSHAKING') {
       return {
-        dotColor: 'bg-amber-400 animate-pulse',
-        text: 'Connecting P2P...',
-        textColor: 'text-amber-300',
+        label: 'Connecting',
+        dot: 'bg-amber-400 animate-pulse',
+        hint: activeContact ? `Linking with ${activeContact.alias || activeContact.deviceId}` : undefined,
       };
     }
     if (relayStatus === 'ONLINE') {
       return {
-        dotColor: 'bg-emerald-400',
-        text: 'Signaling Online',
-        textColor: 'text-zinc-300',
-        subText: relayPingMs !== null && relayPingMs !== undefined ? `${relayPingMs}ms` : undefined,
+        label: relayPingMs ? `Online · ${relayPingMs}ms` : 'Online',
+        dot: 'bg-[var(--sc-e400)]',
+        hint: 'Signaling reachable, nothing connected yet',
       };
     }
-    return {
-      dotColor: 'bg-amber-400 animate-pulse',
-      text: 'Connecting...',
-      textColor: 'text-amber-300',
-    };
-  };
+    if (relayStatus === 'OFFLINE') {
+      return {
+        label: 'Offline',
+        dot: 'bg-rose-500',
+        hint: relayErrorReason || 'Signaling unreachable — LAN pairing still works',
+      };
+    }
+    return { label: 'Checking', dot: 'bg-amber-400 animate-pulse', hint: undefined };
+  })();
 
-  const status = getStatusConfig();
+  const initial = (identity?.displayName || 'U').charAt(0).toUpperCase();
 
   return (
-    <header className="border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm px-4 sm:px-6 py-3 flex items-center justify-between gap-4 text-sm font-sans select-none z-30 relative">
-      {/* Left: Brand Logo & Title */}
-      <div className="flex items-center gap-3">
-        <div className="w-8 h-8 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-white shadow-sm">
-          <Lock className="w-4 h-4 text-emerald-400" />
-        </div>
-        <div className="flex flex-col">
-          <span className="font-semibold text-white text-sm tracking-tight leading-tight">
-            scryptChat
-          </span>
-          <span className="text-[10px] text-zinc-500 font-mono leading-none">
-            E2EE P2P
-          </span>
-        </div>
+    <header className="shrink-0 px-3 sm:px-5 h-14 flex items-center justify-between gap-2 select-none">
+      {/* Brand */}
+      <div className="flex items-center gap-2 min-w-0">
+        <ScryptChatLogo size={24} className="shrink-0" />
+        <span className="wordmark truncate">scryptChat</span>
       </div>
 
-      {/* Mobile Tab Switcher */}
-      <div className="flex md:hidden items-center bg-zinc-900 border border-zinc-800 rounded-xl p-0.5">
+      {/* Mobile tab switcher */}
+      <div className="flex md:hidden items-center gap-1 p-1 rounded-full border border-zinc-800 bg-zinc-900">
         <button
-          id="tab-peers-btn"
           onClick={() => onMobileTabChange('peers')}
-          className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${
-            currentMobileTab === 'peers'
-              ? 'bg-white text-black font-semibold shadow-sm'
-              : 'text-zinc-400 hover:text-white'
+          className={`px-3 py-1 rounded-full text-[11px] font-medium transition-colors ${
+            currentMobileTab === 'peers' ? 'bg-zinc-950 text-white' : 'text-zinc-500'
           }`}
         >
-          Contacts
+          Chats
         </button>
         <button
-          id="tab-chat-btn"
           onClick={() => onMobileTabChange('chat')}
-          className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${
-            currentMobileTab === 'chat'
-              ? 'bg-white text-black font-semibold shadow-sm'
-              : 'text-zinc-400 hover:text-white'
+          className={`px-3 py-1 rounded-full text-[11px] font-medium transition-colors ${
+            currentMobileTab === 'chat' ? 'bg-zinc-950 text-white' : 'text-zinc-500'
           }`}
         >
           Chat
         </button>
       </div>
 
-      {/* Right: Status, Profile & Menu */}
-      <div className="flex items-center gap-2">
-        {/* Status Pill Indicator */}
+      {/* Actions */}
+      <div className="flex items-center gap-1.5">
         <div
-          id="p2p-status-indicator"
-          className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-xs select-none hidden sm:flex"
+          className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full border border-zinc-800 text-[11px] text-zinc-400"
+          title={status.hint}
         >
-          <span className={`w-1.5 h-1.5 rounded-full ${status.dotColor}`} />
-          <span className={`font-medium ${status.textColor}`}>{status.text}</span>
-          {status.subText && (
-            <span className="text-zinc-500 font-mono text-[10px] border-l border-zinc-800 pl-2">
-              {status.subText}
-            </span>
-          )}
+          <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`} />
+          <span className="tabular-nums">{status.label}</span>
         </div>
 
-        {/* Mobile Status Compact */}
-        <div className="sm:hidden flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-900 border border-zinc-800">
-          <span className={`w-1.5 h-1.5 rounded-full ${status.dotColor}`} />
-          <span className={`font-medium ${status.textColor} text-xs`}>
-            {isDirect ? 'P2P' : isConnecting ? 'Connecting' : relayStatus === 'ONLINE' ? 'Online' : 'Connecting'}
-          </span>
-        </div>
-
-        {/* Pair Button - Mobile Only */}
         <button
-          className="sm:hidden p-2 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
           onClick={onOpenPairing}
-          aria-label="Pair Device"
+          className="p-2 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-900 transition-colors cursor-pointer"
+          title="Pair a device"
+          aria-label="Pair a device"
         >
-          <QrCode className="w-5 h-5" />
+          <Plus className="w-4 h-4" />
         </button>
 
-        {/* User Profile Popover Button */}
-        <div className="relative" ref={profileMenuRef}>
+        <button
+          onClick={toggleTheme}
+          className="p-2 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-900 transition-colors cursor-pointer"
+          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          aria-label="Toggle theme"
+        >
+          {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+        </button>
+
+        <div className="relative" ref={menuRef}>
           <button
-            id="header-profile-btn"
-            onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
-            className="flex items-center gap-2 p-1.5 pr-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 transition-all cursor-pointer"
-            title="Profile & Settings"
-            aria-expanded={isProfileMenuOpen}
-            aria-haspopup="true"
+            onClick={() => setIsMenuOpen((open) => !open)}
+            className="flex items-center gap-1.5 pl-1 pr-1.5 py-1 rounded-full hover:bg-zinc-900 transition-colors cursor-pointer"
+            aria-label="Account menu"
           >
-            <div
-              className="w-7 h-7 rounded-lg flex items-center justify-center text-white font-semibold text-xs shadow-sm"
-              style={{ backgroundColor: identity?.avatarColor || '#2563eb' }}
-            >
-              {initial}
-            </div>
-            <span className="font-medium text-white text-xs max-w-[100px] truncate hidden sm:inline">
-              {identity?.displayName || 'User'}
-            </span>
-            <ChevronDown className="w-3.5 h-3.5 text-zinc-400 hidden sm:block" />
+            {identity?.avatarUrl ? (
+              <img
+                src={identity.avatarUrl}
+                alt=""
+                className="w-7 h-7 rounded-full object-cover"
+              />
+            ) : (
+              <span
+                className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-medium text-white"
+                style={{ backgroundColor: identity?.avatarColor || '#3f3f46' }}
+              >
+                {initial}
+              </span>
+            )}
+            <ChevronDown className="w-3.5 h-3.5 text-zinc-500" />
           </button>
 
-          {/* Top-Right Profile Dropdown Popover */}
-          {isProfileMenuOpen && (
-            <div
-              id="profile-dropdown-menu"
-              className="absolute right-0 top-full mt-2 w-56 bg-zinc-950 border border-zinc-800 rounded-2xl shadow-xl p-1.5 space-y-0.5 text-xs z-50 animate-in animate-scale-in"
-            >
-              {/* User Identity Header Card */}
-              <div className="p-3 bg-zinc-950/50 border border-zinc-800 rounded-xl mb-1">
-                <div className="font-medium text-white text-xs truncate">
-                  {identity?.displayName || 'Anonymous User'}
-                </div>
-                <div className="text-[10px] text-zinc-500 font-mono truncate mt-0.5">
-                  {identity?.deviceId}
-                </div>
+          {isMenuOpen && (
+            <div className="absolute right-0 top-full mt-2 w-56 p-1.5 rounded-2xl border border-zinc-800 bg-zinc-950 shadow-xl z-50 animate-in animate-scale-in">
+              <div className="px-2.5 py-2">
+                <p className="text-xs font-medium text-white truncate">
+                  {identity?.displayName || 'Unnamed device'}
+                </p>
+                <button
+                  onClick={copyId}
+                  className="mt-0.5 flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                  title="Copy device ID"
+                >
+                  {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                  <span className="truncate max-w-[150px]">{identity?.deviceId}</span>
+                </button>
               </div>
-
-              {/* Profile */}
+              <div className="my-1 h-px bg-zinc-800" />
               <button
-                id="menu-profile-btn"
                 onClick={() => {
-                  setIsProfileMenuOpen(false);
+                  setIsMenuOpen(false);
                   onOpenProfile();
                 }}
-                className="w-full text-left px-3 py-2.5 text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors flex items-center gap-2"
+                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-zinc-300 hover:text-white hover:bg-zinc-900 transition-colors cursor-pointer"
               >
-                <User className="w-4 h-4 text-zinc-400" />
-                <span className="font-medium">Profile & Identity</span>
+                <User className="w-3.5 h-3.5" />
+                <span>Edit profile</span>
               </button>
-
-              {/* Settings */}
               <button
-                id="menu-settings-btn"
                 onClick={() => {
-                  setIsProfileMenuOpen(false);
-                  onOpenSettings();
-                }}
-                className="w-full text-left px-3 py-2.5 text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors flex items-center gap-2"
-              >
-                <Sliders className="w-4 h-4 text-zinc-400" />
-                <span className="font-medium">Settings</span>
-              </button>
-
-              {/* Security & Safety Numbers */}
-              <button
-                id="menu-security-btn"
-                onClick={() => {
-                  setIsProfileMenuOpen(false);
+                  setIsMenuOpen(false);
                   onOpenSecurity();
                 }}
-                className="w-full text-left px-3 py-2.5 text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors flex items-center gap-2"
+                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-zinc-300 hover:text-white hover:bg-zinc-900 transition-colors cursor-pointer"
               >
-                <Shield className="w-4 h-4 text-zinc-400" />
-                <span className="font-medium">Security & Keys</span>
+                <Shield className="w-3.5 h-3.5" />
+                <span>Safety number</span>
               </button>
-
-              {/* Pair Device */}
               <button
-                id="menu-pair-btn"
                 onClick={() => {
-                  setIsProfileMenuOpen(false);
-                  onOpenPairing();
+                  setIsMenuOpen(false);
+                  onOpenSettings();
                 }}
-                className="w-full text-left px-3 py-2.5 text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors flex items-center gap-2"
+                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-zinc-300 hover:text-white hover:bg-zinc-900 transition-colors cursor-pointer"
               >
-                <QrCode className="w-4 h-4 text-zinc-400" />
-                <span className="font-medium">Pair Device</span>
+                <Sliders className="w-3.5 h-3.5" />
+                <span>Settings</span>
               </button>
-
-              {/* Copy Device ID */}
+              <div className="my-1 h-px bg-zinc-800" />
               <button
-                id="menu-copy-id-btn"
                 onClick={() => {
-                  copyId();
-                  setIsProfileMenuOpen(false);
-                }}
-                className="w-full text-left px-3 py-2.5 text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors flex items-center justify-between"
-              >
-                <div className="flex items-center gap-2">
-                  <Copy className="w-4 h-4 text-zinc-400" />
-                  <span>{copied ? 'Copied ID' : 'Copy Device ID'}</span>
-                </div>
-                {copied && <Check className="w-3.5 h-3.5 text-emerald-400" />}
-              </button>
-
-              <div className="border-t border-zinc-800 my-1" />
-
-              {/* Clear All Data */}
-              <button
-                id="menu-wipe-btn"
-                onClick={() => {
-                  setIsProfileMenuOpen(false);
+                  setIsMenuOpen(false);
                   onOpenWipe();
                 }}
-                className="w-full text-left px-3 py-2.5 text-rose-400 hover:bg-rose-950/30 rounded-xl transition-colors flex items-center gap-2"
+                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
               >
-                <Trash2 className="w-4 h-4 text-rose-400" />
-                <span className="font-medium">Clear All Data</span>
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Erase local data</span>
               </button>
             </div>
           )}

@@ -1,50 +1,52 @@
 # scryptChat
 
-scryptChat is a zero-trust, peer-to-peer secure communication system designed for direct, end-to-end encrypted messaging, voice/video calling, code sharing, and file transfers without intermediate storage servers.
+Peer-to-peer chat, calls and file transfer. Messages are encrypted on the device
+with the Web Crypto API and travel directly between peers over WebRTC data
+channels; the signaling server only relays connection metadata.
 
-All cryptographic operations run locally on the client using the Web Cryptography API (SubtleCrypto). No message content, private keys, or transferred files ever touch a central database or third-party cloud.
+## Run locally
 
----
+```bash
+npm install
+npm run dev      # Express + Vite on http://localhost:3000
+```
 
-## Core Principles
+## Build and run in production
 
-### 1. Zero-Trust Security & Real Cryptography
-- **Ephemeral Key Exchange**: Uses ECDH (Elliptic Curve Diffie-Hellman P-256) to derive shared symmetric session keys per peer.
-- **Authenticated Encryption**: All message payloads, file chunks, and control packets are encrypted with AES-256-GCM with unique initialization vectors (IV) for every transmission.
-- **Key Derivation & Protection**: User identity keys and local database contents are secured client-side using PBKDF2 with SHA-256 key stretching and salt.
-- **Safety Numbers & Fingerprints**: Visual cryptographic fingerprint comparisons to verify contact identities out-of-band and protect against active man-in-the-middle attacks.
+```bash
+npm run build    # vite build -> dist/, esbuild -> dist/server.cjs
+npm start        # NODE_ENV=production node dist/server.cjs
+```
 
-### 2. Direct P2P Transport & Low Latency
-- **Direct WebRTC Data Channels**: Messages, code snippets, and large files stream directly between peers over encrypted WebRTC data channels with DTLS encryption.
-- **Zero Central Storage**: Signaling only exchanges ephemeral connection metadata (SDP offers/answers and ICE candidates). Once connected, communication is direct browser-to-browser.
-- **Chunked File Pipeline**: High-throughput file transmission engine with transfer progress, checksum validation, and client-side IndexedDB assembly.
+In production the same Express process serves `dist/` and the
+`/api/signaling/*` relay on `$PORT`, so the browser talks to the relay on its own
+origin.
 
-### 3. Native Calling Experience
-- **Real-Time Voice & Video**: Direct WebRTC peer-to-peer voice and video streams.
-- **Synthesized Audio Engine**: Realistic telecommunication ringbacks, dual-frequency dial tones (440Hz + 480Hz), and acoustic notifications generated via the Web Audio API without bulky audio assets.
-- **Native Call Interface**: Clean calling dashboard with camera toggle, audio mute, front/back camera switching, screen sharing, and call duration tracking.
+## Deploy on Render
 
-### 4. Developer-Focused Code Sharing
-- **Automatic Code Detection**: Pasted snippets and code messages are automatically parsed into syntax-highlighted code cards without requiring manual markdown fences.
-- **Interactive Tools**: Full-screen code viewer, code search, one-click copy, and file download with detected language extensions (.ts, .py, .go, .rs, .json, etc.).
+1. Push this repository to GitHub.
+2. In Render choose **New → Blueprint** and select the repository.
+   `render.yaml` is picked up automatically and configures:
+   - build: `npm install && npm run build`
+   - start: `npm start`
+   - env: `NODE_ENV=production`, health check on `/api/health`
+3. Wait for the first deploy, then open the service URL.
 
-### 5. Local Data Control & Privacy
-- **Encrypted Local Database**: All contact lists, conversation histories, and transferred assets are stored strictly in client-side IndexedDB.
-- **Data Export & Import**: Users can export their encrypted identity and conversation archives as a JSON backup or purge all local data instantly with one click.
-- **Custom Identities**: Custom contact aliases, group details, and local avatar pictures without uploading images to any external image host.
+The free instance sleeps after ~15 minutes idle; the first request afterwards
+takes a few seconds while it wakes up.
 
----
+### Environment variables
 
-## Tech Stack
+| Key | Required | Notes |
+| --- | --- | --- |
+| `NODE_ENV` | yes | Set to `production` so the server serves `dist/` instead of Vite middleware. |
+| `PORT` | set by Render | The server binds `0.0.0.0:$PORT`. |
+| `CORS_ORIGINS` | no | Comma separated extra origins allowed to call the relay API. |
 
-- **Frontend**: React 18, TypeScript, Tailwind CSS, Lucide Icons
-- **Cryptographic Primitives**: Web Cryptography API (SubtleCrypto, ECDH P-256, AES-GCM 256-bit, PBKDF2)
-- **Networking & Transport**: WebRTC (RTCPeerConnection, RTCDataChannel), WebSocket Signaling
-- **Local Persistence**: IndexedDB (Dexie.js)
-- **Audio Synthesis**: Web Audio API (real-time harmonic frequency generator)
+## Notes
 
----
-
-## License
-
-MIT License. Free for personal and commercial use.
+- Signaling state (rooms, presence, mailboxes) lives in memory, so a single
+  instance is expected. Restarting the service clears pending handshakes.
+- Devices on the same network negotiate a direct host route; the relay is only
+  needed to find each other.
+- Everything the user sends is stored locally in IndexedDB on their device.

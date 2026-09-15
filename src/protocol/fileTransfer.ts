@@ -21,8 +21,8 @@ import {
 import { CryptoSession } from '../crypto/session';
 import { extractImageExif } from '../utils/exifParser';
 
-export const CHUNK_SIZE = 128 * 1024; // 128 KB - larger chunks reduce per-packet encryption overhead
-const MAX_BUFFERED_AMOUNT = 4 * 1024 * 1024; // 4 MB backpressure threshold for higher throughput
+export const CHUNK_SIZE = 256 * 1024; // 256 KB frames: far less per-chunk encryption/ACK overhead
+const MAX_BUFFERED_AMOUNT = 16 * 1024 * 1024; // 16 MB in-flight window keeps fast LAN links saturated
 const CHUNK_TIMEOUT_MS = 10000; // Resend chunk if ACK not received within 10s
 const ACK_WAIT_TIMEOUT_MS = 15000; // Total wait for final ACK before declaring complete
 const MAX_CHUNK_RETRIES = 3; // Maximum retransmission attempts per chunk
@@ -55,7 +55,16 @@ export class FileTransferManager {
   private receivedAcks: Map<string, Set<number>> = new Map();
   private isCancelled = new Set<string>();
   private pendingChunks: Map<string, Map<number, PendingChunk>> = new Map();
-  private transferContext: Map<string, { dataChannel: RTCDataChannel; session: CryptoSession; fileIdBigInt: bigint; fileBytes: Uint8Array }> = new Map();
+  private transferContext: Map<
+    string,
+    {
+      dataChannel: RTCDataChannel;
+      session: CryptoSession;
+      fileIdBigInt: bigint;
+      fileBytes: Uint8Array;
+      events?: FileTransferEvents;
+    }
+  > = new Map();
 
   public getTransfer(fileId: string): FileTransferProgress | undefined {
     return this.activeTransfers.get(fileId);
@@ -93,6 +102,31 @@ export class FileTransferManager {
     this.incomingFiles.delete(fileId);
   }
 
+  /**
+   * Resolves as soon as the SCTP send buffer drains below its low watermark.
+   * Uses the native `bufferedamountlow` signal so the send loop resumes on the
+   * very next packet instead of after a polling tick.
+   */
+  private waitForDrain(dataChannel: RTCDataChannel): Promise<void> {
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      let poll: ReturnType<typeof setInterval> | undefined;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        if (poll) clearInterval(poll);
+        dataChannel.removeEventListener('bufferedamountlow', done);
+        resolve();
+      };
+      const lowWaterMark = Math.min(4 * 1024 * 1024, MAX_BUFFERED_AMOUNT / 2);
+      dataChannel.bufferedAmountLowThreshold = lowWaterMark;
+      dataChannel.addEventListener('bufferedamountlow', done);
+      poll = setInterval(() => {
+        if (dataChannel.readyState !== 'open' || dataChannel.bufferedAmount <= lowWaterMark) done();
+      }, 20);
+    });
+  }
+
   private async sendChunkWithRetry(
     fileId: string,
     fileIdBigInt: bigint,
@@ -110,18 +144,9 @@ export class FileTransferManager {
 
     const encryptedChunkFrame = await session.encryptFrame(chunkPacketHeader, chunkBytes);
 
-    // Backpressure check
+    // Backpressure: park the loop until the channel buffer drains.
     if (dataChannel.bufferedAmount > MAX_BUFFERED_AMOUNT) {
-      await new Promise<void>((resolve) => {
-        const checkBuffer = () => {
-          if (dataChannel.bufferedAmount < MAX_BUFFERED_AMOUNT / 2) {
-            resolve();
-          } else {
-            setTimeout(checkBuffer, 15);
-          }
-        };
-        checkBuffer();
-      });
+      await this.waitForDrain(dataChannel);
     }
 
     if (dataChannel.readyState !== 'open') {
@@ -143,7 +168,9 @@ export class FileTransferManager {
         if (transfer) {
           transfer.status = 'error';
         }
-        this.events?.onError?.(fileId, `Chunk ${chunkIdx} failed after ${MAX_CHUNK_RETRIES} retries`);
+        this.transferContext
+          .get(fileId)
+          ?.events?.onError?.(fileId, `Chunk ${chunkIdx} failed after ${MAX_CHUNK_RETRIES} retries`);
         pending.delete(chunkIdx);
         return;
       }
@@ -234,7 +261,7 @@ export class FileTransferManager {
     this.outgoingAckResolvers.set(fileId, new Map());
     this.receivedAcks.set(fileId, new Set());
     this.pendingChunks.set(fileId, new Map());
-    this.transferContext.set(fileId, { dataChannel, session, fileIdBigInt, fileBytes });
+    this.transferContext.set(fileId, { dataChannel, session, fileIdBigInt, fileBytes, events });
     events?.onProgress?.({ ...progress });
 
     try {

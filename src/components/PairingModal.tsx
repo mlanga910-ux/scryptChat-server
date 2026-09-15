@@ -247,7 +247,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
           await peerManager.confirmPairingOnRelay(code);
 
           setIsSuccess(true);
-          setStatusMessage('Secure E2EE connection established.');
+          setStatusMessage('Connected.');
           setTimeout(() => {
             onPairSuccess();
             onClose();
@@ -496,9 +496,6 @@ export const PairingModal: React.FC<PairingModalProps> = ({
               <h3 className="text-sm font-semibold text-white tracking-tight">
                 Pair New Device
               </h3>
-              <p className="text-[11px] text-zinc-500">
-                Direct end-to-end encrypted pairing
-              </p>
             </div>
           </div>
           <button
@@ -738,8 +735,8 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                               try {
                                 const url = `${window.location.origin}/?room=${roomCode}`;
                                 await navigator.share({
-                                  title: 'Add me on Secure Chat',
-                                  text: 'Join my end-to-end encrypted direct chat:',
+                                  title: 'Add me on scryptChat',
+                                  text: 'Pair with me on scryptChat:',
                                   url,
                                 });
                               } catch {}

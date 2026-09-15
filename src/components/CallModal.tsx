@@ -232,7 +232,7 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
                   ? 'Connecting direct P2P audio...'
                   : isVideo && session.isRemoteVideoMuted
                   ? 'Partner camera is paused'
-                  : 'Encrypted High-Definition Voice'}
+                  : 'Voice call'}
               </p>
             </div>
           </div>

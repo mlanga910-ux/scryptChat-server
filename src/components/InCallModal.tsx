@@ -12,7 +12,6 @@ import {
   VolumeX,
   MessageSquare,
   Hand,
-  HandRaised,
   SignalHigh,
   Wifi,
   Battery,
@@ -290,7 +289,7 @@ export const InCallModal: React.FC<InCallModalProps> = ({
               }`}
             >
               {isHandRaised ? (
-                <HandRaised className="w-5 h-5" />
+                <Hand className="w-5 h-5" />
               ) : (
                 <Hand className="w-5 h-5" />
               )}

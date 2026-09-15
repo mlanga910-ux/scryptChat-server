@@ -1,0 +1,25 @@
+# Render blueprint for scryptChat.
+#
+# The web service runs the Express signaling relay and serves the built Vite
+# bundle from dist/ on the same origin, so the client can reach
+# /api/signaling/* without any extra configuration.
+#
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repository.
+services:
+  - type: web
+    name: scryptchat
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "20.18.0"
+      # Optional: comma separated list of extra origins allowed to call the relay.
+      - key: CORS_ORIGINS
+        value: ""

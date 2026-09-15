@@ -459,7 +459,11 @@ export class CallManager {
 
    public async toggleScreenShare(): Promise<boolean> {
     if (this.screenStream) {
-      this.screenStream.getTracks().forEach((t) => t.stop());
+      // Grab references before stopping: MediaStreamTrack ids are read-only, so
+      // the screen tracks are matched by identity instead of a renamed id.
+      const screenTracks = this.screenStream.getTracks();
+      const screenAudioTrackRef = screenTracks.find((t) => t.kind === 'audio') || null;
+      screenTracks.forEach((t) => t.stop());
       this.screenStream = null;
 
       if (this.localStream && this.mediaPeerConnection) {
@@ -471,20 +475,17 @@ export class CallManager {
       }
 
       // Remove screen audio track from local stream and stop any screen audio senders
-      if (this.mediaPeerConnection) {
+      if (this.mediaPeerConnection && screenAudioTrackRef) {
         const senders = this.mediaPeerConnection.getSenders();
         for (const s of senders) {
-          if (s.track?.id.startsWith('screen-audio-')) {
+          if (s.track === screenAudioTrackRef) {
             try { s.track?.stop(); } catch {}
             try { s.replaceTrack(null); } catch {}
           }
         }
       }
-      if (this.localStream) {
-        const screenAudio = this.localStream.getAudioTracks().find((t) => t.id.startsWith('screen-audio-'));
-        if (screenAudio) {
-          this.localStream.removeTrack(screenAudio);
-        }
+      if (this.localStream && screenAudioTrackRef) {
+        this.localStream.removeTrack(screenAudioTrackRef);
       }
 
       if (this.currentSession) {
@@ -498,13 +499,6 @@ export class CallManager {
         this.screenStream = stream;
         const screenTrack = stream.getVideoTracks()[0];
         const screenAudioTrack = stream.getAudioTracks()[0];
-
-        if (screenAudioTrack) {
-          screenAudioTrack.id = `screen-audio-${Date.now()}`;
-        }
-        if (screenTrack) {
-          screenTrack.id = `screen-video-${Date.now()}`;
-        }
 
         screenTrack.onended = () => {
           this.toggleScreenShare();

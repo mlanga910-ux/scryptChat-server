@@ -327,9 +327,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             <div className="space-y-3.5">
               <div className="p-2.5 bg-zinc-900/30 border border-zinc-800 rounded-xl flex items-start gap-2 text-zinc-400 text-[11px]">
                 <Shield className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                <p>
-                  All information below is completely optional. It is never transmitted without your consent and is preserved securely in your local E2EE vault.
-                </p>
+                <p>Optional. Stored only on this device.</p>
               </div>
 
               {/* Phone & Email */}

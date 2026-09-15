@@ -155,7 +155,7 @@ export const GroupCreatorModal: React.FC<GroupCreatorModalProps> = ({
                 Create Group Chat
               </h3>
               <p className="text-[11px] text-zinc-500">
-                Multi-peer encrypted chat and group calls
+                Pick the devices that belong in this group
               </p>
             </div>
           </div>

@@ -50,6 +50,11 @@ const RTC_CONFIG: RTCConfiguration = {
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun.cloudflare.com:3478' },
   ],
+  // Pre-gather candidates so same-LAN devices negotiate a direct host route
+  // immediately, and keep media/data on a single transport for lower overhead.
+  iceCandidatePoolSize: 4,
+  bundlePolicy: 'max-bundle',
+  rtcpMuxPolicy: 'require',
 };
 
 export type ConnectionState =
