@@ -11,7 +11,6 @@ import {
   GroupRecord,
   IdentityRecord,
   MessageRecord,
-  RelayServerStats,
   RelayStatus,
 } from './types/index';
 import { ConnectionState, PeerManager } from './webrtc/peerManager';
@@ -49,7 +48,6 @@ export default function App() {
   const [connectionState, setConnectionState] = useState<ConnectionState>('DISCONNECTED');
   const [relayStatus, setRelayStatus] = useState<RelayStatus>('CONNECTING');
   const [relayPingMs, setRelayPingMs] = useState<number | null>(null);
-  const [relayStats, setRelayStats] = useState<RelayServerStats | null>(null);
   const [relayErrorReason, setRelayErrorReason] = useState<string | null>(null);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
 
@@ -160,9 +158,8 @@ export default function App() {
               setMobileTab('chat');
             }
           },
-          onRelayStatusChange: (status, stats, pingMs, errorReason) => {
+          onRelayStatusChange: (status, _stats, pingMs, errorReason) => {
             setRelayStatus(status);
-            if (stats !== undefined) setRelayStats(stats || null);
             setRelayPingMs(pingMs !== undefined ? pingMs : null);
             setRelayErrorReason(errorReason || null);
           },

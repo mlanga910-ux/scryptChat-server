@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ConnectionState } from '../webrtc/peerManager';
-import { ContactRecord, IdentityRecord, RelayStatus } from '../types/index';
+import { IdentityRecord } from '../types/index';
 import {
   Check,
   ChevronDown,

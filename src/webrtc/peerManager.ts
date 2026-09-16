@@ -137,7 +137,9 @@ export class PeerManager {
   }
 
   public getRelayBaseUrl(): string {
-    return this.customRelayUrl || '';
+    if (this.customRelayUrl) return this.customRelayUrl;
+    if (typeof window !== 'undefined' && window.location?.origin) return window.location.origin;
+    return '';
   }
 
   public setRelayBaseUrl(url: string) {
