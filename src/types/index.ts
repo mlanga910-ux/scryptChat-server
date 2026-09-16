@@ -55,8 +55,10 @@ export interface UserProfile {
 
 export interface IdentityRecord {
   deviceId: string; // DEV-XXXX-XXXX-XXXX-XXXX
-  publicKeyECDSA: CryptoKey;
-  privateKeyECDSA: CryptoKey;
+  // Keyless devices are possible: browsers without WebCrypto (an insecure
+  // context) can still run the workspace, but cannot pair securely.
+  publicKeyECDSA: CryptoKey | null;
+  privateKeyECDSA: CryptoKey | null;
   publicKeyRaw: string; // Base64 uncompressed 65 bytes
   displayName?: string;
   avatarColor?: string;

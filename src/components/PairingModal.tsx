@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { PeerManager } from '../webrtc/peerManager';
 import { db } from '../db/index';
+import { hasWebCrypto } from '../crypto/keys';
 import {
   generateQrDataUrl,
   scanCanvasForQr,
@@ -481,6 +482,29 @@ export const PairingModal: React.FC<PairingModalProps> = ({
   };
 
   if (!isOpen) return null;
+
+  // Without WebCrypto this device has no signing key, so a secure handshake is
+  // impossible. Say so plainly instead of failing at the crypto step.
+  if (!hasWebCrypto()) {
+    return (
+      <div
+        id="pairing-modal-backdrop"
+        className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150 font-sans select-none"
+      >
+        <div className="w-full max-w-sm rounded-2xl border border-zinc-800 bg-zinc-950 p-5 space-y-3">
+          <h3 className="text-sm font-semibold text-white">Pairing unavailable here</h3>
+          <p className="text-xs text-zinc-500 leading-relaxed">
+            This page is not running in a secure context, so this device has no signing key.
+            Open scryptChat over https (or on localhost) to pair devices. Your profile, history
+            and settings keep working on this device.
+          </p>
+          <button onClick={onClose} className="btn-secondary w-full py-2.5 text-xs">
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

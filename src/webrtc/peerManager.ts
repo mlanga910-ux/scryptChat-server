@@ -446,6 +446,21 @@ export class PeerManager {
 
   // --- WebRTC Peer Signaling ---
 
+  /**
+   * This device can only complete a secure handshake with a real signing key.
+   * Browsers without WebCrypto (an insecure context) get a clear message
+   * instead of an obscure crypto failure.
+   */
+  private requireSigningKey(): CryptoKey {
+    const key = this.identity.privateKeyECDSA;
+    if (!key) {
+      throw new Error(
+        'Secure pairing needs WebCrypto. Open scryptChat over https (or localhost) to pair devices.'
+      );
+    }
+    return key;
+  }
+
   public async createOffer(roomId?: string): Promise<HandshakeOfferData> {
     this.cleanup();
     this.setState('CONNECTING');
@@ -544,7 +559,8 @@ export class PeerManager {
       sdpFingerprintSHA256: sdpHash,
     });
 
-    const signature = await signTranscriptHash(this.identity.privateKeyECDSA, transcriptHash);
+    const signingKey = this.requireSigningKey();
+    const signature = await signTranscriptHash(signingKey, transcriptHash);
 
     const peerEphemeralCryptoKey = await importPeerECDHKey(offerData.ephemeralPublicKeyRaw);
     const sessionKeys = await deriveSessionKeys(
@@ -634,7 +650,7 @@ export class PeerManager {
       throw new Error('SECURITY ALERT: Cryptographic signature verification failed!');
     }
 
-    const ourSignature = await signTranscriptHash(this.identity.privateKeyECDSA, transcriptHash);
+    const ourSignature = await signTranscriptHash(this.requireSigningKey(), transcriptHash);
     const peerEphemeralCryptoKey = await importPeerECDHKey(answerData.ephemeralPublicKeyRaw);
     const sessionKeys = await deriveSessionKeys(
       this.ephemeralKeyPair.privateKey,

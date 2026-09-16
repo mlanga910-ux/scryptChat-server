@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { getOrCreateIdentity, resetIdentityBootstrap } from './crypto/keys';
-import { db } from './db/index';
+import { getOrCreateIdentity, hasWebCrypto, resetIdentityBootstrap } from './crypto/keys';
+import { db, describeStorage, initDatabase, StorageDriverName } from './db/index';
+import { AlertTriangle, X } from 'lucide-react';
 import { soundEngine } from './utils/cyberSoundEngine';
 import {
   CallSessionInfo,
@@ -73,6 +74,9 @@ export default function App() {
   const [peerManager, setPeerManager] = useState<PeerManager | null>(null);
   const [bootAttempt, setBootAttempt] = useState(0);
   const [bootError, setBootError] = useState<string | null>(null);
+  const [storageDriver, setStorageDriver] = useState<StorageDriverName | null>(null);
+  const [secureContext, setSecureContext] = useState(true);
+  const [warningDismissed, setWarningDismissed] = useState(false);
 
   // Check URL params for direct pairing link (e.g. ?room=ABC123)
   useEffect(() => {
@@ -101,7 +105,14 @@ export default function App() {
     async function init() {
       setBootError(null);
 
-      // 1. Local identity. This only needs IndexedDB + WebCrypto.
+      // 0. Resolve a storage backend that works on this device. Never rejects:
+      //    it degrades from IndexedDB to localStorage to session memory.
+      const driver = await initDatabase().catch(() => null);
+      if (!isMounted) return;
+      setStorageDriver(driver);
+      setSecureContext(hasWebCrypto());
+
+      // 1. Local identity. Keys need WebCrypto, everything else does not.
       let idRecord: IdentityRecord | null = null;
       try {
         idRecord = await getOrCreateIdentity();
@@ -123,9 +134,7 @@ export default function App() {
           setShowOnboarding(true);
         }
       } else {
-        setBootError(
-          'This browser blocked local storage, so your device profile could not be created.'
-        );
+        setBootError('scryptChat could not start on this browser. Reload the page to try again.');
         return;
       }
 
@@ -473,6 +482,20 @@ export default function App() {
     }
   };
 
+  /** A single, non-blocking notice about a degraded browser environment. */
+  const environmentWarning = (() => {
+    if (storageDriver === 'memory') {
+      return 'This browser blocks site storage. scryptChat works, but your data stays only for this session.';
+    }
+    if (storageDriver === 'localstorage') {
+      return 'IndexedDB is unavailable here, so scryptChat is using browser storage instead.';
+    }
+    if (!secureContext) {
+      return 'This page is not secure (https), so pairing devices is unavailable. Everything local still works.';
+    }
+    return null;
+  })();
+
   /** Retry the signaling relay from the header chip. */
   const handleRetryRelay = () => {
     if (peerManagerRef.current) {
@@ -504,7 +527,7 @@ export default function App() {
 
   if (bootError && !identity) {
     return (
-      <div className="h-[100dvh] w-screen flex flex-col items-center justify-center gap-4 bg-zinc-950 text-zinc-300 px-6 text-center font-sans">
+      <div className="app-shell-height w-screen flex flex-col items-center justify-center gap-4 bg-zinc-950 text-zinc-300 px-6 text-center font-sans">
         <ScryptChatLogo size={40} />
         <p className="max-w-sm text-sm text-zinc-400">{bootError}</p>
         <button
@@ -513,12 +536,18 @@ export default function App() {
         >
           Try again
         </button>
+        <button
+          onClick={() => window.location.reload()}
+          className="btn-secondary px-5 py-2.5 text-xs"
+        >
+          Reload page
+        </button>
       </div>
     );
   }
 
   return (
-    <div className="h-[100dvh] w-screen max-w-full flex flex-col bg-zinc-950 text-zinc-100 overflow-hidden select-none font-sans">
+    <div className="app-shell-height w-screen max-w-full flex flex-col bg-zinc-950 text-zinc-100 overflow-hidden select-none font-sans">
       {/* Top Header Bar */}
       <TerminalHeader
         identity={identity}
@@ -537,6 +566,21 @@ export default function App() {
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenWipe={() => setIsWipeOpen(true)}
       />
+
+      {/* Degraded-environment notice: informational, never blocks the app */}
+      {environmentWarning && !warningDismissed && (
+        <div className="mx-3 md:mx-5 mb-2 shrink-0 flex items-center gap-2 rounded-2xl border border-zinc-800 panel-surface px-3 py-2 text-[11px] text-zinc-400 animate-in animate-slide-down">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+          <span className="flex-1 min-w-0">{environmentWarning}</span>
+          <button
+            onClick={() => setWarningDismissed(true)}
+            className="p-1 rounded-full hover:text-white transition-colors cursor-pointer"
+            aria-label="Dismiss notice"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Main Workspace Layout */}
       <div className="flex-1 min-h-0 flex overflow-hidden md:px-3 md:pb-3">
@@ -710,6 +754,8 @@ export default function App() {
         onClose={() => setIsSettingsOpen(false)}
         relayStatus={relayStatus}
         relayPingMs={relayPingMs}
+        storageMode={describeStorage(storageDriver)}
+        secureContext={secureContext}
       />
 
       {/* Cryptographic Security Modal */}

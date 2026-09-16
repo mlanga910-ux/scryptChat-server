@@ -46,9 +46,17 @@ takes a few seconds while it wakes up.
 ## How it works
 
 - **Local first.** Identity keys, profile, contacts, groups and message history
-  live in IndexedDB on the device, with a localStorage backup of the keypair.
-  Profile, history, chat settings and the welcome flow work with the signaling
-  server completely unreachable.
+  live on the device, with a localStorage backup of the keypair. Profile,
+  history, chat settings and the welcome flow work with the signaling server
+  completely unreachable.
+- **Storage that cannot be blocked.** The vault probes IndexedDB and silently
+  falls back to localStorage and then to session memory, so blocked-cookies
+  policies, private windows, partitioned frames and storage-restricted webviews
+  still run the whole app. The active backend is shown under Settings and a
+  dismissible notice appears when it is degraded.
+- **Keyless fallback.** Browsers without WebCrypto (an insecure http origin) get
+  a working device without a signing key: everything local works, and pairing
+  explains that it needs an https context instead of failing mysteriously.
 - **The relay only introduces peers.** It creates pairing rooms, exchanges
   SDP/ICE candidates, keeps presence and stores offline envelopes. Once two
   devices are paired, messages, calls and files travel directly over a WebRTC

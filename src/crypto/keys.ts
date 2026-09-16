@@ -13,11 +13,95 @@ const STORAGE_KEY_DEV_ID = 'scryptchat_permanent_device_id';
 const STORAGE_KEY_NAME = 'scryptchat_display_name';
 const STORAGE_KEY_COLOR = 'scryptchat_avatar_color';
 
+/**
+ * True when WebCrypto is usable. Browsers only expose `crypto.subtle` in a
+ * secure context (https, localhost, some packaged apps), so an http:// origin
+ * or an embedded frame can legitimately lack it.
+ */
+export function hasWebCrypto(): boolean {
+  try {
+    return (
+      typeof crypto !== 'undefined' &&
+      !!crypto.subtle &&
+      typeof crypto.subtle.generateKey === 'function'
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Strong random bytes where available, `Math.random` as an absolute fallback. */
+export function randomBytes(length: number): Uint8Array {
+  const bytes = new Uint8Array(length);
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+      crypto.getRandomValues(bytes);
+      return bytes;
+    }
+  } catch {
+    /* fall through */
+  }
+  for (let i = 0; i < length; i += 1) {
+    bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return bytes;
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  let hex = '';
+  for (const byte of bytes) hex += byte.toString(16).padStart(2, '0');
+  return hex;
+}
+
+function formatDeviceId(hex: string): string {
+  return `DEV-${hex.slice(0, 4)}-${hex.slice(4, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}`.toUpperCase();
+}
+
 export async function generateDeviceId(rawPublicKey: Uint8Array): Promise<string> {
+  if (!hasWebCrypto()) {
+    return formatDeviceId(bytesToHex(randomBytes(8)));
+  }
   const hash = await sha256(rawPublicKey);
   const hex = arrayBufferToHex(hash);
   // Format: DEV-XXXX-XXXX-XXXX-XXXX (Deterministic cryptographic fingerprint)
-  return `DEV-${hex.slice(0, 4)}-${hex.slice(4, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}`;
+  return formatDeviceId(hex);
+}
+
+/** Writes the identity to the vault and to the localStorage backup. Never throws. */
+async function persistIdentity(identity: IdentityRecord, privateJwk?: JsonWebKey): Promise<void> {
+  try {
+    await db.identity.put(identity);
+  } catch (err) {
+    console.warn('Identity vault write warning:', err);
+  }
+  try {
+    localStorage.setItem(STORAGE_KEY_DEV_ID, identity.deviceId);
+    localStorage.setItem(STORAGE_KEY_PUB, identity.publicKeyRaw);
+    if (privateJwk) localStorage.setItem(STORAGE_KEY_PRIV_JWK, JSON.stringify(privateJwk));
+    if (identity.displayName) localStorage.setItem(STORAGE_KEY_NAME, identity.displayName);
+    if (identity.avatarColor) localStorage.setItem(STORAGE_KEY_COLOR, identity.avatarColor);
+  } catch {
+    /* storage blocked - the vault above is the source of truth */
+  }
+}
+
+/** Identity for browsers without WebCrypto: everything local works, pairing needs https. */
+function buildKeylessIdentity(
+  customDisplayName?: string,
+  customAvatarColor?: string,
+  deviceId?: string
+): IdentityRecord {
+  const raw = randomBytes(32);
+  return {
+    deviceId: deviceId || formatDeviceId(bytesToHex(raw)),
+    publicKeyECDSA: null,
+    privateKeyECDSA: null,
+    publicKeyRaw: arrayBufferToBase64(raw),
+    displayName: customDisplayName,
+    avatarColor: customAvatarColor,
+    statusBio: undefined,
+    createdAt: Date.now(),
+  };
 }
 
 export async function getOrCreateIdentity(customDisplayName?: string, customAvatarColor?: string): Promise<IdentityRecord> {
@@ -40,34 +124,55 @@ export function resetIdentityBootstrap(): void {
 }
 
 async function bootstrapIdentity(customDisplayName?: string, customAvatarColor?: string): Promise<IdentityRecord> {
-  // 1. Check IndexedDB first
+  const cryptoReady = hasWebCrypto();
+
+  // 1. Check the local vault first. A missing keypair only matters when the
+  //    browser could actually give us one.
   try {
     const existingList = await db.identity.toArray();
     if (existingList.length > 0) {
       const current = existingList[0];
-      if (current && current.deviceId && current.publicKeyECDSA && current.privateKeyECDSA) {
-        if (customDisplayName && !current.displayName) {
-          current.displayName = customDisplayName;
-          if (customAvatarColor) current.avatarColor = customAvatarColor;
-          await db.identity.put(current);
+      if (current && current.deviceId) {
+        const hasKeys = !!current.publicKeyECDSA && !!current.privateKeyECDSA;
+
+        if (!hasKeys && cryptoReady) {
+          // The device was first opened in a context without WebCrypto.
+          // Upgrade it with real keys, keeping the same device id.
+          try {
+            const keyPair = (await crypto.subtle.generateKey(
+              { name: 'ECDSA', namedCurve: 'P-256' },
+              true,
+              ['sign', 'verify']
+            )) as CryptoKeyPair;
+            const rawPubBytes = new Uint8Array(await crypto.subtle.exportKey('raw', keyPair.publicKey));
+            current.publicKeyECDSA = keyPair.publicKey;
+            current.privateKeyECDSA = keyPair.privateKey;
+            current.publicKeyRaw = arrayBufferToBase64(rawPubBytes);
+            const privJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey);
+            await persistIdentity(current, privJwk);
+          } catch (err) {
+            console.warn('Identity key upgrade warning:', err);
+          }
+          return current;
         }
-        // Sync backup to localStorage
-        try {
-          localStorage.setItem(STORAGE_KEY_DEV_ID, current.deviceId);
-          localStorage.setItem(STORAGE_KEY_PUB, current.publicKeyRaw);
-          if (current.displayName) localStorage.setItem(STORAGE_KEY_NAME, current.displayName);
-          if (current.avatarColor) localStorage.setItem(STORAGE_KEY_COLOR, current.avatarColor);
-        } catch {}
-        return current;
+
+        if (hasKeys || !cryptoReady) {
+          if (customDisplayName && !current.displayName) {
+            current.displayName = customDisplayName;
+            if (customAvatarColor) current.avatarColor = customAvatarColor;
+            await persistIdentity(current);
+          }
+          return current;
+        }
       }
     }
   } catch (e) {
-    console.warn('IndexedDB identity lookup warning:', e);
+    console.warn('Identity vault lookup warning:', e);
   }
 
-  // 2. Check localStorage permanent backup if IndexedDB was cleared or fresh
+  // 2. Check the localStorage backup if the vault was cleared or is fresh
   try {
-    const savedPrivJwk = localStorage.getItem(STORAGE_KEY_PRIV_JWK);
+    const savedPrivJwk = cryptoReady ? localStorage.getItem(STORAGE_KEY_PRIV_JWK) : null;
     const savedPubRaw = localStorage.getItem(STORAGE_KEY_PUB);
     const savedDevId = localStorage.getItem(STORAGE_KEY_DEV_ID);
     const savedName = localStorage.getItem(STORAGE_KEY_NAME);
@@ -102,14 +207,35 @@ async function bootstrapIdentity(customDisplayName?: string, customAvatarColor?:
         createdAt: Date.now(),
       };
 
-      await db.identity.put(identity);
+      await persistIdentity(identity, jwk);
       return identity;
     }
   } catch (e) {
     console.warn('LocalStorage backup recovery warning:', e);
   }
 
-  // 3. Generate new permanent ECDSA keypair (extractable for deterministic durability)
+  // 3. No WebCrypto: create a keyless device so the app is still usable.
+  if (!cryptoReady) {
+    const identity = buildKeylessIdentity(customDisplayName, customAvatarColor);
+    await persistIdentity(identity);
+    return identity;
+  }
+
+  // 4. Generate new permanent ECDSA keypair (extractable for deterministic durability)
+  try {
+    return await generateFreshIdentity(customDisplayName, customAvatarColor);
+  } catch (err) {
+    console.warn('ECDSA generation failed, falling back to a keyless device:', err);
+    const identity = buildKeylessIdentity(customDisplayName, customAvatarColor);
+    await persistIdentity(identity);
+    return identity;
+  }
+}
+
+async function generateFreshIdentity(
+  customDisplayName?: string,
+  customAvatarColor?: string
+): Promise<IdentityRecord> {
   const keyPair = (await crypto.subtle.generateKey(
     {
       name: 'ECDSA',
@@ -137,16 +263,7 @@ async function bootstrapIdentity(customDisplayName?: string, customAvatarColor?:
     createdAt: Date.now(),
   };
 
-  await db.identity.put(identity);
-
-  // Permanently save to localStorage as fail-safe
-  try {
-    localStorage.setItem(STORAGE_KEY_DEV_ID, deviceId);
-    localStorage.setItem(STORAGE_KEY_PUB, publicKeyRaw);
-    localStorage.setItem(STORAGE_KEY_PRIV_JWK, JSON.stringify(privJwk));
-    if (identity.displayName) localStorage.setItem(STORAGE_KEY_NAME, identity.displayName);
-    if (identity.avatarColor) localStorage.setItem(STORAGE_KEY_COLOR, identity.avatarColor);
-  } catch {}
+  await persistIdentity(identity, privJwk);
 
   return identity;
 }

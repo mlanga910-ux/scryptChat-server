@@ -32,6 +32,8 @@ interface SettingsModalProps {
   onClose: () => void;
   relayStatus: RelayStatus;
   relayPingMs?: number | null;
+  storageMode?: string;
+  secureContext?: boolean;
 }
 
 const MESSAGE_SOUNDS: { id: MessageSoundType; label: string; desc: string }[] = [
@@ -56,6 +58,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose,
   relayStatus,
+  storageMode,
+  secureContext,
   relayPingMs,
 }) => {
   if (!isOpen) return null;
@@ -573,6 +577,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
 
               <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-zinc-500">Local vault</span>
+                  <span className="font-mono text-xs text-white text-right">
+                    {storageMode || '—'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-zinc-500">Device keys</span>
+                  <span className="font-mono text-xs text-white text-right">
+                    {secureContext === false ? 'Unavailable (needs https)' : 'WebCrypto P-256'}
+                  </span>
+                </div>
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-zinc-500">Transport</span>
                   <span className="font-mono text-xs text-white">WebRTC / data channel</span>

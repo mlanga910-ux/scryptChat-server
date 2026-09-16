@@ -190,6 +190,8 @@ html.dark {
   }
 
   ::selection {
+    /* Solid colour first: browsers without color-mix() keep working. */
+    background: rgba(127, 127, 133, 0.28);
     background: color-mix(in oklab, var(--sc-fg-strong) 18%, transparent);
     color: var(--sc-fg);
   }
@@ -415,6 +417,7 @@ html.dark {
   }
 
   .glass {
+    background: var(--sc-panel);
     background: color-mix(in oklab, var(--sc-panel) 82%, transparent);
     backdrop-filter: saturate(150%) blur(14px);
     border: 1px solid var(--sc-border);
@@ -438,10 +441,12 @@ html.dark {
   }
 
   .row-item:hover {
+    background: var(--sc-panel-muted);
     background: color-mix(in oklab, var(--sc-fg-strong) 5%, transparent);
   }
 
   .row-item[data-selected="true"] {
+    background: var(--sc-panel-muted);
     background: color-mix(in oklab, var(--sc-fg-strong) 8%, transparent);
   }
 
@@ -518,6 +523,7 @@ html.dark {
   }
 
   .btn-ghost:hover:not(:disabled) {
+    background: var(--sc-panel-muted);
     background: color-mix(in oklab, var(--sc-fg-strong) 6%, transparent);
     color: var(--sc-fg-strong);
   }
@@ -540,6 +546,7 @@ html.dark {
   .input-base:focus {
     outline: none;
     border-color: var(--sc-border-strong);
+    box-shadow: 0 0 0 3px rgba(127, 127, 133, 0.16);
     box-shadow: 0 0 0 3px color-mix(in oklab, var(--sc-fg-strong) 6%, transparent);
   }
 
@@ -612,6 +619,7 @@ html.dark {
 
 .bg-\[\#27272a\]\/60,
 .hover\:bg-\[\#27272a\]\/60:hover {
+  background-color: var(--sc-z800);
   background-color: color-mix(in oklab, var(--sc-z800) 60%, transparent);
 }
 
@@ -630,10 +638,12 @@ html.dark {
 }
 
 .bg-\[\#111114\]\/80 {
+  background-color: var(--sc-z900);
   background-color: color-mix(in oklab, var(--sc-z900) 80%, transparent);
 }
 
 .bg-\[\#111114\]\/90 {
+  background-color: var(--sc-z900);
   background-color: color-mix(in oklab, var(--sc-z900) 90%, transparent);
 }
 
@@ -643,18 +653,22 @@ html.dark {
 }
 
 .bg-\[\#0c0c0e\]\/90 {
+  background-color: var(--sc-z950);
   background-color: color-mix(in oklab, var(--sc-z950) 90%, transparent);
 }
 
 .bg-\[\#0a0a0b\]\/80 {
+  background-color: var(--sc-z950);
   background-color: color-mix(in oklab, var(--sc-z950) 80%, transparent);
 }
 
 .bg-\[\#0a0a0b\]\/92 {
+  background-color: var(--sc-z950);
   background-color: color-mix(in oklab, var(--sc-z950) 92%, transparent);
 }
 
 .border-\[\#27272a\]\/60 {
+  border-color: var(--sc-z800);
   border-color: color-mix(in oklab, var(--sc-z800) 60%, transparent);
 }
 
@@ -664,8 +678,18 @@ html.dark {
 
 @media (width >= 40rem) {
   .sm\:border-\[\#27272a\]\/60 {
+    border-color: var(--sc-z800);
     border-color: color-mix(in oklab, var(--sc-z800) 60%, transparent);
   }
+}
+
+/*
+ * `dvh` (dynamic viewport height) is ignored by browsers that predate it, which
+ * would collapse the shell to zero height. The plain `vh` value is the fallback.
+ */
+.app-shell-height {
+  height: 100vh;
+  height: 100dvh;
 }
 
 /* Bright fills keep white type in both themes. */
