@@ -573,10 +573,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
 
               <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-2">
-                <div className="font-semibold text-white text-xs">Direct Zero-Knowledge Mesh</div>
-                <p className="text-[11px] text-zinc-500 leading-relaxed">
-                  All audio, video, and file streams connect directly P2P through WebSockets/WebRTC with AES-256-GCM encryption. The signaling server never decrypts or retains communication keys.
-                </p>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-zinc-500">Transport</span>
+                  <span className="font-mono text-xs text-white">WebRTC / data channel</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-zinc-500">Cipher</span>
+                  <span className="font-mono text-xs text-white">AES-256-GCM</span>
+                </div>
               </div>
 
               <div className="pt-2">

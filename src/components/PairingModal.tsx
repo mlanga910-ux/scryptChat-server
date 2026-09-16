@@ -221,7 +221,12 @@ export const PairingModal: React.FC<PairingModalProps> = ({
       startHostPolling(newCode);
     } catch (err: any) {
       console.error('Failed to generate pairing code:', err);
-      setErrorMsg(err.message || 'Signaling server connection error');
+      const message = String(err?.message || '');
+      setErrorMsg(
+        /fetch|network|load failed|abort/i.test(message) || !message
+          ? 'Signaling server unreachable. Check the status chip in the header and tap it to retry.'
+          : message
+      );
       setStatusMessage('');
     } finally {
       setIsGeneratingRoom(false);

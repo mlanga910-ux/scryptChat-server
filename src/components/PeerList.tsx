@@ -134,7 +134,7 @@ export const PeerList: React.FC<PeerListProps> = ({
   ];
 
   return (
-    <aside className="relative w-full md:w-[320px] lg:w-[340px] h-full min-h-0 flex flex-col select-none md:border-r md:border-zinc-800">
+    <aside className="relative w-full h-full min-h-0 flex flex-col select-none">
       {/* Search */}
       <div className="px-3 sm:px-4 pb-2 shrink-0">
         <div className="relative">

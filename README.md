@@ -43,10 +43,26 @@ takes a few seconds while it wakes up.
 | `PORT` | set by Render | The server binds `0.0.0.0:$PORT`. |
 | `CORS_ORIGINS` | no | Comma separated extra origins allowed to call the relay API. |
 
+## How it works
+
+- **Local first.** Identity keys, profile, contacts, groups and message history
+  live in IndexedDB on the device, with a localStorage backup of the keypair.
+  Profile, history, chat settings and the welcome flow work with the signaling
+  server completely unreachable.
+- **The relay only introduces peers.** It creates pairing rooms, exchanges
+  SDP/ICE candidates, keeps presence and stores offline envelopes. Once two
+  devices are paired, messages, calls and files travel directly over a WebRTC
+  data channel and never touch the server.
+- **First run.** A new device (or one whose local data was erased) gets the
+  welcome flow: name, profile photo, bio, status and light/dark theme, then the
+  chat workspace. It is stored locally and repeated after a wipe.
+- **Status chip.** The header always shows the live relay state
+  (`Online` / `Connecting…` / `Server offline`) and re-probes the server when
+  tapped, so a stale connection never needs a page reload.
+
 ## Notes
 
 - Signaling state (rooms, presence, mailboxes) lives in memory, so a single
   instance is expected. Restarting the service clears pending handshakes.
 - Devices on the same network negotiate a direct host route; the relay is only
   needed to find each other.
-- Everything the user sends is stored locally in IndexedDB on their device.

@@ -90,8 +90,10 @@ html.light {
   --sc-danger: #e11d48;
   --sc-warning: #d97706;
 
-  --sc-bubble-in-bg: #f4f4f6;
+  --sc-canvas: #f4f4f6;
+  --sc-bubble-in-bg: #ffffff;
   --sc-bubble-in-fg: #18181b;
+  --sc-bubble-in-border: #e7e7ea;
   --sc-bubble-out-bg: #111114;
   --sc-bubble-out-fg: #ffffff;
 
@@ -144,8 +146,10 @@ html.dark {
   --sc-danger: #f43f5e;
   --sc-warning: #f59e0b;
 
+  --sc-canvas: #0b0b0d;
   --sc-bubble-in-bg: #1a1a1f;
   --sc-bubble-in-fg: #f2f2f4;
+  --sc-bubble-in-border: rgba(255, 255, 255, 0.05);
   --sc-bubble-out-bg: #f5f5f7;
   --sc-bubble-out-fg: #101014;
 
@@ -285,6 +289,126 @@ html.dark {
     }
   }
 
+  /* ---------------- welcome (onboarding) motion ---------------- */
+  .onb-fade-up {
+    animation: onbFadeUp 520ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  }
+
+  .onb-step {
+    animation: onbStep 340ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  }
+
+  .onb-pop {
+    animation: onbPop 420ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  }
+
+  .onb-blob {
+    position: absolute;
+    border-radius: 999px;
+    filter: blur(90px);
+    opacity: 0.5;
+  }
+
+  .onb-blob-a {
+    width: 26rem;
+    height: 26rem;
+    top: -8rem;
+    left: -6rem;
+    background: radial-gradient(circle, var(--sc-border-strong), transparent 65%);
+    animation: onbDrift 18s ease-in-out infinite alternate;
+  }
+
+  .onb-blob-b {
+    width: 22rem;
+    height: 22rem;
+    right: -6rem;
+    bottom: -8rem;
+    background: radial-gradient(circle, var(--sc-fg-subtle), transparent 65%);
+    opacity: 0.35;
+    animation: onbDrift 22s ease-in-out infinite alternate-reverse;
+  }
+
+  .onb-grid {
+    background-image: linear-gradient(
+        to right,
+        color-mix(in oklab, var(--sc-fg-strong) 6%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in oklab, var(--sc-fg-strong) 6%, transparent) 1px,
+        transparent 1px
+      );
+    background-size: 56px 56px;
+    mask-image: radial-gradient(circle at 50% 40%, black, transparent 72%);
+    -webkit-mask-image: radial-gradient(circle at 50% 40%, black, transparent 72%);
+  }
+
+  .onb-ring {
+    position: absolute;
+    inset: -6px;
+    border-radius: 1.25rem;
+    background: conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      var(--sc-fg-strong) 90deg,
+      transparent 180deg
+    );
+    opacity: 0.35;
+    animation: onbSpin 6s linear infinite;
+  }
+
+  @keyframes onbFadeUp {
+    from {
+      opacity: 0;
+      transform: translateY(14px) scale(0.99);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes onbStep {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes onbPop {
+    0% {
+      opacity: 0;
+      transform: scale(0.9);
+    }
+    60% {
+      transform: scale(1.02);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes onbDrift {
+    from {
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+    to {
+      transform: translate3d(3rem, 2rem, 0) scale(1.12);
+    }
+  }
+
+  @keyframes onbSpin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
   .focus-ring:focus-visible {
     outline: 2px solid var(--sc-fg-strong);
     outline-offset: 2px;
@@ -325,6 +449,15 @@ html.dark {
   .bubble-in {
     background: var(--sc-bubble-in-bg);
     color: var(--sc-bubble-in-fg);
+    border: 1px solid var(--sc-bubble-in-border);
+  }
+
+  .canvas-surface {
+    background: var(--sc-canvas);
+  }
+
+  .panel-surface {
+    background: var(--sc-panel);
   }
 
   .bubble-out {

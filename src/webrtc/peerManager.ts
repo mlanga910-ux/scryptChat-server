@@ -146,6 +146,19 @@ export class PeerManager {
     this.startRealtimeStream();
   }
 
+  /**
+   * Manual retry from the UI. Re-probes the relay and reopens the push stream so
+   * a user never has to reload the page to get live pairing back.
+   * Everything else in the app keeps working while the relay is unreachable.
+   */
+  public reconnectRelay() {
+    this.relayStatus = 'CONNECTING';
+    this.relayErrorReason = null;
+    this.events.onRelayStatusChange?.('CONNECTING', undefined, null, undefined);
+    this.startRealtimeStream();
+    void this.checkRelayHealth();
+  }
+
   public async fetchRelay(endpoint: string, options: RequestInit = {}, timeoutMs = 12000): Promise<Response> {
     const baseUrl = this.getRelayBaseUrl();
     const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
@@ -233,6 +246,8 @@ export class PeerManager {
       sse.onerror = () => {
         sse.close();
         this.sseSource = null;
+        // A dropped push stream is not a dead relay: the health probe decides
+        // the reported status, and polling keeps messages flowing meanwhile.
         if (!this.sseReconnectTimeout) {
           this.sseReconnectTimeout = setTimeout(() => {
             this.startRealtimeStream();

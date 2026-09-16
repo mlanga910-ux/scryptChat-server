@@ -434,7 +434,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
   if (!activeContact && !activeGroup) {
     // No conversation open: keep the pane empty instead of showing placeholder copy.
-    return <div className="flex-1 h-full bg-zinc-950" />;
+    return <div className="flex-1 h-full canvas-surface" />;
   }
 
   const isGroup = !!activeGroup;
@@ -447,9 +447,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
     : activeContact!.avatarColor || '#2563eb';
 
   return (
-    <div className="flex-1 h-full min-h-0 flex flex-col bg-zinc-950 text-zinc-50 font-sans select-none overflow-hidden relative">
+    <div className="flex-1 h-full min-h-0 flex flex-col canvas-surface text-zinc-50 font-sans select-none overflow-hidden relative">
       {/* Top Header */}
-      <div className="shrink-0 mx-2 sm:mx-4 mt-1 mb-2 px-2.5 sm:px-3 py-2 rounded-2xl border border-zinc-800 bg-zinc-900 flex items-center justify-between gap-2 z-10">
+      <div className="shrink-0 mx-2 sm:mx-4 mt-1 mb-2 px-2.5 sm:px-3 py-2 rounded-2xl border border-zinc-800 panel-surface shadow-[var(--sc-shadow-sm)] flex items-center justify-between gap-2 z-10">
         <div className="flex items-center gap-3 min-w-0">
           {onBackToPeers && (
             <button
@@ -952,7 +952,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
       <div className="shrink-0 px-3 sm:px-6 pt-3 pb-4 sm:pb-6 space-y-2">
         <form
           onSubmit={handleSend}
-          className="flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-900 px-2 py-1.5 sm:px-2.5 sm:py-2 shadow-lg transition-colors focus-within:border-zinc-700"
+          className="flex items-center gap-1.5 rounded-full border border-zinc-800 panel-surface px-2 py-1.5 sm:px-2.5 sm:py-2 shadow-lg transition-colors focus-within:border-zinc-700"
         >
           <input
             type="file"

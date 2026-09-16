@@ -21,6 +21,25 @@ export async function generateDeviceId(rawPublicKey: Uint8Array): Promise<string
 }
 
 export async function getOrCreateIdentity(customDisplayName?: string, customAvatarColor?: string): Promise<IdentityRecord> {
+  // Single-flight guard: React strict mode mounts twice in development and a
+  // concurrent second call must never mint a second device identity.
+  if (!identityBootstrap) {
+    identityBootstrap = bootstrapIdentity(customDisplayName, customAvatarColor).catch((err) => {
+      identityBootstrap = null;
+      throw err;
+    });
+  }
+  return identityBootstrap;
+}
+
+let identityBootstrap: Promise<IdentityRecord> | null = null;
+
+/** Drops the cached bootstrap promise after a local vault wipe. */
+export function resetIdentityBootstrap(): void {
+  identityBootstrap = null;
+}
+
+async function bootstrapIdentity(customDisplayName?: string, customAvatarColor?: string): Promise<IdentityRecord> {
   // 1. Check IndexedDB first
   try {
     const existingList = await db.identity.toArray();
@@ -150,8 +169,14 @@ export async function updateIdentityProfile(
     };
   }
 ): Promise<IdentityRecord | null> {
-  const list = await db.identity.toArray();
-  if (list.length === 0) return null;
+  let list = await db.identity.toArray();
+  if (list.length === 0) {
+    // The vault was cleared while the app was open: rebuild the identity first
+    // so saving a profile always succeeds.
+    await getOrCreateIdentity(displayName, avatarColor);
+    list = await db.identity.toArray();
+    if (list.length === 0) return null;
+  }
   const current = list[0];
   current.displayName = displayName;
   if (avatarColor) current.avatarColor = avatarColor;

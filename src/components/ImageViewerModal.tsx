@@ -461,7 +461,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
                 <div className="flex items-center justify-between text-white font-medium">
                   <div className="flex items-center gap-1.5">
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>E2EE SHA-256 Digest</span>
+                    <span>SHA-256</span>
                   </div>
                   <button
                     onClick={copyHash}

@@ -78,7 +78,7 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
           <div className="space-y-3 flex flex-col items-center">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium bg-white/10 text-white/90 backdrop-blur-md">
               <Lock className="w-3 h-3 text-emerald-400" />
-              <span>End-to-End Encrypted</span>
+              <span>Encrypted</span>
             </div>
 
             <div className="pt-2">
@@ -158,7 +158,7 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
               )}
               <span>•</span>
               <span className="inline-flex items-center gap-1 text-[#71717a]">
-                <Lock className="w-3 h-3 text-emerald-400" /> P2P E2EE
+                <Lock className="w-3 h-3 text-emerald-400" /> Direct
               </span>
             </div>
           </div>
@@ -229,7 +229,7 @@ export const CallModal: React.FC<CallModalProps> = ({ session, callManager }) =>
               <h3 className="text-xl font-bold text-white">{session.peerDisplayName}</h3>
               <p className="text-xs text-[#71717a]">
                 {session.state === 'CALLING'
-                  ? 'Connecting direct P2P audio...'
+                  ? 'Connecting…'
                   : isVideo && session.isRemoteVideoMuted
                   ? 'Partner camera is paused'
                   : 'Voice call'}

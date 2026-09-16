@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { getOrCreateIdentity } from './crypto/keys';
+import { getOrCreateIdentity, resetIdentityBootstrap } from './crypto/keys';
 import { db } from './db/index';
 import { soundEngine } from './utils/cyberSoundEngine';
 import {
@@ -18,6 +18,7 @@ import { ConnectionState, PeerManager } from './webrtc/peerManager';
 import { CallManager } from './webrtc/callManager';
 import { CallModal } from './components/CallModal';
 import { TerminalHeader } from './components/TerminalHeader';
+import { ScryptChatLogo } from './components/ScryptChatLogo';
 import { PeerList } from './components/PeerList';
 import { ChatView } from './components/ChatView';
 import { PairingModal } from './components/PairingModal';
@@ -30,8 +31,9 @@ import { ContactDetailsModal } from './components/ContactDetailsModal';
 import { GroupCreatorModal } from './components/GroupCreatorModal';
 import { GroupDetailsModal } from './components/GroupDetailsModal';
 
-// Marks that this device has completed the first-run profile setup.
-const ONBOARDING_FLAG = 'scryptchat_onboarding_done';
+// Marks that this device has completed the first-run welcome setup.
+// Bumping the version re-shows the welcome screen once after an upgrade.
+const ONBOARDING_FLAG = 'scryptchat_onboarding_v2';
 
 export default function App() {
   const [identity, setIdentity] = useState<IdentityRecord | null>(null);
@@ -68,6 +70,12 @@ export default function App() {
   const [isGroupCreatorOpen, setIsGroupCreatorOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
+  // The signaling client lives in React state (not only a ref) so every screen
+  // that talks to it - pairing, chat, calls - mounts even if the relay is slow.
+  const [peerManager, setPeerManager] = useState<PeerManager | null>(null);
+  const [bootAttempt, setBootAttempt] = useState(0);
+  const [bootError, setBootError] = useState<string | null>(null);
+
   // Check URL params for direct pairing link (e.g. ?room=ABC123)
   useEffect(() => {
     try {
@@ -87,39 +95,63 @@ export default function App() {
   const activeChatKeyRef = useRef<string | null>(null);
   const pendingCallSignalsRef = useRef<any[]>([]);
 
-  // Initialize Identity & Load Contacts
+  // Initialize identity, the local vault and the signaling client. Every step
+  // is isolated so a failure in one never makes the rest of the app unusable.
   useEffect(() => {
     let isMounted = true;
 
     async function init() {
-      try {
-        const idRecord = await getOrCreateIdentity();
-        if (!isMounted) return;
-        setIdentity(idRecord);
+      setBootError(null);
 
-        // First time this device is opened (or right after a data wipe):
-        // show the profile setup page instead of dropping straight into chat.
+      // 1. Local identity. This only needs IndexedDB + WebCrypto.
+      let idRecord: IdentityRecord | null = null;
+      try {
+        idRecord = await getOrCreateIdentity();
+      } catch (err) {
+        console.error('Identity bootstrap error:', err);
+      }
+      if (!isMounted) return;
+      setIdentity(idRecord);
+
+      if (idRecord) {
+        // First time this device is opened (or right after a data wipe): show
+        // the welcome page before unlocking the chat workspace.
         let onboardingDone = false;
         try {
           onboardingDone = localStorage.getItem(ONBOARDING_FLAG) === 'true';
         } catch {}
-        if (!onboardingDone || !idRecord.displayName || idRecord.displayName.trim() === '') {
+        const hasName = !!idRecord.displayName && idRecord.displayName.trim() !== '';
+        if (!onboardingDone || !hasName) {
           setShowOnboarding(true);
         }
+      } else {
+        setBootError(
+          'This browser blocked local storage, so your device profile could not be created.'
+        );
+        return;
+      }
 
-        // Load contacts
+      // 2. Local vault: contacts, groups and history are read straight from
+      // this device and never depend on a signaling server.
+      try {
         const loadedContacts = await db.contacts.toArray();
-        setContacts(loadedContacts);
         const loadedGroups = await db.groups.toArray();
+        if (!isMounted) return;
+        setContacts(loadedContacts);
         setGroups(loadedGroups);
         if (loadedContacts.length > 0 && loadedGroups.length === 0) {
           setActiveContact(loadedContacts[0]);
           activeChatKeyRef.current = loadedContacts[0].deviceId;
         }
-
-        // Load all latest messages for sidebar previews
         await reloadLastMessages();
+      } catch (err) {
+        console.warn('Local vault load error:', err);
+      }
 
+      if (!isMounted) return;
+
+      // 3. Signaling client. If it cannot start, the app still runs locally.
+      try {
         // Initialize Peer Manager
         const pm = new PeerManager(idRecord, {
           onStateChange: (state) => {
@@ -195,6 +227,7 @@ export default function App() {
         });
 
         peerManagerRef.current = pm;
+        setPeerManager(pm);
 
         // Initialize Call Manager
         const cm = new CallManager(pm, idRecord, {
@@ -217,7 +250,8 @@ export default function App() {
           await cm.handleCallSignal(signal);
         }
       } catch (err) {
-        console.error('Initialization error:', err);
+        // Networking is optional: the workspace keeps working without it.
+        console.warn('Signaling client init error:', err);
       }
     }
 
@@ -226,9 +260,11 @@ export default function App() {
     return () => {
       isMounted = false;
       callManagerRef.current?.destroy();
+      callManagerRef.current = null;
       peerManagerRef.current?.destroy();
+      peerManagerRef.current = null;
     };
-  }, []);
+  }, [bootAttempt]);
 
   const reloadLastMessages = async () => {
     const allMsgs = await db.messages.orderBy('timestamp').reverse().toArray();
@@ -440,6 +476,15 @@ export default function App() {
     }
   };
 
+  /** Retry the signaling relay from the header chip. */
+  const handleRetryRelay = () => {
+    if (peerManagerRef.current) {
+      peerManagerRef.current.reconnectRelay();
+      return;
+    }
+    setBootAttempt((attempt) => attempt + 1);
+  };
+
   const handleProfileUpdate = (updatedId: IdentityRecord) => {
     setIdentity(updatedId);
     if (peerManagerRef.current) {
@@ -460,6 +505,21 @@ export default function App() {
     }
   };
 
+  if (bootError && !identity) {
+    return (
+      <div className="h-[100dvh] w-screen flex flex-col items-center justify-center gap-4 bg-zinc-950 text-zinc-300 px-6 text-center font-sans">
+        <ScryptChatLogo size={40} />
+        <p className="max-w-sm text-sm text-zinc-400">{bootError}</p>
+        <button
+          onClick={() => setBootAttempt((attempt) => attempt + 1)}
+          className="btn-primary px-5 py-2.5 text-xs"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="h-[100dvh] w-screen max-w-full flex flex-col bg-zinc-950 text-zinc-100 overflow-hidden select-none font-sans">
       {/* Top Header Bar */}
@@ -469,6 +529,7 @@ export default function App() {
         relayStatus={relayStatus}
         relayPingMs={relayPingMs}
         relayErrorReason={relayErrorReason}
+        onRetryRelay={handleRetryRelay}
         activeContact={activeContact}
         latencyMs={latencyMs}
         currentMobileTab={mobileTab}
@@ -482,8 +543,9 @@ export default function App() {
 
       {/* Main Workspace Layout */}
       <div className="flex-1 min-h-0 flex overflow-hidden md:px-3 md:pb-3">
-        {/* Desktop: Dual-Pane Master-Detail */}
-        <div className="hidden md:flex flex-1 min-h-0 h-full overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-900/40">
+        {/* Desktop: two floating panes, mirroring the light/dark mockups */}
+        <div className="hidden md:flex flex-1 min-h-0 h-full overflow-hidden gap-3">
+          <div className="w-[320px] lg:w-[344px] shrink-0 min-h-0 rounded-3xl border border-zinc-800 panel-surface overflow-hidden shadow-[var(--sc-shadow-sm)]">
           <PeerList
             contacts={contacts}
             groups={groups}
@@ -502,6 +564,9 @@ export default function App() {
             onStartCall={handleStartCall}
             onDeleteContact={handleDeleteContact}
           />
+          </div>
+          <div className="flex-1 min-w-0 min-h-0 rounded-3xl border border-zinc-800 canvas-surface overflow-hidden shadow-[var(--sc-shadow-sm)]
+          ">
           <ChatView
             activeContact={activeContact}
             activeGroup={activeGroup}
@@ -509,12 +574,13 @@ export default function App() {
             activeTransfers={activeTransfers}
             isConnected={connectionState === 'CONNECTED'}
             latencyMs={latencyMs || undefined}
-            peerManager={peerManagerRef.current}
+            peerManager={peerManager}
             onSendMessage={handleSendMessage}
             onSendFile={handleSendFile}
             onStartCall={handleStartCall}
             onVerifyContact={() => setIsSecurityOpen(true)}
           />
+          </div>
         </div>
 
         {/* Mobile: Single-View Navigation */}
@@ -546,7 +612,7 @@ export default function App() {
               activeTransfers={activeTransfers}
               isConnected={connectionState === 'CONNECTED'}
               latencyMs={latencyMs || undefined}
-              peerManager={peerManagerRef.current}
+              peerManager={peerManager}
               onSendMessage={handleSendMessage}
               onSendFile={handleSendFile}
               onStartCall={handleStartCall}
@@ -608,8 +674,8 @@ export default function App() {
         />
       )}
 
-      {/* Onboarding Welcome Screen (Only on first visit or after erase) */}
-      {showOnboarding && identity && (
+      {/* Onboarding Welcome Screen (First visit, or after erasing local data) */}
+      {showOnboarding && (
         <OnboardingModal
           identity={identity}
           onComplete={handleOnboardingComplete}
@@ -617,10 +683,10 @@ export default function App() {
       )}
 
       {/* Pairing Modal (Dynamic QR / OTP) */}
-      {peerManagerRef.current && (
+      {peerManager && (
         <PairingModal
           isOpen={isPairingOpen}
-          peerManager={peerManagerRef.current}
+          peerManager={peerManager}
           initialCode={initialPairCode}
           onClose={() => {
             setIsPairingOpen(false);
@@ -664,7 +730,11 @@ export default function App() {
         onClose={() => setIsWipeOpen(false)}
         onWipeCompleted={async () => {
           peerManagerRef.current?.destroy();
+          peerManagerRef.current = null;
           callManagerRef.current?.destroy();
+          callManagerRef.current = null;
+          setPeerManager(null);
+          resetIdentityBootstrap();
           setContacts([]);
           setGroups([]);
           setActiveContact(null);

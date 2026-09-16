@@ -22,6 +22,7 @@ interface TerminalHeaderProps {
   relayStatus: RelayStatus;
   relayPingMs?: number | null;
   relayErrorReason?: string | null;
+  onRetryRelay: () => void;
   activeContact: ContactRecord | null;
   latencyMs: number | null;
   currentMobileTab: 'peers' | 'chat';
@@ -39,6 +40,7 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   relayStatus,
   relayPingMs,
   relayErrorReason,
+  onRetryRelay,
   activeContact,
   latencyMs,
   currentMobileTab,
@@ -75,8 +77,12 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   const status = (() => {
     if (connectionState === 'CONNECTED') {
       return {
-        label: latencyMs !== null && latencyMs !== undefined ? `Connected · ${latencyMs}ms` : 'Connected',
+        label:
+          latencyMs !== null && latencyMs !== undefined
+            ? `Connected · ${latencyMs}ms`
+            : 'Connected',
         dot: 'bg-[var(--sc-e400)]',
+        tone: 'text-[var(--sc-e400)]',
         hint: 'Direct peer connection',
       };
     }
@@ -84,24 +90,44 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
       return {
         label: 'Connecting',
         dot: 'bg-amber-400 animate-pulse',
-        hint: activeContact ? `Linking with ${activeContact.alias || activeContact.deviceId}` : undefined,
+        tone: 'text-amber-400',
+        hint: activeContact
+          ? `Linking with ${activeContact.alias || activeContact.deviceId}`
+          : 'Negotiating a direct peer connection',
       };
     }
     if (relayStatus === 'ONLINE') {
       return {
         label: relayPingMs ? `Online · ${relayPingMs}ms` : 'Online',
         dot: 'bg-[var(--sc-e400)]',
-        hint: 'Signaling reachable, nothing connected yet',
+        tone: 'text-[var(--sc-e400)]',
+        hint: 'Signaling server reachable — ready to pair',
       };
     }
     if (relayStatus === 'OFFLINE') {
       return {
-        label: 'Offline',
+        label: 'Server offline',
         dot: 'bg-rose-500',
-        hint: relayErrorReason || 'Signaling unreachable — LAN pairing still works',
+        tone: 'text-rose-400',
+        hint: relayErrorReason
+          ? `${relayErrorReason} — local chats, history and profile still work. Click to retry.`
+          : 'Signaling server unreachable — click to retry',
       };
     }
-    return { label: 'Checking', dot: 'bg-amber-400 animate-pulse', hint: undefined };
+    if (relayStatus === 'RESTARTING') {
+      return {
+        label: 'Restarting',
+        dot: 'bg-amber-400 animate-pulse',
+        tone: 'text-amber-400',
+        hint: 'Signaling server restarting',
+      };
+    }
+    return {
+      label: 'Connecting…',
+      dot: 'bg-amber-400 animate-pulse',
+      tone: 'text-zinc-400',
+      hint: 'Checking the signaling server',
+    };
   })();
 
   const initial = (identity?.displayName || 'U').charAt(0).toUpperCase();
@@ -136,13 +162,15 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
 
       {/* Actions */}
       <div className="flex items-center gap-1.5">
-        <div
-          className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full border border-zinc-800 text-[11px] text-zinc-400"
-          title={status.hint}
+        <button
+          onClick={onRetryRelay}
+          className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-2.5 py-1.5 text-[11px] text-zinc-400 transition-colors hover:border-zinc-700 hover:text-white cursor-pointer"
+          title={status.hint ? `${status.hint} · click to retry` : 'Click to retry'}
+          aria-label="Signaling server status"
         >
-          <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`} />
-          <span className="tabular-nums">{status.label}</span>
-        </div>
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${status.dot}`} />
+          <span className={`tabular-nums ${status.tone}`}>{status.label}</span>
+        </button>
 
         <button
           onClick={onOpenPairing}
