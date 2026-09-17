@@ -40,8 +40,15 @@ interface EncryptedMailboxItem {
 const rooms = new Map<string, SignalingRoom>();
 // Mailbox store: recipientDeviceId -> array of EncryptedMailboxItem
 const mailboxes = new Map<string, EncryptedMailboxItem[]>();
-// Device presence store: deviceId -> { lastSeen: number, displayName?: string }
-const devicePresences = new Map<string, { lastSeen: number; displayName?: string }>();
+// Device presence store: deviceId -> { lastSeen, online, displayName? }
+// `online: false` is written when a device tells us it is leaving (or its push
+// stream drops), so peers see "offline" immediately instead of waiting for the
+// heartbeat window to lapse.
+const devicePresences = new Map<
+  string,
+  { lastSeen: number; online?: boolean; displayName?: string }
+>();
+const PRESENCE_WINDOW_MS = 30000;
 
 // Local Network (LAN) discovery registry
 interface LanDeviceRecord {
@@ -172,7 +179,7 @@ signalingRouter.get('/stream/:deviceId', (req: Request, res: Response) => {
   res.flushHeaders?.();
 
   // Register device presence & active client
-  devicePresences.set(deviceId, { lastSeen: Date.now() });
+  devicePresences.set(deviceId, { lastSeen: Date.now(), online: true });
   activeSSEClients.set(deviceId, res);
 
   // Send initial connected handshake
@@ -194,13 +201,18 @@ signalingRouter.get('/stream/:deviceId', (req: Request, res: Response) => {
       activeSSEClients.delete(deviceId);
       return;
     }
-    devicePresences.set(deviceId, { lastSeen: Date.now() });
+    const previous = devicePresences.get(deviceId);
+    devicePresences.set(deviceId, { ...previous, lastSeen: Date.now(), online: true });
     res.write(`: ping\n\n`);
   }, 15000);
 
   req.on('close', () => {
     clearInterval(heartbeat);
     activeSSEClients.delete(deviceId);
+    // The page is gone (tab closed, navigation, or a dropped network): publish
+    // it right away so the contact list flips to offline without a delay.
+    const previous = devicePresences.get(deviceId);
+    devicePresences.set(deviceId, { ...previous, lastSeen: Date.now(), online: false });
   });
 });
 
@@ -238,16 +250,18 @@ signalingRouter.get(['/health', '/status', '/stats'], (req: Request, res: Respon
  * 0.1 Device Presence Ping & Batch Query
  */
 signalingRouter.post('/presence', (req: Request, res: Response) => {
-  const { deviceId, displayName } = req.body;
+  const { deviceId, displayName, isOnline, lan } = req.body;
   if (!deviceId) {
     res.status(400).json({ error: 'deviceId is required' });
     return;
   }
+  const previous = devicePresences.get(deviceId);
   devicePresences.set(deviceId, {
     lastSeen: Date.now(),
-    displayName,
+    online: isOnline === false ? false : true,
+    displayName: displayName ?? previous?.displayName,
   });
-  res.json({ success: true, timestamp: Date.now() });
+  res.json({ success: true, timestamp: Date.now(), lan: !!lan });
 });
 
 signalingRouter.post('/presence/query', (req: Request, res: Response) => {
@@ -259,8 +273,8 @@ signalingRouter.post('/presence/query', (req: Request, res: Response) => {
     for (const id of deviceIds) {
       const p = devicePresences.get(id);
       if (p) {
-        // Active in last 25 seconds counts as currently online on relay
-        const isOnline = now - p.lastSeen < 25000;
+        // Online = the device said so and its last sign of life is recent.
+        const isOnline = p.online !== false && now - p.lastSeen < PRESENCE_WINDOW_MS;
         presences[id] = {
           isOnline,
           lastSeen: p.lastSeen,
@@ -275,7 +289,9 @@ signalingRouter.post('/presence/query', (req: Request, res: Response) => {
     }
   }
 
-  res.json({ success: true, presences });
+  // `serverTime` lets clients compute the age against our clock, so a wrong
+  // device clock can never keep a departed peer looking online.
+  res.json({ success: true, serverTime: now, presences });
 });
 
 /**

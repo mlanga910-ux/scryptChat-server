@@ -1,4 +1,5 @@
 import { db } from '../db/index';
+import { setProfileCache } from '../db/storage';
 import { IdentityRecord } from '../types/index';
 import {
   arrayBufferToBase64,
@@ -317,7 +318,17 @@ export async function updateIdentityProfile(
     if (options?.socialLinks) localStorage.setItem('scryptchat_socials', JSON.stringify(options.socialLinks));
   } catch {}
 
+  // Propagate the new profile look to every contact-shaped view immediately.
+  updateProfileCache(current);
+
   return current;
+}
+
+function updateProfileCache(current: IdentityRecord) {
+  setProfileCache(current.deviceId, {
+    avatarUrl: current.avatarUrl,
+    avatarColor: current.avatarColor,
+  });
 }
 
 export async function importPeerECDSAKey(rawBase64: string): Promise<CryptoKey> {

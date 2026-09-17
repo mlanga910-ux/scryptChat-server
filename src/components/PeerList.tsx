@@ -15,6 +15,9 @@ import {
   Users,
   Video,
 } from 'lucide-react';
+import { Avatar } from './Avatar';
+import { ScryptChatLogo } from './ScryptChatLogo';
+import { describePresence } from '../utils/presence';
 
 interface PeerListProps {
   contacts: ContactRecord[];
@@ -22,6 +25,10 @@ interface PeerListProps {
   activeContactId: string | null;
   activeGroupId?: string | null;
   connectedPeerId: string | null;
+  /** Contact currently reachable over the local network, if any. */
+  lanPeerId?: string | null;
+  /** Device ids currently composing a message. */
+  typingPeerIds?: Record<string, boolean>;
   lastMessages?: Map<string, MessageRecord>;
   onSelectPeer: (peer: ContactRecord) => void;
   onSelectGroup?: (group: GroupRecord) => void;
@@ -50,6 +57,8 @@ export const PeerList: React.FC<PeerListProps> = ({
   activeContactId,
   activeGroupId,
   connectedPeerId,
+  lanPeerId,
+  typingPeerIds,
   lastMessages,
   onSelectPeer,
   onSelectGroup,
@@ -136,9 +145,9 @@ export const PeerList: React.FC<PeerListProps> = ({
   return (
     <aside className="relative w-full h-full min-h-0 flex flex-col select-none">
       {/* Search */}
-      <div className="px-3 sm:px-4 pb-2 shrink-0">
+      <div className="px-2.5 sm:px-4 pt-1 sm:pt-2 pb-1.5 shrink-0">
         <div className="relative">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
           <input
             id="peer-search-input"
             type="text"
@@ -146,13 +155,13 @@ export const PeerList: React.FC<PeerListProps> = ({
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Search"
             aria-label="Search conversations"
-            className="w-full pl-10 pr-3 py-2.5 rounded-full border border-zinc-800 bg-zinc-950 text-white placeholder-zinc-500 text-[13px] focus:outline-none focus:border-zinc-700 transition-colors"
+            className="w-full pl-9 pr-3 py-2 sm:py-2.5 rounded-full border border-zinc-800 bg-zinc-950 text-white placeholder-zinc-500 text-[13px] focus:outline-none focus:border-zinc-700 transition-colors"
           />
         </div>
       </div>
 
       {/* Segmented filter */}
-      <div className="px-3 sm:px-4 pb-2 shrink-0 flex items-center gap-1">
+      <div className="px-2.5 sm:px-4 pb-1.5 shrink-0 flex items-center gap-1">
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -180,7 +189,7 @@ export const PeerList: React.FC<PeerListProps> = ({
       </div>
 
       {/* Conversations */}
-      <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto px-2 pb-4 space-y-0.5">
+      <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-2 pb-24 sm:pb-4 space-y-0.5">
         {(currentTab === 'all' || currentTab === 'groups') &&
           filteredGroups.map((group) => {
             const isSelected = activeGroupId === group.groupId;
@@ -224,8 +233,14 @@ export const PeerList: React.FC<PeerListProps> = ({
             const isConnected = connectedPeerId === contact.deviceId;
             const isSelected = activeContactId === contact.deviceId && !activeGroupId;
             const lastMsg = lastMessages?.get(contact.deviceId);
-            const isUnread = lastMsg?.direction === 'INBOUND';
-            const online = isConnected || contact.isOnline;
+            // Unread until this device actually displayed the message.
+            const isUnread = lastMsg?.direction === 'INBOUND' && lastMsg?.status !== 'read';
+            const presence = describePresence(
+              { ...contact, isLan: lanPeerId === contact.deviceId || contact.isLan },
+              isConnected
+            );
+            const online = presence.isOnline;
+            const isTyping = !!typingPeerIds?.[contact.deviceId];
             const label = contact.alias || contact.deviceId;
 
             return (
@@ -234,39 +249,45 @@ export const PeerList: React.FC<PeerListProps> = ({
                 id={`peer-item-${contact.deviceId}`}
                 onClick={() => onSelectPeer(contact)}
                 data-selected={isSelected}
-                className="row-item flex items-center gap-3 px-2.5 py-2.5 cursor-pointer group"
+                className="row-item flex items-center gap-3 px-2.5 py-2 sm:py-2.5 cursor-pointer group"
               >
                 <div className="relative shrink-0">
-                  {contact.avatarUrl ? (
-                    <img
-                      src={contact.avatarUrl}
-                      alt=""
-                      className="w-11 h-11 rounded-full object-cover"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenContactDetails(contact);
-                      }}
-                    />
-                  ) : (
-                    <div
-                      className="w-11 h-11 rounded-full flex items-center justify-center text-white text-sm font-medium"
-                      style={{ backgroundColor: contact.avatarColor || '#3f3f46' }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenContactDetails(contact);
-                      }}
-                    >
-                      {initialOf(label)}
-                    </div>
-                  )}
+                  <Avatar
+                    name={label}
+                    avatarUrl={contact.avatarUrl}
+                    avatarColor={contact.avatarColor}
+                    size="lg"
+                    className="rounded-full"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenContactDetails(contact);
+                    }}
+                  />
                   {online && (
-                    <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-[var(--sc-e400)] border-2 border-zinc-950" />
+                    <span
+                      className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-[var(--sc-e400)]"
+                      style={{ boxShadow: '0 0 0 2px var(--sc-panel)' }}
+                    />
                   )}
                 </div>
 
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline gap-2">
-                    <span className="flex-1 truncate text-[13px] font-medium text-white">{label}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-[13px] font-medium text-white">{label}</span>
+                    {presence.state === 'lan' && (
+                      <span
+                        className="shrink-0 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-px text-[10px] font-medium text-[var(--sc-e400)]"
+                        title={presence.detail}
+                      >
+                        LAN
+                      </span>
+                    )}
+                    {presence.state === 'online' && (
+                      <span className="shrink-0 text-[10px] text-zinc-500" title={presence.detail}>
+                        online
+                      </span>
+                    )}
+                    <span className="flex-1" />
                     {lastMsg && (
                       <span className="shrink-0 text-[11px] text-zinc-500 tabular-nums">
                         {formatStamp(lastMsg.timestamp)}
@@ -274,8 +295,12 @@ export const PeerList: React.FC<PeerListProps> = ({
                     )}
                   </div>
                   <div className="flex items-center gap-2 mt-0.5">
-                    <div className="flex-1 min-w-0 truncate text-[12px] text-zinc-500">
-                      {renderPreview(lastMsg)}
+                    <div
+                      className={`flex-1 min-w-0 truncate text-[12px] ${
+                        isTyping ? 'text-[var(--sc-e400)]' : 'text-zinc-500'
+                      }`}
+                    >
+                      {isTyping ? 'typing…' : renderPreview(lastMsg)}
                     </div>
                     {isUnread && !isSelected && (
                       <span className="shrink-0 w-2 h-2 rounded-full bg-zinc-100" />
@@ -355,22 +380,41 @@ export const PeerList: React.FC<PeerListProps> = ({
           })}
 
         {filteredContacts.length === 0 && filteredGroups.length === 0 && (
-          <div className="px-4 py-10 text-center">
-            <p className="text-[13px] text-zinc-500">
-              {query ? 'Nothing matched that search' : 'No conversations yet'}
-            </p>
-            {!query && (
-              <button
-                onClick={onOpenPairing}
-                className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 btn-primary text-xs"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Pair a device</span>
-              </button>
+          <div className="px-5 py-14 flex flex-col items-center text-center sc-fade-in">
+            {query ? (
+              <p className="text-[13px] text-zinc-500">{'Nothing matched that search'}</p>
+            ) : (
+              <>
+                <ScryptChatLogo size={44} />
+                <p className="mt-4 text-[13px] font-medium text-zinc-300">
+                  No conversations yet
+                </p>
+                <p className="mt-1 text-[11px] leading-relaxed text-zinc-500 max-w-[220px]">
+                  Pair another device to start a private conversation. Messages stay on
+                  your devices.
+                </p>
+                <button
+                  onClick={onOpenPairing}
+                  className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 btn-primary text-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Pair a device</span>
+                </button>
+              </>
             )}
           </div>
         )}
       </div>
+
+      {/* Phone shortcut to pair a device (the header keeps it for tablets) */}
+      <button
+        onClick={onOpenPairing}
+        className="sm:hidden absolute bottom-4 right-4 z-30 grid place-items-center h-12 w-12 rounded-full btn-primary shadow-[var(--sc-shadow-lg)] active:scale-95"
+        title="Pair a device"
+        aria-label="Pair a device"
+      >
+        <Plus className="w-5 h-5" />
+      </button>
 
       {/* Delete confirmation */}
       {contactToDelete && (

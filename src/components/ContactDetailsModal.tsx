@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { ContactRecord } from '../types/index';
 import {
   X,
@@ -13,10 +13,9 @@ import {
   UserX,
   Key,
   Calendar,
-  Camera,
-  Upload,
 } from 'lucide-react';
-import { fileToAvatarDataUrl } from '../utils/imageHelper';
+import { Avatar } from './Avatar';
+import { describePresence } from '../utils/presence';
 
 interface ContactDetailsModalProps {
   isOpen: boolean;
@@ -50,29 +49,11 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
   const [aliasInput, setAliasInput] = useState('');
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen || !contact) return null;
 
-  const initial = (contact.alias || contact.deviceId.slice(4, 6)).charAt(0).toUpperCase();
-  const avatarColor = contact.avatarColor || '#3b82f6';
   const isVerified = contact.verificationStatus === 'VERIFIED';
-
-  const handleAvatarFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const dataUrl = await fileToAvatarDataUrl(file);
-      onUpdateAvatar?.(contact.deviceId, dataUrl);
-    } catch (err) {
-      console.error('Failed to process contact avatar:', err);
-    }
-  };
-
-  const handleRemoveAvatar = () => {
-    onUpdateAvatar?.(contact.deviceId, undefined);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
+  const presence = describePresence(contact, isConnected);
 
   const copyDeviceId = () => {
     navigator.clipboard.writeText(contact.deviceId);
@@ -127,62 +108,32 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
 
         {/* Content Body */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {/* Avatar & Identity Info */}
+          {/* Avatar & Identity Info. The photo comes from the contact's own profile
+              and updates automatically, so it is shown read-only here. */}
           <div className="flex flex-col items-center text-center space-y-2">
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleAvatarFileSelect}
-              accept="image/*"
-              className="hidden"
-              aria-label="Upload avatar"
-            />
-            <div
-              className="relative group cursor-pointer"
-              onClick={() => fileInputRef.current?.click()}
-              title="Change contact photo"
-            >
+            <div className="relative">
+              <Avatar
+                name={contact.alias || contact.deviceId}
+                avatarUrl={contact.avatarUrl}
+                avatarColor={contact.avatarColor}
+                size="xl"
+                className="rounded-2xl"
+              />
               <div
-                className="w-16 h-16 rounded-2xl flex items-center justify-center text-white text-2xl font-bold shadow-lg overflow-hidden"
-                style={{ backgroundColor: contact.avatarUrl ? '#18181b' : avatarColor }}
-              >
-                {contact.avatarUrl ? (
-                  <img src={contact.avatarUrl} alt={contact.alias} className="w-full h-full object-cover" />
-                ) : (
-                  initial
-                )}
-              </div>
-              <div className="absolute inset-0 bg-black/60 rounded-2xl opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white">
-                <Camera className="w-5 h-5" />
-              </div>
-              <div
-                className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-zinc-950 ${
-                  isConnected || contact.isOnline ? 'bg-emerald-400' : 'bg-zinc-600'
-                }`}
+                className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full"
+                style={{ boxShadow: '0 0 0 2px var(--sc-panel)' }}
               />
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="text-[11px] text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
-                aria-label={contact.avatarUrl ? 'Change photo' : 'Add photo'}
-              >
-                <Upload className="w-3 h-3" />
-                <span>{contact.avatarUrl ? 'Change Photo' : 'Set Photo'}</span>
-              </button>
-              {contact.avatarUrl && (
-                <button
-                  type="button"
-                  onClick={handleRemoveAvatar}
-                  className="text-[11px] text-rose-400 hover:underline cursor-pointer"
-                  aria-label="Remove photo"
-                >
-                  Remove
-                </button>
+            <p className="text-[11px] text-zinc-500">
+              {presence.isOnline ? (
+                <span className="text-[var(--sc-e400)]">
+                  {presence.state === 'lan' ? 'Online · LAN' : 'Online'}
+                </span>
+              ) : (
+                presence.label
               )}
-            </div>
+            </p>
 
             {/* Editable Alias */}
             <div className="space-y-1 w-full max-w-xs">

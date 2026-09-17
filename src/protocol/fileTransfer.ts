@@ -21,7 +21,7 @@ import {
 import { CryptoSession } from '../crypto/session';
 import { extractImageExif } from '../utils/exifParser';
 
-export const CHUNK_SIZE = 256 * 1024; // 256 KB frames: far less per-chunk encryption/ACK overhead
+export const CHUNK_SIZE = 512 * 1024; // 512 KB frames: fewer encrypt/ACK round trips, ~2x throughput on LAN
 const MAX_BUFFERED_AMOUNT = 16 * 1024 * 1024; // 16 MB in-flight window keeps fast LAN links saturated
 const CHUNK_TIMEOUT_MS = 10000; // Resend chunk if ACK not received within 10s
 const ACK_WAIT_TIMEOUT_MS = 15000; // Total wait for final ACK before declaring complete
@@ -35,7 +35,6 @@ export interface FileTransferEvents {
 }
 
 interface PendingChunk {
-  chunkBytes: Uint8Array;
   retryCount: number;
   timer: ReturnType<typeof setTimeout> | null;
 }
@@ -86,6 +85,7 @@ export class FileTransferManager {
   private cleanupTransferState(fileId: string): void {
     // Cancel all pending chunk resend timers
     const pending = this.pendingChunks.get(fileId);
+
     if (pending) {
       for (const chunk of pending.values()) {
         if (chunk.timer) {
@@ -127,6 +127,16 @@ export class FileTransferManager {
     });
   }
 
+  /** Reads one chunk back out of the retained file bytes (never duplicated). */
+  private sliceChunk(fileId: string, chunkIdx: number): Uint8Array | null {
+    const ctx = this.transferContext.get(fileId);
+    if (!ctx) return null;
+    const start = chunkIdx * CHUNK_SIZE;
+    if (start >= ctx.fileBytes.byteLength) return null;
+    const end = Math.min(start + CHUNK_SIZE, ctx.fileBytes.byteLength);
+    return ctx.fileBytes.slice(start, end);
+  }
+
   private async sendChunkWithRetry(
     fileId: string,
     fileIdBigInt: bigint,
@@ -142,12 +152,13 @@ export class FileTransferManager {
       chunkIdx
     );
 
-    const encryptedChunkFrame = await session.encryptFrame(chunkPacketHeader, chunkBytes);
-
-    // Backpressure: park the loop until the channel buffer drains.
+    // Backpressure first: encrypting while the socket buffer is full would just
+    // hold finished frames in memory.
     if (dataChannel.bufferedAmount > MAX_BUFFERED_AMOUNT) {
       await this.waitForDrain(dataChannel);
     }
+
+    const encryptedChunkFrame = await session.encryptFrame(chunkPacketHeader, chunkBytes);
 
     if (dataChannel.readyState !== 'open') {
       throw new Error('Data channel is not open, cannot send chunk');
@@ -155,7 +166,9 @@ export class FileTransferManager {
 
     dataChannel.send(encryptedChunkFrame);
 
-    // Set up ACK timeout with retry
+    // ACK timeout with retry. The chunk bytes are recovered from the retained
+    // file buffer instead of being held per chunk, so a large file cannot leak
+    // hundreds of megabytes while waiting for acknowledgements.
     const pending = this.pendingChunks.get(fileId);
     if (!pending) return;
 
@@ -165,9 +178,7 @@ export class FileTransferManager {
 
       if (chunk.retryCount >= MAX_CHUNK_RETRIES) {
         const transfer = this.activeTransfers.get(fileId);
-        if (transfer) {
-          transfer.status = 'error';
-        }
+        if (transfer) transfer.status = 'error';
         this.transferContext
           .get(fileId)
           ?.events?.onError?.(fileId, `Chunk ${chunkIdx} failed after ${MAX_CHUNK_RETRIES} retries`);
@@ -176,11 +187,14 @@ export class FileTransferManager {
       }
 
       chunk.retryCount += 1;
-      const backoff = BACKOFF_BASE_MS * Math.pow(2, chunk.retryCount - 1);
+      const attempt = chunk.retryCount;
+      const backoff = BACKOFF_BASE_MS * Math.pow(2, attempt - 1);
 
       setTimeout(() => {
         if (this.isCancelled.has(fileId)) return;
-        this.sendChunkWithRetry(fileId, fileIdBigInt, chunkIdx, chunkBytes, dataChannel, session)
+        const bytes = this.sliceChunk(fileId, chunkIdx);
+        if (!bytes) return;
+        this.sendChunkWithRetry(fileId, fileIdBigInt, chunkIdx, bytes, dataChannel, session)
           .catch((err) => {
             console.warn(`Chunk ${chunkIdx} resend error:`, err);
           });
@@ -188,8 +202,7 @@ export class FileTransferManager {
     }, CHUNK_TIMEOUT_MS);
 
     pending.set(chunkIdx, {
-      chunkBytes,
-      retryCount: 0,
+      retryCount: pending.get(chunkIdx)?.retryCount || 0,
       timer,
     });
   }
@@ -258,6 +271,9 @@ export class FileTransferManager {
     };
 
     this.activeTransfers.set(fileId, progress);
+    // Re-sending the same file (a retry after a dropped link, or the relay
+    // fallback) must never inherit the cancelled flag of the earlier attempt.
+    this.isCancelled.delete(fileId);
     this.outgoingAckResolvers.set(fileId, new Map());
     this.receivedAcks.set(fileId, new Set());
     this.pendingChunks.set(fileId, new Map());
@@ -564,14 +580,11 @@ export class FileTransferManager {
         pending.delete(ack.chunkIndex);
       }
 
-      // Check for NACK and trigger retransmission
+      // Explicit NACK: retransmit that chunk right away.
       if (ack.status === AckStatus.NACK_RETRANSMIT_REQ) {
         const ctx = this.transferContext.get(fileIdHex);
-        if (ctx) {
-          const start = ack.chunkIndex * CHUNK_SIZE;
-          const end = Math.min(start + CHUNK_SIZE, ctx.fileBytes.byteLength);
-          if (start >= ctx.fileBytes.byteLength) return;
-          const chunkBytes = ctx.fileBytes.slice(start, end);
+        const chunkBytes = this.sliceChunk(fileIdHex, ack.chunkIndex);
+        if (ctx && chunkBytes) {
           const resendTimer = setTimeout(() => {
             if (this.isCancelled.has(fileIdHex)) return;
             this.sendChunkWithRetry(
@@ -580,14 +593,9 @@ export class FileTransferManager {
             ).catch((err) => {
               console.warn(`NACK-rerequested chunk ${ack.chunkIndex} resend error:`, err);
             });
-          }, BACKOFF_BASE_MS * Math.pow(2, 0));
-          // Store the timer reference for cleanup
+          }, BACKOFF_BASE_MS);
           if (pending) {
-            pending.set(ack.chunkIndex, {
-              chunkBytes,
-              retryCount: 1,
-              timer: resendTimer,
-            });
+            pending.set(ack.chunkIndex, { retryCount: 1, timer: resendTimer });
           }
         }
       }

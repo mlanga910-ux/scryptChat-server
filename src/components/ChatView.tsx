@@ -24,19 +24,17 @@ import {
   Music,
   Check,
   CheckCheck,
+  CircleAlert,
   Phone,
   Video,
-  Eye,
-  EyeOff,
   Sliders,
-  RotateCw,
   FileText,
-  Code2,
-  Maximize2,
   ChevronDown,
   Users,
-  Copy,
   Plus,
+  Wifi,
+  UploadCloud,
+  MoreVertical,
 } from 'lucide-react';
 import { db } from '../db/index';
 import { ImageViewerModal } from './ImageViewerModal';
@@ -45,7 +43,31 @@ import { CodeViewerModal } from './CodeViewerModal';
 import { CodeBlockCard } from './CodeBlockCard';
 import { Avatar } from './Avatar';
 import { getChatSettings, ChatCustomSettings } from '../utils/chatSettings';
-import { detectCodeLanguage, parseMessageContent, parseMarkdownCodeBlock } from '../utils/codeHelper';
+import { parseMessageContent } from '../utils/codeHelper';
+import { describePresence } from '../utils/presence';
+
+const startOfDay = (timestamp: number) => {
+  const date = new Date(timestamp);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+};
+
+/** "Today", "Yesterday" or a short absolute date for older messages. */
+const formatDayLabel = (timestamp: number) => {
+  const today = startOfDay(Date.now());
+  const day = startOfDay(timestamp);
+  const oneDay = 86400000;
+  if (day === today) return 'Today';
+  if (day === today - oneDay) return 'Yesterday';
+  const date = new Date(timestamp);
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  return date.toLocaleDateString([], {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: sameYear ? undefined : 'numeric',
+  });
+};
 
 interface ChatViewProps {
   activeContact: ContactRecord | null;
@@ -53,11 +75,17 @@ interface ChatViewProps {
   messages: MessageRecord[];
   activeTransfers: FileTransferProgress[];
   isConnected: boolean;
+  /** True when the live link to this contact stays inside the local network. */
+  isLanLink?: boolean;
   latencyMs?: number;
+  /** True while the peer is composing a message. */
+  isPeerTyping?: boolean;
+  /** Re-sends a message whose delivery failed. */
+  onRetryMessage?: (messageId: string) => void;
   peerManager?: any;
   onSendMessage: (
     text: string,
-    options?: { codeSnippet?: CodeSnippet; isGroup?: boolean; groupId?: string }
+    options?: { isGroup?: boolean; groupId?: string }
   ) => Promise<void>;
   onSendFile: (file: File, options?: { isGroup?: boolean; groupId?: string }) => Promise<void>;
   onStartCall?: (peerDeviceId: string, peerDisplayName: string, callType: 'audio' | 'video') => void;
@@ -67,28 +95,16 @@ interface ChatViewProps {
   onOpenGroupDetails?: (group: GroupRecord) => void;
 }
 
-const SUPPORTED_LANGUAGES = [
-  'typescript',
-  'javascript',
-  'python',
-  'rust',
-  'go',
-  'cpp',
-  'html',
-  'css',
-  'json',
-  'sql',
-  'bash',
-  'text',
-];
-
 export const ChatView: React.FC<ChatViewProps> = ({
   activeContact,
   activeGroup,
   messages,
   activeTransfers,
   isConnected,
+  isLanLink,
   latencyMs,
+  isPeerTyping,
+  onRetryMessage,
   peerManager,
   onSendMessage,
   onSendFile,
@@ -100,13 +116,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
 }) => {
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [copiedSnippetId, setCopiedSnippetId] = useState<string | number | null>(null);
+  const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
+  const actionsMenuRef = useRef<HTMLDivElement>(null);
 
-  const [stagedSnippet, setStagedSnippet] = useState<CodeSnippet | null>(null);
-  const [showCodeComposer, setShowCodeComposer] = useState(false);
-  const [composerCode, setComposerCode] = useState('');
-  const [composerLang, setComposerLang] = useState('typescript');
-  const [composerTitle, setComposerTitle] = useState('');
+  const mediaInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  const [attachError, setAttachError] = useState<string | null>(null);
 
   const [selectedSnippetForModal, setSelectedSnippetForModal] = useState<CodeSnippet | null>(null);
   const [isCodeModalOpen, setIsCodeModalOpen] = useState(false);
@@ -141,13 +157,25 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const recordingTimerRef = useRef<any>(null);
   const isRecordingCancelledRef = useRef<boolean>(false);
   const audioStreamRef = useRef<MediaStream | null>(null);
+  const recordingActiveRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (activeContact) {
       setChatSettings(getChatSettings(activeContact.deviceId));
       setRevealedMediaIds(new Set());
     }
-  }, [activeContact?.deviceId]);
+    setIsActionsMenuOpen(false);
+    setAttachError(null);
+  }, [activeContact?.deviceId, activeGroup?.groupId]);
+
+  useEffect(() => {
+    if (!isActionsMenuOpen) return;
+    const close = (event: MouseEvent) => {
+      if (!actionsMenuRef.current?.contains(event.target as Node)) setIsActionsMenuOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [isActionsMenuOpen]);
 
   const handleScroll = () => {
     const el = scrollContainerRef.current;
@@ -217,41 +245,19 @@ export const ChatView: React.FC<ChatViewProps> = ({
     };
   }, [messages]);
 
-  const handleInputPaste = (e: React.ClipboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const text = e.clipboardData.getData('text');
-    if (text && text.length > 400) {
-      e.preventDefault();
-      const lineCount = text.split('\n').length;
-      const detectedLang = detectCodeLanguage(text);
-      const title = detectedLang !== 'text' ? `snippet.${detectedLang}` : `pasted_document_${Date.now().toString().slice(-4)}.txt`;
-
-      setStagedSnippet({
-        code: text,
-        language: detectedLang,
-        title,
-        lineCount,
-      });
-    }
-  };
-
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const text = inputText.trim();
-    if ((!text && !stagedSnippet) || isSending) return;
+    if (!text || isSending) return;
 
     try {
       setIsSending(true);
-
-      const options = {
-        codeSnippet: stagedSnippet || undefined,
+      await onSendMessage(text, {
         isGroup: !!activeGroup,
         groupId: activeGroup?.groupId,
-      };
-
-      await onSendMessage(text, options);
-
+      });
       setInputText('');
-      setStagedSnippet(null);
+      peerManager?.setTypingState?.(false);
       setTimeout(() => scrollToBottom(true), 50);
     } catch (err) {
       console.error('Send error:', err);
@@ -260,36 +266,38 @@ export const ChatView: React.FC<ChatViewProps> = ({
     }
   };
 
-  const handleAttachCodeModalSave = () => {
-    if (!composerCode.trim()) return;
-    const lines = composerCode.split('\n').length;
-    setStagedSnippet({
-      code: composerCode.trim(),
-      language: composerLang,
-      title: composerTitle.trim() || `snippet.${composerLang}`,
-      lineCount: lines,
-    });
-    setComposerCode('');
-    setComposerTitle('');
-    setShowCodeComposer(false);
-  };
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      await onSendFile(file, {
-        isGroup: !!activeGroup,
-        groupId: activeGroup?.groupId,
-      });
-      setTimeout(() => scrollToBottom(true), 50);
-    } catch (err) {
-      console.error('File send error:', err);
-    } finally {
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+  /**
+   * One picker for everything: photos, videos, documents, archives, audio.
+   * Each selected file is sent as its own message so nothing is batched away.
+   */
+  const sendFiles = async (files: File[]) => {
+    if (files.length === 0) return;
+    setAttachError(null);
+    for (const file of files) {
+      try {
+        await onSendFile(file, {
+          isGroup: !!activeGroup,
+          groupId: activeGroup?.groupId,
+        });
+      } catch (err: any) {
+        setAttachError(err?.message || `Could not send ${file.name}`);
       }
     }
+    setTimeout(() => scrollToBottom(true), 50);
+  };
+
+  const handleFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = Array.from(e.target.files || []);
+    if (mediaInputRef.current) mediaInputRef.current.value = '';
+    if (imageInputRef.current) imageInputRef.current.value = '';
+    await sendFiles(picked);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingFiles(false);
+    const dropped = Array.from(e.dataTransfer?.files || []);
+    await sendFiles(dropped);
   };
 
   const startRecording = async () => {
@@ -304,44 +312,63 @@ export const ChatView: React.FC<ChatViewProps> = ({
       });
       audioStreamRef.current = stream;
 
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
+      try {
+        mediaRecorderRef.current = new MediaRecorder(stream, {
+          mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : undefined,
+        });
+      } catch {
+        mediaRecorderRef.current = new MediaRecorder(stream);
+      }
+      const recorder = mediaRecorderRef.current;
       audioChunksRef.current = [];
 
-      mediaRecorder.ondataavailable = (event) => {
+      recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data);
         }
       };
 
-      mediaRecorder.onstop = async () => {
-        if (!isRecordingCancelledRef.current && audioChunksRef.current.length > 0) {
-          const mimeType = mediaRecorder.mimeType || 'audio/webm';
-          const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-          const audioFile = new File(
-            [audioBlob],
-            `voice-note-${Date.now()}.${mimeType.includes('mp4') ? 'm4a' : 'webm'}`,
-            { type: mimeType }
-          );
-          try {
-            await onSendFile(audioFile, {
-              isGroup: !!activeGroup,
-              groupId: activeGroup?.groupId,
-            });
-            setTimeout(() => scrollToBottom(true), 50);
-          } catch (err) {
-            console.error('Voice send error:', err);
-          }
+      recorder.onstop = async () => {
+        recordingActiveRef.current = false;
+        if (isRecordingCancelledRef.current || audioChunksRef.current.length === 0) {
+          audioChunksRef.current = [];
+          setRecordingDuration(0);
+          cleanupRecordingStream();
+          return;
         }
+
+        const mimeType = recorder.mimeType || 'audio/webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        const audioFile = new File([
+          audioBlob,
+        ], `voice-note-${Date.now()}.${mimeType.includes('mp4') ? 'm4a' : 'webm'}` as any, {
+          type: mimeType,
+          lastModified: Date.now(),
+        });
+
+        try {
+          await onSendFile(audioFile, {
+            isGroup: !!activeGroup,
+            groupId: activeGroup?.groupId,
+          });
+          setTimeout(scrollToBottom, 50);
+        } catch (err) {
+          console.error('Voice send error:', err);
+        }
+
         audioChunksRef.current = [];
         setRecordingDuration(0);
-        if (audioStreamRef.current) {
-          audioStreamRef.current.getTracks().forEach((track) => track.stop());
-          audioStreamRef.current = null;
-        }
+        cleanupRecordingStream();
       };
 
-      mediaRecorder.start(200);
+      recordingActiveRef.current = true;
+      try {
+        recorder.start(200);
+      } catch (err) {
+        console.error('MediaRecorder start failed:', err);
+        cleanupRecordingStream();
+        return;
+      }
       setIsRecording(true);
       setRecordingDuration(0);
 
@@ -353,16 +380,32 @@ export const ChatView: React.FC<ChatViewProps> = ({
     }
   };
 
+  const cleanupRecordingStream = () => {
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getTracks().forEach((track) => track.stop());
+      audioStreamRef.current = null;
+    }
+  };
+
   const stopRecording = (cancel = false) => {
     isRecordingCancelledRef.current = cancel;
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
     }
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      try {
+        recorder.stop();
+        setIsRecording(false);
+      } catch {
+        setIsRecording(false);
+        cleanupRecordingStream();
+      }
+    } else {
+      setIsRecording(false);
+      cleanupRecordingStream();
     }
-    setIsRecording(false);
   };
 
   const formatDuration = (seconds: number) => {
@@ -383,13 +426,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
     setIsCodeModalOpen(true);
   };
 
-  const copyCodeSnippet = (snippet: CodeSnippet, messageId?: number | string) => {
-    navigator.clipboard.writeText(snippet.code);
-    const key = messageId || snippet.title || 'snippet';
-    setCopiedSnippetId(key);
-    setTimeout(() => setCopiedSnippetId(null), 2000);
-  };
-
   const toggleRevealMedia = (fileId: string) => {
     setRevealedMediaIds((prev) => {
       const next = new Set(prev);
@@ -400,12 +436,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
       }
       return next;
     });
-  };
-
-  const handleManualSync = async () => {
-    if (activeContact && peerManager) {
-      await peerManager.flushOutboxForPeer(activeContact.deviceId);
-    }
   };
 
   const getFileIcon = (mimeType?: string, fileName?: string) => {
@@ -438,6 +468,10 @@ export const ChatView: React.FC<ChatViewProps> = ({
   }
 
   const isGroup = !!activeGroup;
+  const presence = describePresence(
+    activeContact ? { ...activeContact, isLan: isLanLink || activeContact.isLan } : null,
+    isConnected
+  );
   const isVerified = activeContact?.verificationStatus === 'VERIFIED';
   const headerInitial = isGroup
     ? activeGroup!.name.charAt(0).toUpperCase()
@@ -446,10 +480,26 @@ export const ChatView: React.FC<ChatViewProps> = ({
     ? activeGroup!.avatarColor || '#2563eb'
     : activeContact!.avatarColor || '#2563eb';
 
+  // Presence wording: LAN means the two devices talk directly on the same
+  // network, “Online” that the relay can still reach the device.
+  const peerOnline = presence.isOnline;
+  const presenceLabel =
+    presence.state === 'lan' ? 'Online · LAN' : presence.label;
+
   return (
-    <div className="flex-1 h-full min-h-0 flex flex-col canvas-surface text-zinc-50 font-sans select-none overflow-hidden relative">
+    <div
+      onDragOver={(e) => {
+        if (e.dataTransfer?.types?.includes('Files')) {
+          e.preventDefault();
+          setIsDraggingFiles(true);
+        }
+      }}
+      onDragLeave={() => setIsDraggingFiles(false)}
+      onDrop={handleDrop}
+      className="flex-1 h-full min-h-0 flex flex-col canvas-surface text-zinc-50 font-sans select-none overflow-hidden relative"
+    >
       {/* Top Header */}
-      <div className="shrink-0 mx-2 sm:mx-4 mt-1 mb-2 px-2.5 sm:px-3 py-2 rounded-2xl border border-zinc-800 panel-surface shadow-[var(--sc-shadow-sm)] flex items-center justify-between gap-2 z-10">
+      <div className="shrink-0 mx-2 sm:mx-4 mt-1 mb-2 px-2 sm:px-3 py-1.5 sm:py-2 rounded-2xl border border-zinc-800 panel-surface shadow-[var(--sc-shadow-sm)] flex items-center justify-between gap-2 z-10">
         <div className="flex items-center gap-3 min-w-0">
           {onBackToPeers && (
             <button
@@ -496,17 +546,34 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 </button>
               ) : (
                 <>
-                  {isConnected || activeContact!.isOnline ? (
-                    <span className="flex items-center gap-1.5 text-[var(--sc-e400)]">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[var(--sc-e400)]" />
-                      <span>Active now</span>
+                  <span
+                    className={`flex items-center gap-1.5 ${
+                      peerOnline ? 'text-[var(--sc-e400)]' : 'text-zinc-500'
+                    }`}
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${
+                        isPeerTyping
+                          ? 'sc-typing-dot'
+                          : peerOnline
+                          ? 'bg-[var(--sc-e400)]'
+                          : 'bg-zinc-600'
+                      }`}
+                    />
+                    <span className={`truncate ${isPeerTyping ? 'text-[var(--sc-e400)]' : ''}`}>
+                      {isPeerTyping ? 'typing…' : presenceLabel}
                     </span>
-                  ) : (
-                    <span className="truncate max-w-[160px] sm:max-w-[240px] text-zinc-500">
-                      {activeContact!.deviceId}
+                  </span>
+                  {isLanLink && (
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full border border-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500"
+                      title="Direct local network link — messages and files never leave your network"
+                    >
+                      <Wifi className="w-2.5 h-2.5" />
+                      Direct
                     </span>
                   )}
-                  {latencyMs !== undefined && isConnected && (
+                  {latencyMs !== undefined && peerOnline && (
                     <span className="text-zinc-500">{latencyMs}ms</span>
                   )}
                 </>
@@ -549,36 +616,73 @@ export const ChatView: React.FC<ChatViewProps> = ({
             <Video className="w-4 h-4" />
           </button>
 
-          {/* Group Details or Contact Verification */}
+          {/* Secondary actions. On phones they collapse into one menu so the
+              header never pushes controls off screen. */}
           {isGroup ? (
             <button
               onClick={() => onOpenGroupDetails?.(activeGroup!)}
-              className="p-2 rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+              className="grid place-items-center h-9 w-9 rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
               title="Group details"
-              aria-label="Group Details"
+              aria-label="Group details"
             >
               <Info className="w-4 h-4" />
             </button>
           ) : (
             <>
+              <button
+                onClick={() => setIsChatSettingsOpen(true)}
+                className="hidden sm:grid place-items-center h-9 w-9 rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+                title="Chat preferences"
+                aria-label="Chat preferences"
+              >
+                <Sliders className="w-4 h-4" />
+              </button>
               {onVerifyContact && activeContact && (
                 <button
                   onClick={() => onVerifyContact(activeContact)}
-                  className="p-2 rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+                  className="hidden sm:grid place-items-center h-9 w-9 rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
                   title="Safety number"
-                  aria-label="Security"
+                  aria-label="Safety number"
                 >
                   <ShieldCheck className="w-4 h-4" />
                 </button>
               )}
-              <button
-                onClick={() => setIsChatSettingsOpen(true)}
-                className="p-2 rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
-                title="Chat preferences"
-                aria-label="Chat Preferences"
-              >
-                <Sliders className="w-4 h-4" />
-              </button>
+              <div className="relative" ref={actionsMenuRef}>
+                <button
+                  onClick={() => setIsActionsMenuOpen((open) => !open)}
+                  className="sm:hidden grid place-items-center h-9 w-9 rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+                  title="More"
+                  aria-label="More chat actions"
+                >
+                  <MoreVertical className="w-4 h-4" />
+                </button>
+                {isActionsMenuOpen && (
+                  <div className="sm:hidden absolute right-0 top-full mt-1 w-48 p-1.5 rounded-2xl border border-zinc-800 bg-zinc-950 shadow-xl z-40 animate-in animate-scale-in">
+                    {onVerifyContact && (
+                      <button
+                        onClick={() => {
+                          setIsActionsMenuOpen(false);
+                          onVerifyContact(activeContact!);
+                        }}
+                        className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-zinc-300 hover:text-white hover:bg-zinc-900 transition-colors cursor-pointer"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        <span>Safety number</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setIsActionsMenuOpen(false);
+                        setIsChatSettingsOpen(true);
+                      }}
+                      className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-zinc-300 hover:text-white hover:bg-zinc-900 transition-colors cursor-pointer"
+                    >
+                      <Sliders className="w-3.5 h-3.5" />
+                      <span>Chat preferences</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -588,11 +692,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 py-4 space-y-4 select-text"
+        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 sm:px-6 py-3 sm:py-4 space-y-3 sm:space-y-4 select-text"
       >
         {messages.length === 0 ? null : (
           messages.map((msg, idx) => {
             const isYou = msg.direction === 'OUTBOUND';
+            const previous = idx > 0 ? messages[idx - 1] : undefined;
+            const startsNewDay =
+              !previous || startOfDay(previous.timestamp) !== startOfDay(msg.timestamp);
             const fileRec = msg.fileId ? fileRecordsMap.get(msg.fileId) || msg.fileRecord : undefined;
             const downloadUrl = msg.fileId ? downloadUrls.get(msg.fileId) : undefined;
             const isImage = fileRec?.isImage || msg.mediaType === 'image';
@@ -612,8 +719,17 @@ export const ChatView: React.FC<ChatViewProps> = ({
             });
 
             return (
+              <React.Fragment key={msg.id || idx}>
+              {startsNewDay && (
+                <div className="flex items-center gap-3 py-1 select-none">
+                  <span className="h-px flex-1 bg-zinc-800/70" />
+                  <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+                    {formatDayLabel(msg.timestamp)}
+                  </span>
+                  <span className="h-px flex-1 bg-zinc-800/70" />
+                </div>
+              )}
               <div
-                key={msg.id || idx}
                 className={`flex flex-col ${isYou ? 'items-end' : 'items-start'} space-y-1 w-full max-w-full`}
               >
                 {/* Group Sender Tag */}
@@ -777,24 +893,56 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   <span>{timeStr}</span>
                   {isYou && (
                     <>
+                      {(!msg.status || msg.status === 'sending' || msg.status === 'queued') && (
+                        <Clock className="w-3 h-3 text-zinc-500" aria-label="Sending" />
+                      )}
                       {msg.status === 'delivered' && (
-                        <CheckCheck className="w-3 h-3 text-emerald-400" />
+                        <CheckCheck className="w-3 h-3 text-zinc-400" aria-label="Delivered" />
                       )}
-                      {msg.status === 'queued' && (
-                        <Clock className="w-3 h-3 text-amber-400" />
+                      {msg.status === 'read' && (
+                        <CheckCheck
+                          className="w-3 h-3 text-[var(--sc-e400)]"
+                          aria-label="Read"
+                        />
                       )}
-                      {msg.status === 'sending' && (
-                        <Check className="w-3 h-3 text-zinc-500" />
+                      {msg.status === 'failed' && (
+                        <button
+                          type="button"
+                          onClick={() => msg.messageId && onRetryMessage?.(msg.messageId)}
+                          className="inline-flex items-center gap-1 text-rose-400 hover:text-rose-300 transition-colors cursor-pointer font-medium"
+                          title="Delivery failed — tap to send again"
+                        >
+                          <CircleAlert className="w-3 h-3" />
+                          <span>Retry</span>
+                        </button>
                       )}
                     </>
                   )}
                 </div>
               </div>
+              </React.Fragment>
             );
           })
         )}
+        {isPeerTyping && !isGroup && (
+          <div className="flex items-start w-full sc-fade-in">
+            <div className="rounded-[20px] bubble-in px-4 py-3 flex items-center gap-1.5">
+              <span className="sc-typing-dot h-1.5 w-1.5" />
+              <span className="sc-typing-dot h-1.5 w-1.5" style={{ animationDelay: '0.15s' }} />
+              <span className="sc-typing-dot h-1.5 w-1.5" style={{ animationDelay: '0.3s' }} />
+            </div>
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Drag & drop target for files and photos */}
+      {isDraggingFiles && (
+        <div className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-zinc-950/75 backdrop-blur-sm text-zinc-200">
+          <UploadCloud className="h-8 w-8" />
+          <p className="text-sm font-medium">Drop to send</p>
+        </div>
+      )}
 
       {/* Floating Jump to Bottom Button when Scrolled Up */}
       {isUserScrolledUp && (
@@ -813,107 +961,18 @@ export const ChatView: React.FC<ChatViewProps> = ({
         </button>
       )}
 
-      {/* Staged Large Text / Code Snippet Attachment Pill */}
-      {stagedSnippet && (
-        <div className="px-4 pb-3 shrink-0">
-          <div className="p-3 bg-zinc-900 border border-zinc-800 rounded-xl flex items-center justify-between gap-3 text-xs shadow-sm">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="p-1.5 rounded-lg bg-emerald-950/40 border border-emerald-800/60 text-emerald-400 shrink-0">
-                <FileCode className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <p className="font-semibold text-white truncate text-xs">
-                  {stagedSnippet.title || 'Pasted Document.txt'}
-                </p>
-                <p className="text-[10px] text-zinc-500 font-mono">
-                  {stagedSnippet.lineCount} lines • {stagedSnippet.code.length} chars • {stagedSnippet.language}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                type="button"
-                onClick={() => openCodeModal(stagedSnippet)}
-                className="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg text-[11px] font-medium transition-colors"
-                aria-label="Preview snippet"
-              >
-                Preview
-              </button>
-              <button
-                type="button"
-                onClick={() => setStagedSnippet(null)}
-                className="p-1 text-zinc-500 hover:text-white rounded-lg transition-colors"
-                title="Remove attachment"
-                aria-label="Remove attachment"
-              >
-                <ArrowLeft className="w-3.5 h-3.5 rotate-45" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Inline Code Composer Dropdown */}
-      {showCodeComposer && (
-        <div className="px-4 pb-3 shrink-0">
-          <div className="p-3 bg-zinc-900 border border-zinc-800 rounded-xl space-y-2 shadow-sm">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Code2 className="w-4 h-4 text-emerald-400" />
-                <span className="font-semibold text-xs text-white">Insert Code Block</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <select
-                  value={composerLang}
-                  onChange={(e) => setComposerLang(e.target.value)}
-                  className="px-2 py-1 bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-white uppercase"
-                >
-                  {SUPPORTED_LANGUAGES.map((l) => (
-                    <option key={l} value={l}>
-                      {l}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => setShowCodeComposer(false)}
-                  className="p-1 text-zinc-500 hover:text-white rounded-lg"
-                  aria-label="Close code composer"
-                >
-                  x
-                </button>
-              </div>
-            </div>
-            <input
-              type="text"
-              value={composerTitle}
-              onChange={(e) => setComposerTitle(e.target.value)}
-              placeholder="Filename / Title (e.g. server.ts)"
-              className="w-full px-3 py-1.5 bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-white placeholder-zinc-500 input-base"
-            />
-            <textarea
-              value={composerCode}
-              onChange={(e) => setComposerCode(e.target.value)}
-              placeholder="Paste or write code here..."
-              rows={4}
-              className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg font-mono text-xs text-white placeholder-zinc-500 input-base"
-            />
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowCodeComposer(false)}
-                className="px-3 py-1 bg-zinc-800 text-zinc-400 rounded-lg text-xs hover:text-white transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleAttachCodeModalSave}
-                className="px-3 py-1 btn-primary text-xs"
-              >
-                Attach Code Snippet
-              </button>
-            </div>
+      {/* Attachment error (e.g. size limits on the relay path) */}
+      {attachError && (
+        <div className="px-3 sm:px-6 pb-2 shrink-0">
+          <div className="flex items-start gap-2 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-500">
+            <span className="flex-1 min-w-0">{attachError}</span>
+            <button
+              type="button"
+              onClick={() => setAttachError(null)}
+              className="font-semibold hover:opacity-70 cursor-pointer"
+            >
+              Dismiss
+            </button>
           </div>
         </div>
       )}
@@ -948,62 +1007,71 @@ export const ChatView: React.FC<ChatViewProps> = ({
         </div>
       )}
 
-      {/* Modern Message Composer Bar */}
-      <div className="shrink-0 px-3 sm:px-6 pt-3 pb-4 sm:pb-6 space-y-2">
+      {/* Message Composer Bar */}
+      <div className="shrink-0 px-2.5 sm:px-6 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-6">
         <form
           onSubmit={handleSend}
-          className="flex items-center gap-1.5 rounded-full border border-zinc-800 panel-surface px-2 py-1.5 sm:px-2.5 sm:py-2 shadow-lg transition-colors focus-within:border-zinc-700"
+          className="flex items-end gap-1 rounded-[26px] border border-zinc-800 panel-surface px-1.5 py-1.5 sm:px-2.5 sm:py-2 shadow-lg transition-colors focus-within:border-zinc-700"
         >
+          {/* Universal attachment picker: photos, videos, documents, archives… */}
           <input
             type="file"
-            ref={fileInputRef}
-            onChange={handleFileChange}
+            ref={mediaInputRef}
+            onChange={handleFilesSelected}
+            multiple
             className="hidden"
+            aria-hidden="true"
+            tabIndex={-1}
+          />
+          <input
+            type="file"
+            ref={imageInputRef}
+            onChange={handleFilesSelected}
+            accept="image/*,video/*"
+            multiple
+            className="hidden"
+            aria-hidden="true"
+            tabIndex={-1}
           />
 
           <button
             type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="p-2 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer shrink-0"
-            title="Attach file or photo"
-            aria-label="Attach file"
+            onClick={() => mediaInputRef.current?.click()}
+            className="grid place-items-center h-9 w-9 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer shrink-0"
+            title="Attach any file"
+            aria-label="Attach any file"
           >
-            <Paperclip className="w-4 h-4" />
+            <Paperclip className="h-[18px] w-[18px]" />
           </button>
 
           <button
             type="button"
-            onClick={() => setShowCodeComposer(!showCodeComposer)}
-            className={`p-2 rounded-full transition-colors cursor-pointer shrink-0 ${
-              showCodeComposer
-                ? 'bg-emerald-400 text-zinc-950'
-                : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
-            }`}
-            title="Insert Code Snippet"
-            aria-label="Insert code snippet"
-            aria-pressed={showCodeComposer}
+            onClick={() => imageInputRef.current?.click()}
+            className="grid place-items-center h-9 w-9 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer shrink-0"
+            title="Send photos or videos"
+            aria-label="Send photos or videos"
           >
-            <Code2 className="w-4 h-4" />
+            <ImageIcon className="h-[18px] w-[18px]" />
           </button>
 
           <input
             type="text"
             value={inputText}
-            onPaste={handleInputPaste}
-            onChange={(e) => setInputText(e.target.value)}
-            placeholder={
-              stagedSnippet
-                ? 'Add an optional message...'
-                : 'Message...'
-            }
-            className="flex-1 bg-transparent border-0 px-2.5 py-1.5 text-xs sm:text-sm text-white placeholder-zinc-500 focus:outline-none"
+            onChange={(e) => {
+              setInputText(e.target.value);
+              // Throttled inside the manager, so typing never floods the link.
+              peerManager?.setTypingState?.(e.target.value.length > 0);
+            }}
+            placeholder="Message"
+            enterKeyHint="send"
+            className="flex-1 min-w-0 bg-transparent border-0 px-1.5 py-2 text-[15px] sm:text-sm text-white placeholder-zinc-500 focus:outline-none"
             aria-label="Message input"
           />
 
           <button
             type="button"
             onClick={isRecording ? () => stopRecording(false) : startRecording}
-            className={`p-2 rounded-full transition-colors shrink-0 cursor-pointer ${
+            className={`grid place-items-center h-9 w-9 rounded-full transition-colors shrink-0 cursor-pointer ${
               isRecording
                 ? 'bg-rose-600 text-white'
                 : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
@@ -1012,17 +1080,17 @@ export const ChatView: React.FC<ChatViewProps> = ({
             aria-label={isRecording ? 'Stop recording' : 'Record voice note'}
             aria-pressed={isRecording}
           >
-            <Mic className="w-4 h-4" />
+            <Mic className="h-[18px] w-[18px]" />
           </button>
 
           <button
             type="submit"
-            disabled={(!inputText.trim() && !stagedSnippet) || isSending}
-            className="p-2.5 btn-primary disabled:opacity-30 disabled:cursor-not-allowed shadow-sm active:scale-95"
-            title="Send Message"
+            disabled={!inputText.trim() || isSending}
+            className="grid place-items-center h-10 w-10 btn-primary disabled:opacity-30 disabled:cursor-not-allowed shadow-sm active:scale-95 shrink-0"
+            title="Send message"
             aria-label="Send message"
           >
-            <Send className="w-4 h-4" />
+            <Send className="h-[18px] w-[18px]" />
           </button>
         </form>
       </div>

@@ -181,7 +181,13 @@ export function isLikelyRawCode(text: string): boolean {
  * Parses message text into text and code blocks, supporting multiple markdown code fences
  * or automatically detecting unformatted code pastes.
  */
-export function parseMessageContent(text: string): ParsedMessagePart[] {
+/**
+ * Parsing runs a few regexes per message, and the chat re-renders on every
+ * keystroke and delivery tick. Caching by text keeps long histories cheap.
+ */
+const parsedMessageCache = new Map<string, ParsedMessagePart[]>();
+
+function parseMessageContentUncached(text: string): ParsedMessagePart[] {
   if (!text) return [];
 
   // Match markdown code blocks: ```lang ... ``` or ``` ... ```
@@ -235,6 +241,21 @@ export function parseMessageContent(text: string): ParsedMessagePart[] {
     }
   }
 
+  return parts;
+}
+
+export function parseMessageContent(text: string): ParsedMessagePart[] {
+  if (!text) return [];
+  const cached = parsedMessageCache.get(text);
+  if (cached) return cached;
+  const parts = parseMessageContentUncached(text);
+  // Bounded cache: long conversations keep the parsing cost flat without
+  // holding on to every message ever rendered.
+  if (parsedMessageCache.size > 800) {
+    const oldest = parsedMessageCache.keys().next().value;
+    if (oldest !== undefined) parsedMessageCache.delete(oldest);
+  }
+  parsedMessageCache.set(text, parts);
   return parts;
 }
 

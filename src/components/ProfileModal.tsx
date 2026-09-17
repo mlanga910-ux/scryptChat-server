@@ -192,7 +192,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
                   <div
                     className="w-16 h-16 rounded-2xl flex items-center justify-center text-white font-bold text-xl shadow-lg ring-2 ring-zinc-800 overflow-hidden"
-                    style={{ backgroundColor: avatarUrl ? '#18181b' : avatarColor }}
+                    style={{ backgroundColor: avatarUrl ? 'transparent' : avatarColor }}
                   >
                     {avatarUrl ? (
                       <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />

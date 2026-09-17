@@ -1,47 +1,52 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
-  <rect width="512" height="512" fill="#000000" rx="96"/>
-  
+  <!--
+    Theme-aware brand mark: dark tile with light glyph in light mode,
+    light tile with dark glyph in dark mode, so the tab icon never
+    disappears into the browser chrome.
+  -->
+  <style>
+    .tile { fill: #101014; stroke: #e7e7ea; stroke-width: 8; }
+    .ink { fill: #ffffff; stroke: #ffffff; }
+    .ink-soft { fill: #a1a1aa; }
+    @media (prefers-color-scheme: dark) {
+      .tile { fill: #f5f5f7; stroke: #2b2b31; }
+      .ink { fill: #101014; stroke: #101014; }
+      .ink-soft { fill: #52525b; }
+    }
+  </style>
+
+  <rect class="tile" width="512" height="512" rx="104" />
+
   <!-- Left glitch accent dashes and dots -->
-  <line x1="55" y1="185" x2="110" y2="185" stroke="#ffffff" stroke-width="12" stroke-linecap="square"/>
-  <line x1="38" y1="205" x2="95" y2="205" stroke="#ffffff" stroke-width="10" stroke-linecap="square"/>
-  <line x1="68" y1="225" x2="105" y2="225" stroke="#ffffff" stroke-width="10" stroke-linecap="square"/>
-  <rect x="55" y="245" width="12" height="12" fill="#ffffff"/>
-  <rect x="75" y="245" width="12" height="12" fill="#ffffff"/>
-  <rect x="42" y="265" width="12" height="12" fill="#ffffff"/>
+  <line class="ink" x1="55" y1="185" x2="110" y2="185" stroke-width="12" stroke-linecap="square" />
+  <line class="ink" x1="38" y1="205" x2="95" y2="205" stroke-width="10" stroke-linecap="square" />
+  <line class="ink" x1="68" y1="225" x2="105" y2="225" stroke-width="10" stroke-linecap="square" />
+  <rect class="ink" x="55" y="245" width="12" height="12" />
+  <rect class="ink" x="75" y="245" width="12" height="12" />
+  <rect class="ink" x="42" y="265" width="12" height="12" />
 
   <!-- Right glitch accent bars and column dots -->
-  <line x1="395" y1="120" x2="445" y2="120" stroke="#ffffff" stroke-width="12" stroke-linecap="square"/>
-  <line x1="410" y1="138" x2="465" y2="138" stroke="#ffffff" stroke-width="10" stroke-linecap="square"/>
-  <rect x="415" y="156" width="12" height="12" fill="#ffffff"/>
-  <rect x="415" y="174" width="12" height="12" fill="#ffffff"/>
-  <rect x="415" y="192" width="12" height="12" fill="#ffffff"/>
-  <rect x="415" y="210" width="12" height="12" fill="#ffffff"/>
-  <rect x="435" y="192" width="12" height="12" fill="#ffffff"/>
+  <line class="ink" x1="395" y1="120" x2="445" y2="120" stroke-width="12" stroke-linecap="square" />
+  <line class="ink" x1="410" y1="138" x2="465" y2="138" stroke-width="10" stroke-linecap="square" />
+  <rect class="ink" x="415" y="156" width="12" height="12" />
+  <rect class="ink" x="415" y="174" width="12" height="12" />
+  <rect class="ink" x="415" y="192" width="12" height="12" />
+  <rect class="ink" x="415" y="210" width="12" height="12" />
+  <rect class="ink" x="435" y="192" width="12" height="12" />
 
-  <!-- Stylized Angular Speech Bubble -->
-  <path d="M 160 55 L 352 55 L 405 108 L 405 270 L 352 323 L 200 323 L 155 372 L 155 323 L 110 323 L 57 270 L 57 108 Z" 
-        fill="none" 
-        stroke="#ffffff" 
-        stroke-width="22" 
-        stroke-linejoin="round" 
-        stroke-linecap="round"/>
+  <!-- Angular speech bubble -->
+  <path class="ink" d="M 160 55 L 352 55 L 405 108 L 405 270 L 352 323 L 200 323 L 155 372 L 155 323 L 110 323 L 57 270 L 57 108 Z"
+        fill="none" stroke-width="22" stroke-linejoin="round" stroke-linecap="round" />
 
-  <!-- Stylized Cyber Central 'S' with diagonal cuts -->
-  <!-- Top Segment -->
-  <path d="M 330 115 L 210 115 L 140 185 L 260 185 L 305 140 Z" fill="#ffffff"/>
-  <!-- Middle bar -->
-  <path d="M 185 185 L 325 185 L 325 210 L 185 210 Z" fill="#ffffff"/>
-  <!-- Bottom Segment -->
-  <path d="M 182 280 L 302 280 L 372 210 L 252 210 L 207 255 Z" fill="#ffffff"/>
+  <!-- Cyber 'S' with diagonal cuts -->
+  <path class="ink" d="M 330 115 L 210 115 L 140 185 L 260 185 L 305 140 Z" stroke="none" />
+  <path class="ink" d="M 185 185 L 325 185 L 325 210 L 185 210 Z" stroke="none" />
+  <path class="ink" d="M 182 280 L 302 280 L 372 210 L 252 210 L 207 255 Z" stroke="none" />
 
-  <!-- Futuristic "scryptChat" Typography at bottom -->
-  <text x="256" y="445" 
-        text-anchor="middle" 
-        font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" 
-        font-weight="700" 
-        font-size="46" 
-        fill="#ffffff" 
-        letter-spacing="-1">
-    scrypt<tspan fill="#a1a1aa" font-weight="400">Chat</tspan>
+  <!-- Wordmark -->
+  <text class="ink" x="256" y="445" text-anchor="middle"
+        font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+        font-weight="700" font-size="46" letter-spacing="-1" stroke="none">
+    scrypt<tspan class="ink-soft" font-weight="400">Chat</tspan>
   </text>
 </svg>

@@ -52,8 +52,8 @@ takes a few seconds while it wakes up.
 - **Storage that cannot be blocked.** The vault probes IndexedDB and silently
   falls back to localStorage and then to session memory, so blocked-cookies
   policies, private windows, partitioned frames and storage-restricted webviews
-  still run the whole app. The active backend is shown under Settings and a
-  dismissible notice appears when it is degraded.
+  still run the whole app. The active backend is shown under Settings; the app
+  never interrupts you with a storage warning.
 - **Keyless fallback.** Browsers without WebCrypto (an insecure http origin) get
   a working device without a signing key: everything local works, and pairing
   explains that it needs an https context instead of failing mysteriously.
@@ -72,5 +72,10 @@ takes a few seconds while it wakes up.
 
 - Signaling state (rooms, presence, mailboxes) lives in memory, so a single
   instance is expected. Restarting the service clears pending handshakes.
-- Devices on the same network negotiate a direct host route; the relay is only
-  needed to find each other.
+- Devices on the same network negotiate a direct host route, shown as **LAN**
+  next to the contact: messages, files and calls then travel host-to-host at
+  full local speed and keep working with no internet at all. The relay is only
+  needed to find each other the first time.
+- Profiles sync both ways: a display name, photo or bio change is pushed over the
+  live link (or the encrypted mailbox when the peer is offline), so every view —
+  contact list, chat header, call screen — shows the same picture.

@@ -40,6 +40,8 @@ export class CallManager {
   private currentFacingMode: 'user' | 'environment' = 'user';
   private disconnectTimeout: any = null;
   private pendingIceCandidates: RTCIceCandidateInit[] = [];
+  /** Dedupe guard: the same signal can arrive over the data channel and relay. */
+  private seenSignalIds = new Set<string>();
 
   constructor(peerManager: PeerManager, identity: IdentityRecord, events: CallManagerEvents) {
     this.peerManager = peerManager;
@@ -77,7 +79,9 @@ export class CallManager {
     this.currentSession = {
       callId,
       peerDeviceId,
-      peerDisplayName,
+      peerDisplayName: contact?.alias || peerDisplayName,
+      peerAvatarUrl: contact?.avatarUrl,
+      peerAvatarColor: contact?.avatarColor,
       callType,
       direction: 'OUTBOUND',
       state: 'CALLING',
@@ -130,6 +134,8 @@ export class CallManager {
         callType,
         callerDeviceId: this.identity.deviceId,
         callerDisplayName: this.identity.displayName || 'Secure Peer',
+        callerAvatarUrl: this.identity.avatarUrl,
+        callerAvatarColor: this.identity.avatarColor,
         sdp: {
           type: localDesc.type,
           sdp: localDesc.sdp,
@@ -247,7 +253,18 @@ export class CallManager {
   /**
    * 5. HANDLE INCOMING CALL SIGNAL
    */
-  public async handleCallSignal(payload: CallSignalPayload): Promise<void> {
+  public async handleCallSignal(payload: CallSignalPayload & { signalId?: string }): Promise<void> {
+    // The same signal may arrive twice (data channel + relay). Dropping repeats
+    // here is what keeps a call from being negotiated twice or re-ended.
+    if (payload.signalId) {
+      if (this.seenSignalIds.has(payload.signalId)) return;
+      this.seenSignalIds.add(payload.signalId);
+      if (this.seenSignalIds.size > 400) {
+        const oldest = this.seenSignalIds.values().next().value;
+        if (oldest) this.seenSignalIds.delete(oldest);
+      }
+    }
+
     switch (payload.action) {
       case 'CALL_OFFER': {
         if (this.currentSession && this.currentSession.state === 'CONNECTED') {
@@ -282,6 +299,8 @@ export class CallManager {
           callId: payload.callId,
           peerDeviceId: callerDeviceId,
           peerDisplayName: payload.callerDisplayName || contact?.alias || `Peer-${callerDeviceId.slice(4, 8)}`,
+          peerAvatarUrl: payload.callerAvatarUrl || contact?.avatarUrl,
+          peerAvatarColor: payload.callerAvatarColor || contact?.avatarColor,
           callType: payload.callType || 'audio',
           direction: 'INBOUND',
           state: 'INCOMING',
@@ -697,15 +716,18 @@ export class CallManager {
 
   private async sendCallSignal(payload: CallSignalPayload, targetDeviceId?: string): Promise<void> {
     const recipientId = targetDeviceId || this.currentSession?.peerDeviceId || '';
-    const jsonStr = JSON.stringify(payload);
-    const payloadBytes = new TextEncoder().encode(jsonStr);
+    const signalId =
+      (payload as any).signalId ||
+      `sig_${payload.action}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const outbound = { ...payload, signalId };
+    const payloadBytes = new TextEncoder().encode(JSON.stringify(outbound));
 
     const session = this.peerManager.cryptoSession;
     const dataChannel = this.peerManager.dataChannel;
 
-    let deliveredDirectly = false;
-    // Send via WebRTC DataChannel if open. Relay is a fallback, not a second
-    // copy: duplicate offers can replace the receiver's active call session.
+    // Both paths are sent in parallel on purpose: the relay signal queue is
+    // tiny and instant, while the data channel also works when the relay is
+    // unreachable (LAN-only setups). Receivers drop the duplicate by signalId.
     if (session && dataChannel && dataChannel.readyState === 'open') {
       try {
         const header = buildPacketHeader(
@@ -716,13 +738,12 @@ export class CallManager {
         );
         const frame = await session.encryptFrame(header, payloadBytes);
         dataChannel.send(frame);
-        deliveredDirectly = true;
-      } catch {}
+      } catch (err) {
+        console.warn('Call signal data-channel send failed:', err);
+      }
     }
 
-    // Use the dedicated call queue. The mailbox is for chat messages/files and
-    // can be drained by the fallback poller while a call is being negotiated.
-    if (recipientId && !deliveredDirectly) {
+    if (recipientId) {
       try {
         const response = await this.peerManager.fetchRelay('/api/signaling/call/signal', {
           method: 'POST',
@@ -730,13 +751,15 @@ export class CallManager {
           body: JSON.stringify({
             senderDeviceId: this.identity.deviceId,
             recipientDeviceId: recipientId,
-            signal: payload,
+            signal: outbound,
           }),
         });
         if (!response.ok) {
           throw new Error(`Call relay returned HTTP ${response.status}`);
         }
-      } catch {}
+      } catch {
+        // The data channel may still have delivered it; nothing more to do.
+      }
     }
   }
 

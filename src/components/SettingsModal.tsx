@@ -25,7 +25,12 @@ import {
 } from '../utils/cyberSoundEngine';
 import { RelayStatus, ContactRecord } from '../types/index';
 import { db } from '../db/index';
-import { getChatSettings, saveChatSettings, ChatCustomSettings } from '../utils/chatSettings';
+import {
+  getChatSettings,
+  saveChatSettings,
+  loadContactSettingsMap,
+  ChatCustomSettings,
+} from '../utils/chatSettings';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -72,16 +77,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [contactSettingsMap, setContactSettingsMap] = useState<Record<string, ChatCustomSettings>>({});
 
   useEffect(() => {
-    if (isOpen) {
-      db.contacts.toArray().then((list) => {
-        setContacts(list);
-        const map: Record<string, ChatCustomSettings> = {};
-        list.forEach((c) => {
-          map[c.deviceId] = getChatSettings(c.deviceId);
-        });
-        setContactSettingsMap(map);
-      });
-    }
+    if (!isOpen) return;
+    db.contacts.toArray().then((list) => {
+      setContacts(list);
+      setContactSettingsMap(loadContactSettingsMap(list));
+    });
   }, [isOpen]);
 
   const toggleContactBlock = (deviceId: string, field: 'blockVoiceCalls' | 'blockVideoCalls') => {

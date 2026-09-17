@@ -24,6 +24,8 @@ export enum PacketType {
   HEARTBEAT_PING_PONG = 0x30,
   TYPING_INDICATOR = 0x35,
   READ_RECEIPT = 0x36,
+  PROFILE_INFO = 0x37,
+  DELIVERY_ACK = 0x38,
   MEDIA_SIGNAL = 0x40,
 }
 
@@ -85,6 +87,22 @@ export interface ContactRecord {
   lastSeenAt: number;
   isOnline?: boolean;
   unreadCount?: number;
+  /** True when the live link with this contact runs entirely over the local network. */
+  isLan?: boolean;
+  /** Wall-clock time of the last profile refresh received from the contact. */
+  profileSyncedAt?: number;
+}
+
+/** Profile fields exchanged between paired devices. */
+export interface ProfileSyncPayload {
+  deviceId: string;
+  displayName?: string;
+  avatarUrl?: string;
+  avatarColor?: string;
+  statusBio?: string;
+  status?: string;
+  /** Sender clock at the moment the profile was edited (ordering guard). */
+  updatedAt?: number;
 }
 
 export interface ImageExifData {
@@ -146,6 +164,9 @@ export interface GroupRecord {
 export interface MessageRecord {
   id?: number;
   messageId?: string;
+  /** Delivery bookkeeping used by the outbox retry loop. */
+  deliveryAttempts?: number;
+  nextAttemptAt?: number;
   chatDeviceId: string; // Peer deviceId OR groupId
   isGroup?: boolean;
   groupId?: string;
@@ -233,6 +254,7 @@ export interface CallSessionInfo {
   groupId?: string;
   groupName?: string;
   groupMembers?: string[];
+  isLocalVideoEnabled?: boolean;
 }
 
 export interface CallSignalPayload {
@@ -248,5 +270,5 @@ export interface CallSignalPayload {
   reason?: string;
   isAudioMuted?: boolean;
   isVideoMuted?: boolean;
+  isLocalVideoEnabled?: boolean;
 }
-

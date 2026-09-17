@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getOrCreateIdentity, hasWebCrypto, resetIdentityBootstrap } from './crypto/keys';
 import { db, describeStorage, initDatabase, StorageDriverName } from './db/index';
-import { AlertTriangle, X } from 'lucide-react';
 import { soundEngine } from './utils/cyberSoundEngine';
 import {
   CallSessionInfo,
@@ -51,6 +50,9 @@ export default function App() {
   const [relayPingMs, setRelayPingMs] = useState<number | null>(null);
   const [relayErrorReason, setRelayErrorReason] = useState<string | null>(null);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
+  // Contacts currently composing a message, keyed by device id.
+  const [typingPeers, setTypingPeers] = useState<Record<string, boolean>>({});
+  const typingTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   // Call state
   const [callSession, setCallSession] = useState<CallSessionInfo | null>(null);
@@ -76,7 +78,8 @@ export default function App() {
   const [bootError, setBootError] = useState<string | null>(null);
   const [storageDriver, setStorageDriver] = useState<StorageDriverName | null>(null);
   const [secureContext, setSecureContext] = useState(true);
-  const [warningDismissed, setWarningDismissed] = useState(false);
+  // Contact currently reachable over the local network (host-to-host ICE route).
+  const [lanPeerId, setLanPeerId] = useState<string | null>(null);
 
   // Check URL params for direct pairing link (e.g. ?room=ABC123)
   useEffect(() => {
@@ -95,6 +98,8 @@ export default function App() {
   // Peer Manager ref
   const peerManagerRef = useRef<PeerManager | null>(null);
   const activeChatKeyRef = useRef<string | null>(null);
+  /** Mirror of the contact list so event handlers never read a stale closure. */
+  const contactsRef = useRef<ContactRecord[]>([]);
   const pendingCallSignalsRef = useRef<any[]>([]);
 
   // Initialize identity, the local vault and the signaling client. Every step
@@ -144,6 +149,7 @@ export default function App() {
         const loadedContacts = await db.contacts.toArray();
         const loadedGroups = await db.groups.toArray();
         if (!isMounted) return;
+        contactsRef.current = loadedContacts;
         setContacts(loadedContacts);
         setGroups(loadedGroups);
         if (loadedContacts.length > 0 && loadedGroups.length === 0) {
@@ -174,17 +180,23 @@ export default function App() {
           },
           onContactsPresencesUpdate: async () => {
             const updated = await db.contacts.toArray();
+            contactsRef.current = updated;
             setContacts(updated);
-            setActiveContact((curr) => {
-              if (!curr) return null;
-              const found = updated.find((c) => c.deviceId === curr.deviceId);
-              return found || null;
-            });
+            // Every view (header, list, details) reads the same fresh record so a
+            // contact's photo can never differ from screen to screen.
+            const pick = (deviceId?: string) =>
+              updated.find((c) => c.deviceId === deviceId) || null;
+            setActiveContact((curr) => (curr ? pick(curr.deviceId) : null));
+            setSelectedContactForDetails((curr) => (curr ? pick(curr.deviceId) : null));
             await reloadLastMessages();
+          },
+          onTransportUpdate: ({ deviceId, transport }) => {
+            setLanPeerId(transport === 'lan' ? deviceId : null);
           },
           onMessageReceived: async (msg) => {
             soundEngine.playMessageReceived();
-            if (activeChatKeyRef.current === msg.chatDeviceId) {
+            const isActiveChat = activeChatKeyRef.current === msg.chatDeviceId;
+            if (isActiveChat) {
               setMessages((prev) =>
                 prev.some((existing) =>
                   (msg.messageId && existing.messageId === msg.messageId) ||
@@ -194,7 +206,60 @@ export default function App() {
                   : [...prev, msg]
               );
             }
-            await reloadLastMessages();
+            updateLastMessageFor(msg);
+            // A brand new sender may not be in the sidebar yet.
+            if (!contactsRef.current.some((c) => c.deviceId === msg.chatDeviceId)) {
+              const updated = await db.contacts.toArray();
+              contactsRef.current = updated;
+              setContacts(updated);
+            }
+            if (isActiveChat) {
+              // The chat is on screen, so the peer can see that it was read.
+              acknowledgeVisibleMessages(msg.chatDeviceId, [msg], !!msg.isGroup);
+            }
+          },
+          onMessageStatusChange: (messageId, status, chatDeviceId) => {
+            setMessages((prev) =>
+              prev.some((m) => m.messageId === messageId)
+                ? prev.map((m) => (m.messageId === messageId ? { ...m, status } : m))
+                : prev
+            );
+            setLastMessagesMap((prev) => {
+              const current = prev.get(chatDeviceId);
+              if (!current || current.messageId !== messageId) return prev;
+              const next = new Map(prev);
+              next.set(chatDeviceId, { ...current, status });
+              return next;
+            });
+          },
+          onTypingState: ({ deviceId, isTyping }) => {
+            const timers = typingTimersRef.current;
+            if (isTyping) {
+              setTypingPeers((prev) => (prev[deviceId] ? prev : { ...prev, [deviceId]: true }));
+              if (timers[deviceId]) clearTimeout(timers[deviceId]);
+              // A peer that stops mid-word (tab closed, link lost) must not
+              // leave a typing bubble behind forever.
+              timers[deviceId] = setTimeout(() => {
+                delete timers[deviceId];
+                setTypingPeers((prev) => {
+                  if (!prev[deviceId]) return prev;
+                  const next = { ...prev };
+                  delete next[deviceId];
+                  return next;
+                });
+              }, 4000);
+              return;
+            }
+            if (timers[deviceId]) {
+              clearTimeout(timers[deviceId]);
+              delete timers[deviceId];
+            }
+            setTypingPeers((prev) => {
+              if (!prev[deviceId]) return prev;
+              const next = { ...prev };
+              delete next[deviceId];
+              return next;
+            });
           },
           onFileProgress: (progress) => {
             setActiveTransfers((prev) => {
@@ -209,7 +274,6 @@ export default function App() {
           },
           onFileCompleted: async () => {
             await refreshContacts();
-            await reloadLastMessages();
           },
           onMediaSignal: (signal) => {
             if (callManagerRef.current) {
@@ -221,7 +285,12 @@ export default function App() {
             }
           },
           onPeerInfo: (contact) => {
-            setActiveContact(contact);
+            setActiveContact((current) =>
+              current && current.deviceId !== contact.deviceId ? current : contact
+            );
+            setSelectedContactForDetails((current) =>
+              current && current.deviceId === contact.deviceId ? contact : current
+            );
             refreshContacts();
           },
           onError: (err) => {
@@ -283,6 +352,65 @@ export default function App() {
     setLastMessagesMap(map);
   };
 
+  /**
+   * A new message only affects one row of the sidebar, so the preview is
+   * updated in place instead of re-reading the whole history table.
+   */
+  const updateLastMessageFor = (msg: MessageRecord) => {
+    setLastMessagesMap((prev) => {
+      const current = prev.get(msg.chatDeviceId);
+      if (current && current.timestamp > msg.timestamp) return prev;
+      const next = new Map(prev);
+      next.set(msg.chatDeviceId, msg);
+      return next;
+    });
+  };
+
+  /**
+   * Marks the conversation on screen as read: the sender sees a read receipt and
+   * the unread dot in the sidebar clears. Group messages keep the relay quiet.
+   */
+  const acknowledgeVisibleMessages = (
+    chatKey: string | null,
+    msgs: MessageRecord[],
+    isGroupChat = false
+  ) => {
+    const pm = peerManagerRef.current;
+    if (!pm || !chatKey || msgs.length === 0 || isGroupChat) return;
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+    const unread = msgs.filter(
+      (m) => m.direction === 'INBOUND' && !!m.messageId && m.status !== 'read'
+    );
+    if (unread.length === 0) return;
+    void pm.sendReadReceipt(
+      chatKey,
+      unread.slice(-60).map((m) => m.messageId as string)
+    );
+    void db.messages
+      .filter(
+        (m) =>
+          m.chatDeviceId === chatKey && m.direction === 'INBOUND' && m.status !== 'read'
+      )
+      .modify({ status: 'read' })
+      .then(async () => {
+        const rows = await db.messages.where('chatDeviceId').equals(chatKey).sortBy('timestamp');
+        const latest = rows[rows.length - 1];
+        if (!latest) return;
+        setLastMessagesMap((prev) => {
+          const current = prev.get(chatKey);
+          if (!current || current.timestamp !== latest.timestamp) return prev;
+          const next = new Map(prev);
+          next.set(chatKey, { ...current, status: 'read' });
+          return next;
+        });
+      })
+      .catch(() => {});
+  }
+
+  const handleRetryMessage = (messageId: string) => {
+    void peerManagerRef.current?.retryMessage(messageId).catch(() => {});
+  };
+
   // Reload messages when activeContact changes
   useEffect(() => {
     async function loadMessages() {
@@ -297,12 +425,14 @@ export default function App() {
         .equals(chatKey)
         .sortBy('timestamp');
       setMessages(msgs);
+      acknowledgeVisibleMessages(chatKey, msgs, !!activeGroup);
     }
     loadMessages();
   }, [activeContact, activeGroup]);
 
   const refreshContacts = async () => {
     const list = await db.contacts.toArray();
+    contactsRef.current = list;
     setContacts(list);
     await reloadLastMessages();
   };
@@ -370,10 +500,7 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = async (
-    text: string,
-    options?: { codeSnippet?: any; isGroup?: boolean; groupId?: string }
-  ) => {
+  const handleSendMessage = async (text: string) => {
     if (!peerManagerRef.current) return;
     if (activeGroup) {
       const messageId = await peerManagerRef.current.sendGroupTextMessage(text, activeGroup);
@@ -388,8 +515,6 @@ export default function App() {
         direction: 'OUTBOUND',
         payloadText: text,
         mediaType: 'text',
-        codeSnippet: options?.codeSnippet,
-        ...(options?.codeSnippet ? { mediaType: 'code' as const } : {}),
         timestamp: Date.now(),
         status: 'delivered',
       };
@@ -403,7 +528,7 @@ export default function App() {
     const msg = await peerManagerRef.current.sendTextMessage(text, activeContact.deviceId);
     soundEngine.playMessageSent();
     setMessages((prev) => [...prev, msg]);
-    await reloadLastMessages();
+    updateLastMessageFor(msg);
   };
 
   const handleSendFile = async (
@@ -444,7 +569,7 @@ export default function App() {
     }
     if (!activeContact) return;
     await peerManagerRef.current.sendFile(file, activeContact.deviceId);
-    await reloadLastMessages();
+    // The sidebar preview is refreshed by the file's own status events.
   };
 
   const handleUpdateGroup = (updated: GroupRecord) => {
@@ -481,20 +606,6 @@ export default function App() {
       peerManagerRef.current.updateIdentity(updatedId);
     }
   };
-
-  /** A single, non-blocking notice about a degraded browser environment. */
-  const environmentWarning = (() => {
-    if (storageDriver === 'memory') {
-      return 'This browser blocks site storage. scryptChat works, but your data stays only for this session.';
-    }
-    if (storageDriver === 'localstorage') {
-      return 'IndexedDB is unavailable here, so scryptChat is using browser storage instead.';
-    }
-    if (!secureContext) {
-      return 'This page is not secure (https), so pairing devices is unavailable. Everything local still works.';
-    }
-    return null;
-  })();
 
   /** Retry the signaling relay from the header chip. */
   const handleRetryRelay = () => {
@@ -547,7 +658,7 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell-height w-screen max-w-full flex flex-col bg-zinc-950 text-zinc-100 overflow-hidden select-none font-sans">
+    <div className="app-shell-height w-full max-w-full flex flex-col bg-zinc-950 text-zinc-100 overflow-hidden select-none font-sans">
       {/* Top Header Bar */}
       <TerminalHeader
         identity={identity}
@@ -567,26 +678,12 @@ export default function App() {
         onOpenWipe={() => setIsWipeOpen(true)}
       />
 
-      {/* Degraded-environment notice: informational, never blocks the app */}
-      {environmentWarning && !warningDismissed && (
-        <div className="mx-3 md:mx-5 mb-2 shrink-0 flex items-center gap-2 rounded-2xl border border-zinc-800 panel-surface px-3 py-2 text-[11px] text-zinc-400 animate-in animate-slide-down">
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-400" />
-          <span className="flex-1 min-w-0">{environmentWarning}</span>
-          <button
-            onClick={() => setWarningDismissed(true)}
-            className="p-1 rounded-full hover:text-white transition-colors cursor-pointer"
-            aria-label="Dismiss notice"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
-
       {/* Main Workspace Layout */}
-      <div className="flex-1 min-h-0 flex overflow-hidden md:px-3 md:pb-3">
-        {/* Desktop: two floating panes, mirroring the light/dark mockups */}
-        <div className="hidden md:flex flex-1 min-h-0 h-full overflow-hidden gap-3">
-          <div className="w-[320px] lg:w-[344px] shrink-0 min-h-0 rounded-3xl border border-zinc-800 panel-surface overflow-hidden shadow-[var(--sc-shadow-sm)]">
+      <div className="flex-1 min-h-0 flex overflow-hidden lg:px-3 lg:pb-3">
+        {/* Wide screens (laptop and up): two floating panes. Tablets and phones
+            use the tabbed single-pane flow so nothing gets stretched. */}
+        <div className="hidden lg:flex flex-1 min-h-0 h-full overflow-hidden gap-3">
+          <div className="w-[320px] xl:w-[352px] shrink-0 min-h-0 rounded-3xl border border-zinc-800 panel-surface overflow-hidden shadow-[var(--sc-shadow-sm)]">
           <PeerList
             contacts={contacts}
             groups={groups}
@@ -595,6 +692,8 @@ export default function App() {
             connectedPeerId={
               connectionState === 'CONNECTED' ? activeContact?.deviceId || null : null
             }
+            lanPeerId={lanPeerId}
+            typingPeerIds={typingPeers}
             lastMessages={lastMessagesMap}
             onSelectPeer={handleSelectPeer}
             onSelectGroup={handleSelectGroup}
@@ -614,18 +713,21 @@ export default function App() {
             messages={messages}
             activeTransfers={activeTransfers}
             isConnected={connectionState === 'CONNECTED'}
+            isLanLink={lanPeerId === activeContact?.deviceId}
             latencyMs={latencyMs || undefined}
             peerManager={peerManager}
             onSendMessage={handleSendMessage}
             onSendFile={handleSendFile}
             onStartCall={handleStartCall}
+            onRetryMessage={handleRetryMessage}
+            isPeerTyping={!!activeContact && !!typingPeers[activeContact.deviceId]}
             onVerifyContact={() => setIsSecurityOpen(true)}
           />
           </div>
         </div>
 
-        {/* Mobile: Single-View Navigation */}
-        <div className="flex md:hidden flex-1 min-h-0 h-full overflow-hidden">
+        {/* Phones and tablets: single view with the Chats / Chat switcher */}
+        <div className="flex lg:hidden flex-1 min-h-0 h-full overflow-hidden">
           {mobileTab === 'peers' ? (
             <PeerList
               contacts={contacts}
@@ -635,6 +737,8 @@ export default function App() {
               connectedPeerId={
                 connectionState === 'CONNECTED' ? activeContact?.deviceId || null : null
               }
+              lanPeerId={lanPeerId}
+              typingPeerIds={typingPeers}
               lastMessages={lastMessagesMap}
               onSelectPeer={handleSelectPeer}
               onSelectGroup={handleSelectGroup}
@@ -652,11 +756,14 @@ export default function App() {
               messages={messages}
               activeTransfers={activeTransfers}
               isConnected={connectionState === 'CONNECTED'}
+              isLanLink={lanPeerId === activeContact?.deviceId}
               latencyMs={latencyMs || undefined}
               peerManager={peerManager}
               onSendMessage={handleSendMessage}
               onSendFile={handleSendFile}
               onStartCall={handleStartCall}
+              onRetryMessage={handleRetryMessage}
+              isPeerTyping={!!activeContact && !!typingPeers[activeContact.deviceId]}
               onBackToPeers={() => setMobileTab('peers')}
               onVerifyContact={() => setIsSecurityOpen(true)}
             />

@@ -553,3 +553,23 @@ export function resetStorageDriver(): void {
   selectedDriver = null;
   selectionPromise = null;
 }
+
+/**
+ * Device-profile snapshot cache.
+ *
+ * Used so chats, contact lists and the header all render the latest profile
+ * image/color for a deviceId without re-querying the vault on every change.
+ */
+export const profileCache = new Map<string, { avatarUrl?: string; avatarColor?: string }>();
+
+export function setProfileCache(deviceId: string, entry: { avatarUrl?: string; avatarColor?: string }) {
+  if (deviceId) profileCache.set(deviceId, entry);
+}
+
+export function getProfileCache(deviceId: string): { avatarUrl?: string; avatarColor?: string } | undefined {
+  return profileCache.get(deviceId);
+}
+
+export function clearProfileCache() {
+  profileCache.clear();
+}

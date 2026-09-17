@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 
 interface AvatarProps {
   name?: string;
@@ -39,9 +39,17 @@ export const Avatar: React.FC<AvatarProps> = ({
   className = '',
   onClick,
 }) => {
+  const [imageFailed, setImageFailed] = useState(false);
   const initial = (name.trim() || 'U').charAt(0).toUpperCase();
   const sizeClass = SIZE_CLASSES[size] || SIZE_CLASSES.md;
   const badgeClass = BADGE_SIZES[size] || BADGE_SIZES.md;
+
+  // A new picture deserves a new attempt, even if the previous one 404'd.
+  useEffect(() => {
+    setImageFailed(false);
+  }, [avatarUrl]);
+
+  const showImage = !!avatarUrl && !imageFailed;
 
   return (
     <div
@@ -50,16 +58,17 @@ export const Avatar: React.FC<AvatarProps> = ({
     >
       <div
         className={`${sizeClass} overflow-hidden flex items-center justify-center text-white font-sans shadow-sm transition-all`}
-        style={{ backgroundColor: avatarUrl ? '#18181b' : avatarColor }}
+        // Photos paint over a transparent layer so nothing darkens them in light
+        // mode; initials keep the contact colour behind them.
+        style={{ backgroundColor: showImage ? 'transparent' : avatarColor }}
       >
-        {avatarUrl ? (
+        {showImage ? (
           <img
             src={avatarUrl}
             alt={name}
+            draggable={false}
             className="w-full h-full object-cover"
-            onError={(e) => {
-              (e.target as HTMLElement).style.display = 'none';
-            }}
+            onError={() => setImageFailed(true)}
           />
         ) : (
           <span>{initial}</span>
@@ -68,9 +77,12 @@ export const Avatar: React.FC<AvatarProps> = ({
 
       {showBadge && (
         <div
-          className={`absolute rounded-full border-[#0a0a0b] ${badgeClass} ${
-            isOnline ? 'bg-emerald-400 ring-1 ring-emerald-400/50' : 'bg-zinc-600'
+          className={`absolute rounded-full ${badgeClass} ${
+            isOnline
+              ? 'bg-[var(--sc-e400)] ring-1 ring-[var(--sc-e400)]'
+              : 'bg-zinc-600'
           }`}
+          style={{ borderColor: 'var(--sc-panel)' }}
           title={isOnline ? 'Online' : 'Offline'}
         />
       )}
