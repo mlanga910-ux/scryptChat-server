@@ -68,6 +68,24 @@ export async function generateDeviceId(rawPublicKey: Uint8Array): Promise<string
   return formatDeviceId(hex);
 }
 
+/**
+ * IndexedDB can store CryptoKey objects natively, but not every browser does it
+ * reliably — some browsers or private-browsing modes return a plain object
+ * (e.g. the JWK representation) instead of a live CryptoKey instance.  When
+ * that happens, `crypto.subtle.sign()` throws the exact "parameter 2 is not of
+ * type 'CryptoKey'" error users have been seeing during pairing.
+ *
+ * This helper detects the problem so we can re-import from the JWK backup.
+ */
+function isRealCryptoKey(value: unknown): boolean {
+  try {
+    return value instanceof CryptoKey;
+  } catch {
+    // Some browsers throw when checking instanceof on cross-realm objects.
+    return !!(value as any)?.type && !!(value as any)?.algorithm?.name;
+  }
+}
+
 /** Writes the identity to the vault and to the localStorage backup. Never throws. */
 async function persistIdentity(identity: IdentityRecord, privateJwk?: JsonWebKey): Promise<void> {
   try {
@@ -84,6 +102,40 @@ async function persistIdentity(identity: IdentityRecord, privateJwk?: JsonWebKey
   } catch {
     /* storage blocked - the vault above is the source of truth */
   }
+}
+
+/**
+ * Re-imports CryptoKey objects for an identity from the JWK stored in
+ * localStorage.  This is the safety net when IndexedDB returns a plain-object
+ * representation instead of a live CryptoKey.
+ */
+export async function reimportIdentityKeys(identity: IdentityRecord): Promise<void> {
+  const savedPrivJwk = localStorage.getItem(STORAGE_KEY_PRIV_JWK);
+  if (!savedPrivJwk) {
+    throw new Error('No private key JWK in localStorage – cannot re-import.');
+  }
+
+  const jwk = JSON.parse(savedPrivJwk);
+  identity.privateKeyECDSA = await crypto.subtle.importKey(
+    'jwk',
+    jwk,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['sign']
+  );
+
+  const rawPubBytes = base64ToArrayBuffer(identity.publicKeyRaw);
+  identity.publicKeyECDSA = await crypto.subtle.importKey(
+    'raw',
+    rawPubBytes,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['verify']
+  );
+
+  // Persist the freshly-imported keys back to IndexedDB so subsequent loads
+  // work without hitting this path again.
+  await persistIdentity(identity, jwk);
 }
 
 /** Identity for browsers without WebCrypto: everything local works, pairing needs https. */
@@ -158,6 +210,21 @@ async function bootstrapIdentity(customDisplayName?: string, customAvatarColor?:
         }
 
         if (hasKeys || !cryptoReady) {
+          // Even when IndexedDB reports keys, they may not be live CryptoKey
+          // instances — a known issue in some browsers / private modes. Re-import
+          // them from the JWK backup stored in localStorage.
+          if (cryptoReady) {
+            const pubValid = isRealCryptoKey(current.publicKeyECDSA);
+            const privValid = isRealCryptoKey(current.privateKeyECDSA);
+            if (!pubValid || !privValid) {
+              try {
+                await reimportIdentityKeys(current);
+              } catch (err) {
+                console.warn('Key re-import warning:', err);
+              }
+            }
+          }
+
           if (customDisplayName && !current.displayName) {
             current.displayName = customDisplayName;
             if (customAvatarColor) current.avatarColor = customAvatarColor;

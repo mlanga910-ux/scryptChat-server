@@ -482,7 +482,16 @@ export const PairingModal: React.FC<PairingModalProps> = ({
       await pollForHandshakeFinalize(cleanCode);
     } catch (err: any) {
       console.error('Join error:', err);
-      setErrorMsg(err.message || 'Pairing code not found or expired.');
+      const msg = String(err?.message || '');
+      if (/CryptoKey|SubtleCrypto|parameter 2/i.test(msg)) {
+        setErrorMsg(
+          'Cryptographic keys are corrupted. Go to Settings → Profile → Manage keys and regenerate them, or clear site data and re-onboard.'
+        );
+      } else if (/fetch|network|load failed|abort/i.test(msg) || !msg) {
+        setErrorMsg('Cannot reach the signaling server. Check your connection and try again.');
+      } else {
+        setErrorMsg(msg || 'Pairing code not found or expired.');
+      }
       setStatusMessage('');
     } finally {
       setIsConnecting(false);
