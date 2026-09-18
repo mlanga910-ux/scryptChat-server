@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   X,
   Volume2,
@@ -6,14 +6,9 @@ import {
   Play,
   Square,
   Mic,
-  Video,
-  Shield,
-  Radio,
   Sliders,
   Check,
   RotateCcw,
-  PhoneOff,
-  VideoOff,
 } from 'lucide-react';
 import {
   getSoundSettings,
@@ -22,74 +17,62 @@ import {
   SoundSettings,
   MessageSoundType,
   RingtoneType,
+  MESSAGE_TONES,
+  RINGTONE_PRESETS,
 } from '../utils/cyberSoundEngine';
-import { RelayStatus, ContactRecord } from '../types/index';
-import { db } from '../db/index';
-import {
-  getChatSettings,
-  saveChatSettings,
-  loadContactSettingsMap,
-  ChatCustomSettings,
-} from '../utils/chatSettings';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  relayStatus: RelayStatus;
-  relayPingMs?: number | null;
-  storageMode?: string;
-  secureContext?: boolean;
+  relayStatusText?: string;
+  vaultText?: string;
 }
 
-const MESSAGE_SOUNDS: { id: MessageSoundType; label: string; desc: string }[] = [
-  { id: 'neural_ping', label: 'Neural Ping', desc: 'Harmonic sine chirp with rapid exponential decay' },
-  { id: 'quantum_chime', label: 'Quantum Chime', desc: 'Resonant pure glass triad chord' },
-  { id: 'cyber_glitch', label: 'Cyber Glitch', desc: 'Frequency-modulated micro flutter' },
-  { id: 'glitch_ping', label: 'Glitch Ping', desc: 'Fast FM sawtooth tick' },
-  { id: 'laser_blip', label: 'Laser Blip', desc: 'Retro cyber downward blip' },
-  { id: 'sub_thud', label: 'Sub Thud', desc: 'Low-frequency punchy transient' },
-  { id: 'matrix_chime', label: 'Matrix Chime', desc: 'Multi-harmonic digital sequence' },
+type SettingsTab = 'audio' | 'calls';
+
+const TABS: { id: SettingsTab; label: string; hint: string; icon: React.ReactNode }[] = [
+  { id: 'audio', label: 'Audio', hint: 'Sounds & volume', icon: <Volume2 className="w-3.5 h-3.5" /> },
+  { id: 'calls', label: 'Calls', hint: 'Voice & video', icon: <Mic className="w-3.5 h-3.5" /> },
 ];
 
-const RINGTONES: { id: RingtoneType; label: string; desc: string }[] = [
-  { id: 'cyber_pulse', label: 'Cyber Pulse', desc: 'Arpeggiated high-frequency pulse' },
-  { id: 'neon_hologram', label: 'Neon Hologram', desc: 'Futuristic warm dual-chord progression' },
-  { id: 'sub_quantum', label: 'Sub-Quantum', desc: 'Deep bass pulse with high harmonic resonance' },
-  { id: 'cyber_alert', label: 'Cyber Alert', desc: 'High urgency dual-tone burst' },
-  { id: 'neon_synth', label: 'Neon Synth', desc: 'Smooth synth chord swell' },
-];
+const AUDIO_PRESETS = [
+  { id: 'opus_hd', label: 'Studio', hint: '128 kbps' },
+  { id: 'standard', label: 'Balanced', hint: '48 kbps' },
+  { id: 'eco', label: 'Data saver', hint: '24 kbps' },
+] as const;
 
+const VIDEO_PRESETS = [
+  { id: '1080p', label: '1080p', hint: 'Full HD' },
+  { id: '720p', label: '720p', hint: 'HD' },
+  { id: '480p', label: '480p', hint: 'Low data' },
+] as const;
+
+/**
+ * The settings window itself: custom notification sounds and call quality.
+ * Profile and About have their own windows.
+ */
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose,
-  relayStatus,
-  storageMode,
-  secureContext,
-  relayPingMs,
+  relayStatusText,
+  vaultText,
 }) => {
-  if (!isOpen) return null;
-
-  const [activeTab, setActiveTab] = useState<'audio' | 'calls' | 'privacy'>('audio');
-  const [settings, setSettings] = useState<SoundSettings>(getSoundSettings());
+  const [activeTab, setActiveTab] = useState<SettingsTab>('audio');
+  const [settings, setSettings] = useState<SoundSettings>(() => getSoundSettings());
   const [isPlayingRing, setIsPlayingRing] = useState(false);
-  const [activeTestTone, setActiveTestTone] = useState<string | null>(null);
-  const [contacts, setContacts] = useState<ContactRecord[]>([]);
-  const [contactSettingsMap, setContactSettingsMap] = useState<Record<string, ChatCustomSettings>>({});
 
   useEffect(() => {
-    if (!isOpen) return;
-    db.contacts.toArray().then((list) => {
-      setContacts(list);
-      setContactSettingsMap(loadContactSettingsMap(list));
-    });
+    if (isOpen) setSettings(getSoundSettings());
   }, [isOpen]);
 
-  const toggleContactBlock = (deviceId: string, field: 'blockVoiceCalls' | 'blockVideoCalls') => {
-    const current = contactSettingsMap[deviceId] || getChatSettings(deviceId);
-    const updated = { ...current, [field]: !current[field] };
-    saveChatSettings(deviceId, updated);
-    setContactSettingsMap((prev) => ({ ...prev, [deviceId]: updated }));
-  };
+  useEffect(() => {
+    if (!isOpen) {
+      soundEngine.stopRingtone();
+      setIsPlayingRing(false);
+    }
+  }, [isOpen]);
+
+  if (!isOpen) return null;
 
   const updateSetting = <K extends keyof SoundSettings>(key: K, value: SoundSettings[K]) => {
     const updated = { ...settings, [key]: value };
@@ -97,20 +80,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     saveSoundSettings(updated);
   };
 
-  const handleTestMessageTone = async (soundId: MessageSoundType) => {
-    setActiveTestTone(soundId);
-    await soundEngine.playMessageSound(soundId);
-    setTimeout(() => setActiveTestTone(null), 500);
-  };
-
-  const handleToggleRingtoneTest = async (ringId: RingtoneType) => {
+  const previewRingtone = async (ringtone: RingtoneType) => {
     if (isPlayingRing) {
       soundEngine.stopRingtone();
       setIsPlayingRing(false);
-    } else {
-      setIsPlayingRing(true);
-      await soundEngine.startIncomingRingtone(ringId);
+      return;
     }
+    updateSetting('ringtone', ringtone);
+    setIsPlayingRing(true);
+    await soundEngine.startIncomingRingtone(ringtone);
   };
 
   const handleClose = () => {
@@ -119,500 +97,275 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     onClose();
   };
 
-  const handleResetDefaults = () => {
-    const defaultSettings: SoundSettings = {
+  const resetAudio = () => {
+    const defaults: SoundSettings = {
+      ...settings,
       soundEnabled: true,
-      masterVolume: 0.85,
-      volume: 0.85,
-      ringtone: 'cyber_pulse',
-      ringtonePreset: 'cyber_pulse',
-      messageSound: 'neural_ping',
-      notificationPreset: 'neural_ping',
+      masterVolume: 0.75,
+      volume: 0.75,
+      messageSound: 'crystal_glass',
+      notificationPreset: 'crystal_glass',
+      ringtone: 'crystal_pulse',
+      ringtonePreset: 'crystal_pulse',
+      studioVoiceGate: true,
       audioPreset: 'opus_hd',
       videoQuality: '1080p',
-      noiseSuppression: true,
-      echoCancellation: true,
-      autoGainControl: true,
-      studioVoiceGate: true,
     };
-    setSettings(defaultSettings);
-    saveSoundSettings(defaultSettings);
+    setSettings(defaults);
+    saveSoundSettings(defaults);
   };
 
+  const sectionLabel = 'block text-[11px] font-semibold uppercase tracking-wider text-zinc-500 mb-2';
+  const segmented = (active: boolean) =>
+    `px-2.5 py-2 rounded-xl text-center transition-colors cursor-pointer border ${
+      active
+        ? 'border-transparent bg-[var(--sc-accent)] text-[var(--sc-on-accent)] font-semibold'
+        : 'border-zinc-800 bg-zinc-950/40 text-zinc-400 hover:text-white'
+    }`;
+  const switchBase =
+    'w-10 h-6 rounded-full transition-colors relative flex items-center p-0.5 shrink-0 cursor-pointer';
+
   return (
-    <div
-      id="settings-modal-backdrop"
-      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 select-none font-sans text-xs animate-in fade-in duration-150"
-    >
-      <div className="w-full max-w-xl h-[620px] max-h-[92vh] bg-zinc-950 border border-zinc-800 rounded-2xl shadow-xl flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 select-none font-sans text-xs animate-in fade-in duration-150">
+      <div className="w-full max-w-md h-[min(600px,92vh)] panel-surface border border-zinc-800 rounded-3xl shadow-[var(--sc-shadow-lg)] flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="px-5 py-4 border-b border-zinc-800 bg-zinc-950/50 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-white">
-              <Sliders className="w-4 h-4 text-white" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-white tracking-tight">
-                Settings
-              </h3>
-              <p className="text-[11px] text-zinc-500">
-                Audio, call quality, and network preferences
-              </p>
-            </div>
+        <div className="shrink-0 px-4 py-3.5 flex items-center gap-3 border-b border-zinc-800">
+          <div className="grid place-items-center h-8 w-8 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-300">
+            <Sliders className="w-4 h-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-semibold text-white tracking-tight">Settings</h2>
+            <p className="text-[10px] text-zinc-500">Sounds, notifications and call quality</p>
           </div>
           <button
-            id="close-settings-modal-btn"
             onClick={handleClose}
-            className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-900 rounded-lg transition-colors"
+            className="grid place-items-center h-8 w-8 rounded-full text-zinc-500 hover:text-white hover:bg-zinc-900 transition-colors cursor-pointer"
             aria-label="Close settings"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="grid grid-cols-3 border-b border-zinc-800 bg-zinc-950/50 p-1.5 gap-1.5 text-center shrink-0">
-          <button
-            id="tab-audio-settings"
-            onClick={() => setActiveTab('audio')}
-            className={`py-2 rounded-xl text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${
-              activeTab === 'audio'
-                ? 'bg-zinc-900 text-white border border-zinc-800 font-semibold shadow-sm'
-                : 'text-zinc-500 hover:text-white'
-            }`}
-            aria-label="Audio & Sounds"
-          >
-            <Volume2 className="w-3.5 h-3.5" />
-            <span>Audio &amp; Sounds</span>
-          </button>
-          <button
-            id="tab-calls-settings"
-            onClick={() => setActiveTab('calls')}
-            className={`py-2 rounded-xl text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${
-              activeTab === 'calls'
-                ? 'bg-zinc-900 text-white border border-zinc-800 font-semibold shadow-sm'
-                : 'text-zinc-500 hover:text-white'
-            }`}
-            aria-label="Call & Media"
-          >
-            <Mic className="w-3.5 h-3.5" />
-            <span>Call &amp; Media</span>
-          </button>
-          <button
-            id="tab-privacy-settings"
-            onClick={() => setActiveTab('privacy')}
-            className={`py-2 rounded-xl text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${
-              activeTab === 'privacy'
-                ? 'bg-zinc-900 text-white border border-zinc-800 font-semibold shadow-sm'
-                : 'text-zinc-500 hover:text-white'
-            }`}
-            aria-label="Network & Status"
-          >
-            <Radio className="w-3.5 h-3.5" />
-            <span>Network &amp; Status</span>
-          </button>
+        {/* Tabs */}
+        <div className="shrink-0 px-3 pt-3">
+          <div className="grid grid-cols-2 gap-1 p-1 rounded-2xl border border-zinc-800 bg-zinc-950/40">
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center justify-center gap-2 py-2 rounded-xl transition-colors cursor-pointer ${
+                  activeTab === tab.id
+                    ? 'bg-[var(--sc-accent)] text-[var(--sc-on-accent)] font-semibold'
+                    : 'text-zinc-500 hover:text-white'
+                }`}
+                aria-label={tab.label}
+                aria-current={activeTab === tab.id}
+              >
+                {tab.icon}
+                <span className="text-[11px] font-medium">{tab.label}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* Modal Body with Fixed Height & Smooth Scroll */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-5">
-          {/* TAB 1: AUDIO & SOUNDS */}
+        {/* Body */}
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4">
           {activeTab === 'audio' && (
             <div className="space-y-4">
-              {/* Master Volume Toggle */}
-              <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl flex items-center justify-between">
-                <div>
-                  <div className="font-semibold text-white text-xs">Audio Feedback</div>
-                  <div className="text-[11px] text-zinc-500 mt-0.5">
-                    Real-time procedural audio synthesis
-                  </div>
-                </div>
-                <button
-                  id="toggle-sound-enabled-btn"
-                  onClick={() => updateSetting('soundEnabled', !settings.soundEnabled)}
-                  className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 ${
-                    settings.soundEnabled ? 'bg-emerald-400' : 'bg-zinc-800'
-                  }`}
-                  aria-label={settings.soundEnabled ? 'Disable sounds' : 'Enable sounds'}
-                  aria-pressed={settings.soundEnabled}
-                >
-                  <div
-                    className={`w-5 h-5 rounded-full bg-black shadow-md transition-transform ${
-                      settings.soundEnabled ? 'translate-x-5' : 'translate-x-0'
-                    }`}
-                  />
-                </button>
-              </div>
-
-              {/* Volume Slider */}
-              <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-2">
+              <div className="p-3.5 rounded-2xl border border-zinc-800 bg-zinc-950/40 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="font-medium text-white text-xs">Master Volume</span>
-                  <span className="font-mono text-[11px] text-zinc-500">
-                    {Math.round((settings.masterVolume || 0.85) * 100)}%
-                  </span>
+                  <span className="font-medium text-white">Notification sounds</span>
+                  <button
+                    onClick={() => updateSetting('soundEnabled', !settings.soundEnabled)}
+                    className={`${switchBase} ${
+                      settings.soundEnabled ? 'bg-[var(--sc-e400)]' : 'bg-zinc-800'
+                    }`}
+                    aria-label="Toggle notification sounds"
+                    aria-pressed={settings.soundEnabled}
+                  >
+                    <span
+                      className={`w-5 h-5 rounded-full bg-zinc-950 shadow transition-transform ${
+                        settings.soundEnabled ? 'translate-x-4' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
                 </div>
-                <div className="flex items-center gap-3">
-                  <VolumeX className="w-4 h-4 text-zinc-500" />
+                <div className="flex items-center gap-2.5">
+                  <VolumeX className="w-4 h-4 text-zinc-500 shrink-0" />
                   <input
                     type="range"
                     min="0"
                     max="1"
                     step="0.05"
-                    value={settings.masterVolume ?? 0.85}
+                    value={settings.masterVolume ?? 0.75}
                     onChange={(e) => updateSetting('masterVolume', parseFloat(e.target.value))}
-                    className="flex-1 accent-emerald-400 h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
-                    aria-label="Master volume"
+                    className="flex-1 h-1.5 rounded-full accent-[var(--sc-e400)] cursor-pointer"
+                    aria-label="Volume"
                   />
-                  <Volume2 className="w-4 h-4 text-white" />
+                  <span className="w-8 text-right text-[11px] tabular-nums text-zinc-500">
+                    {Math.round((settings.masterVolume ?? 0.75) * 100)}%
+                  </span>
                 </div>
               </div>
 
-              {/* Message Sound Presets */}
-              <div className="space-y-2">
-                <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 block">
-                  Message Notification Tones
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {MESSAGE_SOUNDS.map((sound) => {
-                    const isSelected = settings.messageSound === sound.id;
-                    const isTesting = activeTestTone === sound.id;
+              <div>
+                <span className={sectionLabel}>Message tone</span>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {MESSAGE_TONES.map((tone) => {
+                    const selected = settings.messageSound === tone.id;
                     return (
-                      <div
-                        key={sound.id}
-                        onClick={() => updateSetting('messageSound', sound.id)}
-                        className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-2 ${
-                          isSelected
-                            ? 'bg-zinc-900 border-emerald-400/40 text-white shadow-sm'
-                            : 'bg-zinc-950/50 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-white'
+                      <button
+                        key={tone.id}
+                        onClick={() => {
+                          updateSetting('messageSound', tone.id);
+                          void soundEngine.playMessageSound(tone.id);
+                        }}
+                        className={`flex flex-col items-center gap-1.5 px-2 py-3 rounded-2xl border transition-colors cursor-pointer ${
+                          selected
+                            ? 'border-[var(--sc-e400)] bg-zinc-900'
+                            : 'border-zinc-800 bg-zinc-950/40 hover:border-zinc-700'
                         }`}
+                        aria-label={tone.label}
                       >
-                        <div className="min-w-0">
-                          <div className="font-semibold text-xs text-white truncate flex items-center gap-1.5">
-                            {isSelected && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
-                            <span>{sound.label}</span>
-                          </div>
-                          <div className="text-[10px] text-zinc-500 truncate mt-0.5">{sound.desc}</div>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleTestMessageTone(sound.id);
-                          }}
-                          className={`p-2 rounded-lg transition-colors shrink-0 ${
-                            isTesting
-                              ? 'bg-emerald-500 text-zinc-950'
-                              : 'bg-zinc-900 text-white hover:bg-zinc-800'
-                          }`}
-                          title="Test tone"
-                          aria-label={`Test ${sound.label}`}
-                        >
-                          <Play className="w-3 h-3" />
-                        </button>
-                      </div>
+                        {selected ? (
+                          <Check className="w-3.5 h-3.5 text-[var(--sc-e400)]" />
+                        ) : (
+                          <Volume2 className="w-3.5 h-3.5 text-zinc-500" />
+                        )}
+                        <span className="text-[11px] font-medium text-white">{tone.label}</span>
+                        <span className="text-[10px] text-zinc-500">{tone.desc}</span>
+                      </button>
                     );
                   })}
                 </div>
               </div>
 
-              {/* Ringtone Presets */}
-              <div className="space-y-2">
-                <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 block">
-                  Incoming Call Ringtones
-                </label>
-                <div className="space-y-2">
-                  {RINGTONES.map((ring) => {
-                    const isSelected = settings.ringtone === ring.id;
-                    const isTestingThis = isPlayingRing && isSelected;
+              <div>
+                <span className={sectionLabel}>Incoming call ringtone</span>
+                <div className="space-y-1.5">
+                  {RINGTONE_PRESETS.map((ring) => {
+                    const selected = settings.ringtone === ring.id;
+                    const playing = isPlayingRing && selected;
                     return (
                       <div
                         key={ring.id}
-                        onClick={() => updateSetting('ringtone', ring.id)}
-                        className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-2 ${
-                          isSelected
-                            ? 'bg-zinc-900 border-emerald-400/40 text-white shadow-sm'
-                            : 'bg-zinc-950/50 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-white'
+                        className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-2xl border transition-colors ${
+                          selected
+                            ? 'border-[var(--sc-e400)] bg-zinc-900'
+                            : 'border-zinc-800 bg-zinc-950/40'
                         }`}
                       >
-                        <div className="min-w-0">
-                          <div className="font-semibold text-xs text-white truncate flex items-center gap-1.5">
-                            {isSelected && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
-                            <span>{ring.label}</span>
-                          </div>
-                          <div className="text-[10px] text-zinc-500 truncate mt-0.5">{ring.desc}</div>
-                        </div>
-
                         <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            updateSetting('ringtone', ring.id);
-                            handleToggleRingtoneTest(ring.id);
-                          }}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors shrink-0 ${
-                            isTestingThis
-                              ? 'bg-rose-600 text-white animate-pulse'
-                              : 'bg-zinc-900 text-white hover:bg-zinc-800'
-                          }`}
-                          aria-label={isTestingThis ? `Stop ${ring.label}` : `Test ${ring.label}`}
+                          onClick={() => updateSetting('ringtone', ring.id)}
+                          className="flex-1 min-w-0 text-left cursor-pointer"
+                          aria-label={ring.label}
                         >
-                          {isTestingThis ? <Square className="w-3 h-3" /> : <Play className="w-3 h-3" />}
-                          <span>{isTestingThis ? 'Stop' : 'Test'}</span>
+                          <div className="flex items-center gap-1.5">
+                            {selected && (
+                              <Check className="w-3.5 h-3.5 text-[var(--sc-e400)] shrink-0" />
+                            )}
+                            <span className="text-[11px] font-medium text-white">{ring.label}</span>
+                          </div>
+                          <span className="text-[10px] text-zinc-500">{ring.desc}</span>
+                        </button>
+                        <button
+                          onClick={() => previewRingtone(ring.id)}
+                          className={`shrink-0 grid place-items-center h-7 w-7 rounded-full border transition-colors cursor-pointer ${
+                            playing
+                              ? 'border-transparent bg-rose-500/90 text-white'
+                              : 'border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-700'
+                          }`}
+                          aria-label={playing ? `Stop ${ring.label}` : `Preview ${ring.label}`}
+                        >
+                          {playing ? <Square className="w-3 h-3" /> : <Play className="w-3 h-3" />}
                         </button>
                       </div>
                     );
                   })}
                 </div>
               </div>
+
+              <button
+                onClick={resetAudio}
+                className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-zinc-800 text-[11px] text-zinc-500 hover:text-white hover:border-zinc-700 transition-colors cursor-pointer"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Reset sound defaults</span>
+              </button>
             </div>
           )}
 
-          {/* TAB 2: CALL & MEDIA STUDIO QUALITY */}
           {activeTab === 'calls' && (
             <div className="space-y-4">
-              {/* Studio Voice Engine */}
-              <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-semibold text-white text-xs">Studio Voice &amp; Noise Isolation</div>
-                    <div className="text-[11px] text-zinc-500 mt-0.5">
-                      DSP dynamic voice gate &amp; active background noise filtering
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => updateSetting('studioVoiceGate', !settings.studioVoiceGate)}
-                    className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 ${
-                      settings.studioVoiceGate ? 'bg-emerald-400' : 'bg-zinc-800'
-                    }`}
-                    aria-label={settings.studioVoiceGate ? 'Disable voice gate' : 'Enable voice gate'}
-                    aria-pressed={settings.studioVoiceGate}
-                  >
-                    <div
-                      className={`w-5 h-5 rounded-full bg-black shadow-md transition-transform ${
-                        settings.studioVoiceGate ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 pt-1 border-t border-zinc-800">
-                  <div className="flex items-center justify-between p-2 bg-zinc-900 rounded-lg">
-                    <span className="text-[10px] text-zinc-500">Echo Cancellation</span>
-                    <span className="text-emerald-400 font-bold text-[10px]">ON</span>
-                  </div>
-                  <div className="flex items-center justify-between p-2 bg-zinc-900 rounded-lg">
-                    <span className="text-[10px] text-zinc-500">Noise Suppression</span>
-                    <span className="text-emerald-400 font-bold text-[10px]">ON</span>
-                  </div>
-                  <div className="flex items-center justify-between p-2 bg-zinc-900 rounded-lg">
-                    <span className="text-[10px] text-zinc-500">Auto Gain Control</span>
-                    <span className="text-emerald-400 font-bold text-[10px]">ON</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Audio Fidelity Preset */}
-              <div className="space-y-2">
-                <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 block">
-                  Audio Codec Quality
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { id: 'opus_hd', label: 'Opus HD Studio', desc: '128 kbps 48kHz Stereo' },
-                    { id: 'standard', label: 'Standard Voice', desc: '48 kbps Mono' },
-                    { id: 'eco', label: 'Low Bandwidth', desc: '24 kbps Narrow' },
-                  ].map((preset) => (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      onClick={() => updateSetting('audioPreset', preset.id as any)}
-                      className={`p-3 rounded-xl border text-left transition-all ${
-                        settings.audioPreset === preset.id
-                          ? 'bg-zinc-900 border-emerald-400/40 text-white font-semibold shadow-sm'
-                          : 'bg-zinc-950/50 border-zinc-800 text-zinc-500 hover:text-white'
-                      }`}
-                      aria-label={preset.label}
-                    >
-                      <div className="text-xs font-semibold text-white">{preset.label}</div>
-                      <div className="text-[10px] opacity-70 mt-0.5">{preset.desc}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Video Resolution */}
-              <div className="space-y-2">
-                <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 block">
-                  Video Call Resolution
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { id: '1080p', label: 'Full HD 1080p', desc: '60 fps VP9/H.264' },
-                    { id: '720p', label: 'HD 720p', desc: '30 fps Balanced' },
-                    { id: '480p', label: 'SD 480p', desc: 'Low Data Usage' },
-                  ].map((v) => (
-                    <button
-                      key={v.id}
-                      type="button"
-                      onClick={() => updateSetting('videoQuality', v.id as any)}
-                      className={`p-3 rounded-xl border text-left transition-all ${
-                        settings.videoQuality === v.id
-                          ? 'bg-zinc-900 border-emerald-400/40 text-white font-semibold shadow-sm'
-                          : 'bg-zinc-950/50 border-zinc-800 text-zinc-500 hover:text-white'
-                      }`}
-                      aria-label={v.label}
-                    >
-                      <div className="text-xs font-semibold text-white">{v.label}</div>
-                      <div className="text-[10px] opacity-70 mt-0.5">{v.desc}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Call & Video Call Blocking List */}
-              <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-3">
-                <div>
-                  <div className="font-semibold text-white text-xs flex items-center gap-1.5">
-                    <PhoneOff className="w-3.5 h-3.5 text-rose-400" />
-                    <span>Call &amp; Video Call Blocking</span>
-                  </div>
-                  <p className="text-[11px] text-zinc-500 mt-0.5">
-                    Prevent specific contacts from calling your device.
+              <div className="p-3.5 rounded-2xl border border-zinc-800 bg-zinc-950/40 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-medium text-white">Voice isolation</div>
+                  <p className="text-[10px] text-zinc-500 mt-0.5">
+                    Echo, noise and gain control while calling
                   </p>
                 </div>
-
-                {contacts.length === 0 ? (
-                  <p className="text-[11px] text-zinc-600 italic py-1">
-                    No contacts paired yet.
-                  </p>
-                ) : (
-                  <div className="space-y-2 pt-1 border-t border-zinc-800 max-h-48 overflow-y-auto pr-1">
-                    {contacts.map((c) => {
-                      const cSet = contactSettingsMap[c.deviceId] || getChatSettings(c.deviceId);
-                      const isVoiceBlocked = !!cSet.blockVoiceCalls;
-                      const isVideoBlocked = !!cSet.blockVideoCalls;
-                      return (
-                        <div
-                          key={c.deviceId}
-                          className="flex items-center justify-between p-2.5 bg-zinc-950 border border-zinc-800 rounded-xl gap-2"
-                        >
-                          <div className="min-w-0 flex-1">
-                            <div className="font-medium text-white text-xs truncate">
-                              {c.alias || c.deviceId}
-                            </div>
-                            <div className="font-mono text-[10px] text-zinc-500 truncate">
-                              {c.deviceId}
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => toggleContactBlock(c.deviceId, 'blockVoiceCalls')}
-                              className={`px-2 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1 ${
-                                isVoiceBlocked
-                                  ? 'bg-rose-950/40 text-rose-400 border border-rose-800/60'
-                                  : 'bg-zinc-900 text-zinc-500 border border-zinc-800 hover:text-white'
-                              }`}
-                              title={isVoiceBlocked ? 'Unblock Voice Calls' : 'Block Voice Calls'}
-                              aria-label={isVoiceBlocked ? 'Unblock voice calls' : 'Block voice calls'}
-                            >
-                              <PhoneOff className="w-3 h-3" />
-                              <span>{isVoiceBlocked ? 'Calls Blocked' : 'Block Calls'}</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => toggleContactBlock(c.deviceId, 'blockVideoCalls')}
-                              className={`px-2 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1 ${
-                                isVideoBlocked
-                                  ? 'bg-rose-950/40 text-rose-400 border border-rose-800/60'
-                                  : 'bg-zinc-900 text-zinc-500 border border-zinc-800 hover:text-white'
-                              }`}
-                              title={isVideoBlocked ? 'Unblock Video Calls' : 'Block Video Calls'}
-                              aria-label={isVideoBlocked ? 'Unblock video calls' : 'Block video calls'}
-                            >
-                              <VideoOff className="w-3 h-3" />
-                              <span>{isVideoBlocked ? 'Video Blocked' : 'Block Video'}</span>
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: NETWORK & STATUS */}
-          {activeTab === 'privacy' && (
-            <div className="space-y-4">
-              <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-zinc-500">Signaling Server Status</span>
-                  <div className="flex items-center gap-2">
-                    <div
-                      className={`w-2 h-2 rounded-full ${
-                        relayStatus === 'ONLINE'
-                          ? 'bg-emerald-400 animate-pulse'
-                          : relayStatus === 'CONNECTING'
-                          ? 'bg-amber-400'
-                          : 'bg-rose-500'
-                      }`}
-                    />
-                    <span className="font-mono text-xs text-white">{relayStatus}</span>
-                  </div>
-                </div>
-
-                {relayPingMs !== null && relayPingMs !== undefined && (
-                  <div className="flex items-center justify-between pt-2 border-t border-zinc-800">
-                    <span className="text-xs text-zinc-500">Signaling Latency</span>
-                    <span className="font-mono text-xs text-emerald-400 font-semibold">
-                      {relayPingMs} ms
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-2">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs text-zinc-500">Local vault</span>
-                  <span className="font-mono text-xs text-white text-right">
-                    {storageMode || '—'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs text-zinc-500">Device keys</span>
-                  <span className="font-mono text-xs text-white text-right">
-                    {secureContext === false ? 'Unavailable (needs https)' : 'WebCrypto P-256'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-zinc-500">Transport</span>
-                  <span className="font-mono text-xs text-white">WebRTC / data channel</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-zinc-500">Cipher</span>
-                  <span className="font-mono text-xs text-white">AES-256-GCM</span>
-                </div>
-              </div>
-
-              <div className="pt-2">
                 <button
-                  type="button"
-                  onClick={handleResetDefaults}
-                  className="flex items-center justify-center gap-2 w-full py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white border border-zinc-800 rounded-xl text-xs font-medium transition-colors"
-                  aria-label="Restore factory defaults"
+                  onClick={() => updateSetting('studioVoiceGate', !settings.studioVoiceGate)}
+                  className={`${switchBase} ${
+                    settings.studioVoiceGate ? 'bg-[var(--sc-e400)]' : 'bg-zinc-800'
+                  }`}
+                  aria-label="Toggle voice isolation"
+                  aria-pressed={!!settings.studioVoiceGate}
                 >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Restore Factory Defaults</span>
+                  <span
+                    className={`w-5 h-5 rounded-full bg-zinc-950 shadow transition-transform ${
+                      settings.studioVoiceGate ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
                 </button>
               </div>
+
+              <div>
+                <span className={sectionLabel}>Call audio quality</span>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {AUDIO_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      onClick={() => updateSetting('audioPreset', preset.id)}
+                      className={segmented(settings.audioPreset === preset.id)}
+                      aria-label={preset.label}
+                    >
+                      <span className="block text-[11px] font-medium">{preset.label}</span>
+                      <span className="block text-[10px] opacity-70">{preset.hint}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <span className={sectionLabel}>Video call quality</span>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {VIDEO_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      onClick={() => updateSetting('videoQuality', preset.id)}
+                      className={segmented(settings.videoQuality === preset.id)}
+                      aria-label={preset.label}
+                    >
+                      <span className="block text-[11px] font-medium">{preset.label}</span>
+                      <span className="block text-[10px] opacity-70">{preset.hint}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <p className="text-[10px] text-zinc-600 leading-relaxed">
+                Calls are peer to peer. On the same network they never leave your LAN.
+              </p>
             </div>
           )}
         </div>
+
+        {(relayStatusText || vaultText) && (
+          <div className="shrink-0 px-4 py-2.5 border-t border-zinc-800 text-center text-[10px] text-zinc-600 tabular-nums">
+            {[relayStatusText, vaultText].filter(Boolean).join(' · ')}
+          </div>
+        )}
       </div>
     </div>
   );

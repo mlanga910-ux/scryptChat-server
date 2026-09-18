@@ -94,6 +94,9 @@ html.light {
   --sc-warning: #d97706;
 
   --sc-canvas: #f4f4f6;
+  /* Raised content (cards, tables, viewer rows) vs. their insets. */
+  --sc-surface: #ffffff;
+  --sc-surface-2: #f5f5f6;
   --sc-bubble-in-bg: #ffffff;
   --sc-bubble-in-fg: #18181b;
   --sc-bubble-in-border: #e7e7ea;
@@ -150,6 +153,8 @@ html.dark {
   --sc-warning: #f59e0b;
 
   --sc-canvas: #0b0b0d;
+  --sc-surface: #141417;
+  --sc-surface-2: #101013;
   --sc-bubble-in-bg: #1a1a1f;
   --sc-bubble-in-fg: #f2f2f4;
   --sc-bubble-in-border: rgba(255, 255, 255, 0.05);

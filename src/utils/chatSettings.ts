@@ -16,23 +16,16 @@ export type { MessageSoundType, RingtoneType };
 
 export interface ChatCustomSettings {
   blurMedia: boolean;
-  autoDownloadMedia: boolean;
   muteNotifications: boolean;
   customSound: MessageSoundType | 'default';
-  /** 0 = off, 3600 = 1h, 86400 = 24h, 604800 = 7d */
-  disappearingTimerSeconds: number;
-  privateNotes: string;
   blockVoiceCalls: boolean;
   blockVideoCalls: boolean;
 }
 
 export const DEFAULT_CHAT_SETTINGS: ChatCustomSettings = {
   blurMedia: false,
-  autoDownloadMedia: true,
   muteNotifications: false,
   customSound: 'default',
-  disappearingTimerSeconds: 0,
-  privateNotes: '',
   blockVoiceCalls: false,
   blockVideoCalls: false,
 };

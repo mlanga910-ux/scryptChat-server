@@ -21,8 +21,13 @@ import {
 import { CryptoSession } from '../crypto/session';
 import { extractImageExif } from '../utils/exifParser';
 
-export const CHUNK_SIZE = 512 * 1024; // 512 KB frames: fewer encrypt/ACK round trips, ~2x throughput on LAN
-const MAX_BUFFERED_AMOUNT = 16 * 1024 * 1024; // 16 MB in-flight window keeps fast LAN links saturated
+export const CHUNK_SIZE = 512 * 1024; // Default 512 KB frames: fewer encrypt/ACK round trips
+/** Biggest frame we will build, even on a very fast link. */
+export const MAX_CHUNK_SIZE = 2 * 1024 * 1024;
+/** Smallest frame, so a slow link still gets pipelined packets. */
+export const MIN_CHUNK_SIZE = 32 * 1024;
+const MAX_BUFFERED_AMOUNT = 16 * 1024 * 1024; // In-flight window for the internet path
+const LAN_BUFFERED_AMOUNT = 48 * 1024 * 1024; // Deeper window when host-to-host
 const CHUNK_TIMEOUT_MS = 10000; // Resend chunk if ACK not received within 10s
 const ACK_WAIT_TIMEOUT_MS = 15000; // Total wait for final ACK before declaring complete
 const MAX_CHUNK_RETRIES = 3; // Maximum retransmission attempts per chunk
@@ -32,6 +37,38 @@ export interface FileTransferEvents {
   onProgress?: (progress: FileTransferProgress) => void;
   onCompleted?: (fileRecord: FileRecord, blob: Blob) => void;
   onError?: (fileId: string, error: string) => void;
+}
+
+export interface TransferOptions {
+  /**
+   * True when both devices are on the same network (host-to-host ICE pair).
+   * Frames get bigger and the in-flight window deeper, because there is no
+   * uplink to saturate and no relay in the way.
+   */
+  isLan?: boolean;
+  /** Force a frame size (tests, or a caller that already measured the link). */
+  chunkSize?: number;
+}
+
+/**
+ * Picks the frame size for a link.
+ *
+ * Bigger frames mean fewer encrypt calls, fewer SCTP messages and far fewer
+ * ACK round trips — which is exactly what a LAN needs. They are capped by the
+ * channel's own maximum message size (browsers disagree: Chromium reports
+ * 256 KB, others 64 KB) and by a ceiling so a weak device never has to
+ * allocate a huge frame.
+ */
+export function pickChunkSize(dataChannel: RTCDataChannel, options?: TransferOptions): number {
+  if (options?.chunkSize) {
+    return Math.max(MIN_CHUNK_SIZE, Math.min(MAX_CHUNK_SIZE, options.chunkSize));
+  }
+  // Not in every TS DOM lib yet, but every browser ships it at runtime.
+  const reported = Number((dataChannel as any).maxMessageSize) || 0;
+  // Leave room for the packet header and AEAD tag.
+  const ceiling = reported > 4096 ? reported - 2048 : MAX_CHUNK_SIZE;
+  const desired = options?.isLan ? 1024 * 1024 : CHUNK_SIZE;
+  return Math.max(MIN_CHUNK_SIZE, Math.min(desired, MAX_CHUNK_SIZE, ceiling));
 }
 
 interface PendingChunk {
@@ -62,8 +99,21 @@ export class FileTransferManager {
       fileIdBigInt: bigint;
       fileBytes: Uint8Array;
       events?: FileTransferEvents;
+      chunkSize: number;
+      maxBufferedAmount: number;
     }
   > = new Map();
+
+  /**
+   * The peer manager tells us when the current link is host-to-host. It only
+   * affects tuning (frame size, in-flight window) — never the wire format — so
+   * a stale hint can never break a transfer.
+   */
+  private lanHint = false;
+
+  public setLanHint(isLan: boolean): void {
+    this.lanHint = isLan;
+  }
 
   public getTransfer(fileId: string): FileTransferProgress | undefined {
     return this.activeTransfers.get(fileId);
@@ -107,7 +157,7 @@ export class FileTransferManager {
    * Uses the native `bufferedamountlow` signal so the send loop resumes on the
    * very next packet instead of after a polling tick.
    */
-  private waitForDrain(dataChannel: RTCDataChannel): Promise<void> {
+  private waitForDrain(dataChannel: RTCDataChannel, maxBufferedAmount = MAX_BUFFERED_AMOUNT): Promise<void> {
     return new Promise<void>((resolve) => {
       let settled = false;
       let poll: ReturnType<typeof setInterval> | undefined;
@@ -118,12 +168,13 @@ export class FileTransferManager {
         dataChannel.removeEventListener('bufferedamountlow', done);
         resolve();
       };
-      const lowWaterMark = Math.min(4 * 1024 * 1024, MAX_BUFFERED_AMOUNT / 2);
+      const lowWaterMark = Math.min(4 * 1024 * 1024, Math.floor(maxBufferedAmount / 2));
       dataChannel.bufferedAmountLowThreshold = lowWaterMark;
       dataChannel.addEventListener('bufferedamountlow', done);
+      // Short poll as a safety net for engines that never fire the event.
       poll = setInterval(() => {
         if (dataChannel.readyState !== 'open' || dataChannel.bufferedAmount <= lowWaterMark) done();
-      }, 20);
+      }, 8);
     });
   }
 
@@ -131,9 +182,9 @@ export class FileTransferManager {
   private sliceChunk(fileId: string, chunkIdx: number): Uint8Array | null {
     const ctx = this.transferContext.get(fileId);
     if (!ctx) return null;
-    const start = chunkIdx * CHUNK_SIZE;
+    const start = chunkIdx * ctx.chunkSize;
     if (start >= ctx.fileBytes.byteLength) return null;
-    const end = Math.min(start + CHUNK_SIZE, ctx.fileBytes.byteLength);
+    const end = Math.min(start + ctx.chunkSize, ctx.fileBytes.byteLength);
     return ctx.fileBytes.slice(start, end);
   }
 
@@ -154,8 +205,9 @@ export class FileTransferManager {
 
     // Backpressure first: encrypting while the socket buffer is full would just
     // hold finished frames in memory.
-    if (dataChannel.bufferedAmount > MAX_BUFFERED_AMOUNT) {
-      await this.waitForDrain(dataChannel);
+    const windowLimit = this.transferContext.get(fileId)?.maxBufferedAmount ?? MAX_BUFFERED_AMOUNT;
+    if (dataChannel.bufferedAmount > windowLimit) {
+      await this.waitForDrain(dataChannel, windowLimit);
     }
 
     const encryptedChunkFrame = await session.encryptFrame(chunkPacketHeader, chunkBytes);
@@ -215,12 +267,20 @@ export class FileTransferManager {
     file: File,
     dataChannel: RTCDataChannel,
     session: CryptoSession,
-    events?: FileTransferEvents
+    events?: FileTransferEvents,
+    options?: TransferOptions
   ): Promise<FileRecord> {
     const arrayBuf = await file.arrayBuffer();
     const fileBytes = new Uint8Array(arrayBuf);
     const hashBytes = await sha256(fileBytes);
     const hashHex = arrayBufferToHex(hashBytes);
+
+    // Frame size and in-flight window are chosen per link, not globally.
+    const isLan = options?.isLan ?? this.lanHint;
+    const chunkSize = pickChunkSize(dataChannel, { ...options, isLan });
+    const maxBufferedAmount = isLan
+      ? LAN_BUFFERED_AMOUNT
+      : Math.max(MAX_BUFFERED_AMOUNT, chunkSize * 12);
 
     // Generate 64-bit Hex FileID (16 hex chars)
     const fileIdBigInt = BigInt(
@@ -231,7 +291,7 @@ export class FileTransferManager {
     );
     const fileId = fileIdBigInt.toString(16).padStart(16, '0').toUpperCase();
 
-    const totalChunks = Math.ceil(fileBytes.byteLength / CHUNK_SIZE);
+    const totalChunks = Math.ceil(fileBytes.byteLength / chunkSize);
     const mime = file.type || 'application/octet-stream';
     const isImage = mime.startsWith('image/');
     const isAudio = mime.startsWith('audio/');
@@ -253,7 +313,7 @@ export class FileTransferManager {
       mimeType: mime,
       hashSHA256: hashHex,
       totalChunks,
-      chunkSize: CHUNK_SIZE,
+      chunkSize,
     };
 
     const progress: FileTransferProgress = {
@@ -277,7 +337,15 @@ export class FileTransferManager {
     this.outgoingAckResolvers.set(fileId, new Map());
     this.receivedAcks.set(fileId, new Set());
     this.pendingChunks.set(fileId, new Map());
-    this.transferContext.set(fileId, { dataChannel, session, fileIdBigInt, fileBytes, events });
+    this.transferContext.set(fileId, {
+      dataChannel,
+      session,
+      fileIdBigInt,
+      fileBytes,
+      events,
+      chunkSize,
+      maxBufferedAmount,
+    });
     events?.onProgress?.({ ...progress });
 
     try {
@@ -304,24 +372,39 @@ export class FileTransferManager {
           throw new Error('File transfer cancelled by user');
         }
 
-        const start = chunkIdx * CHUNK_SIZE;
-        const end = Math.min(start + CHUNK_SIZE, fileBytes.byteLength);
+        const start = chunkIdx * chunkSize;
+        const end = Math.min(start + chunkSize, fileBytes.byteLength);
         const chunkBytes = fileBytes.slice(start, end);
 
         await this.sendChunkWithRetry(
           fileId, fileIdBigInt, chunkIdx, chunkBytes, dataChannel, session
         );
 
-        // Update progress - use chunk size for accurate speed calculation
+        // Update progress from the real byte count (frames may vary in size).
         const transferred = chunkIdx + 1;
         const pct = Math.round((transferred / totalChunks) * 100);
         const elapsedSec = (Date.now() - startTime) / 1000;
-        const speed = elapsedSec > 0 ? (transferred * CHUNK_SIZE) / elapsedSec : 0;
+        const sentBytes = Math.min(end + 1, fileBytes.byteLength);
+        const speed = elapsedSec > 0 ? sentBytes / elapsedSec : 0;
 
+        const lastPct = progress.progressPercent;
         progress.transferredChunks = transferred;
         progress.progressPercent = pct;
         progress.speedBps = speed;
-        events?.onProgress?.({ ...progress });
+
+        // Adaptive window: when the link clearly keeps up, let more data sit in
+        // flight. The window only gates us, so growing it is always safe — and
+        // it is what actually unlocks LAN speed (less waiting per ACK).
+        const ctx = this.transferContext.get(fileId);
+        if (ctx && speed > 8 * 1024 * 1024 && ctx.maxBufferedAmount < LAN_BUFFERED_AMOUNT) {
+          ctx.maxBufferedAmount = Math.min(LAN_BUFFERED_AMOUNT, ctx.maxBufferedAmount * 2);
+        }
+
+        // Repainting the chat on every frame would cost more than the transfer
+        // itself, so a big file reports on percent changes and every 32 frames.
+        if (pct !== lastPct || chunkIdx % 32 === 0 || transferred === totalChunks) {
+          events?.onProgress?.({ ...progress });
+        }
       }
 
       // Wait for final chunk ACK with configurable timeout

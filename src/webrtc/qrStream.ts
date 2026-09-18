@@ -110,31 +110,42 @@ export function scanCanvasForQr(canvas: HTMLCanvasElement): string | null {
   return code ? code.data : null;
 }
 
+/**
+ * Room codes are 6 characters for one-time pairing and longer for permanent
+ * links, so every matcher accepts 6–12 characters.
+ */
+const CODE_PATTERN = '([A-Z0-9]{6,12})';
+
+/**
+ * Pulls a pairing code out of anything a QR code might carry: the bare code, a
+ * JSON payload, a URL with ?room=... / #room=... / /room/..., or the
+ * scryptchat: custom protocol.
+ */
 export function extractRoomCodeFromScannedText(text: string): string | null {
   if (!text) return null;
   const trimmed = text.trim();
 
-  // 1. Direct 6-character code
-  if (/^[A-Z0-9]{6}$/i.test(trimmed)) {
+  // 1. Direct code
+  if (/^[A-Z0-9]{6,12}$/i.test(trimmed)) {
     return trimmed.toUpperCase();
   }
 
   // 2. JSON payload
   try {
     const obj = JSON.parse(trimmed);
-    if (obj && typeof obj.room === 'string' && /^[A-Z0-9]{6}$/i.test(obj.room.trim())) {
+    if (obj && typeof obj.room === 'string' && /^[A-Z0-9]{6,12}$/i.test(obj.room.trim())) {
       return obj.room.trim().toUpperCase();
     }
   } catch {}
 
-  // 3. URL parameter or hash
-  const urlMatch = trimmed.match(/[?&#/]room[=/]([A-Z0-9]{6})/i);
+  // 3. URL parameter, hash, or path segment
+  const urlMatch = trimmed.match(new RegExp(`[?&#/]room[=/]${CODE_PATTERN}`, 'i'));
   if (urlMatch && urlMatch[1]) {
     return urlMatch[1].toUpperCase();
   }
 
   // 4. Custom protocol scryptchat:CODE
-  const scryptMatch = trimmed.match(/scryptchat:([A-Z0-9]{6})/i);
+  const scryptMatch = trimmed.match(/scryptchat:([A-Z0-9]{6,12})/i);
   if (scryptMatch && scryptMatch[1]) {
     return scryptMatch[1].toUpperCase();
   }

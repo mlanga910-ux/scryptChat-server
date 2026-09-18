@@ -9,6 +9,44 @@ export type PresenceState =
   | 'lan'
   | 'offline';
 
+/** Presence you can pick for yourself, shown to every contact. */
+export type StatusTone = 'online' | 'busy' | 'away' | 'info';
+
+export interface StatusPreset {
+  label: string;
+  tone: StatusTone;
+}
+
+export const STATUS_PRESETS: StatusPreset[] = [
+  { label: 'Online', tone: 'online' },
+  { label: 'Busy', tone: 'busy' },
+  { label: 'Away', tone: 'away' },
+  { label: 'In a meeting', tone: 'busy' },
+  { label: 'Do not disturb', tone: 'busy' },
+  { label: 'On mobile', tone: 'info' },
+  { label: 'Working remotely', tone: 'info' },
+];
+
+const STATUS_TONES: Record<string, StatusTone> = STATUS_PRESETS.reduce(
+  (acc, preset) => ({ ...acc, [preset.label.toLowerCase()]: preset.tone }),
+  {} as Record<string, StatusTone>
+);
+
+/** Tone for a status label, defaulting to a neutral online dot. */
+export function statusTone(status?: string | null): StatusTone {
+  if (!status) return 'online';
+  return STATUS_TONES[status.trim().toLowerCase()] || 'online';
+}
+
+/** CSS colour for a status dot, following the active theme. */
+export function statusColor(status?: string | null): string {
+  const tone = statusTone(status);
+  if (tone === 'busy') return 'var(--sc-danger)';
+  if (tone === 'away') return 'var(--sc-warning)';
+  if (tone === 'info') return 'var(--sc-fg-muted)';
+  return 'var(--sc-e400)';
+}
+
 export interface PresenceInfo {
   state: PresenceState;
   /** Short label for chips and headers. */

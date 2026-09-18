@@ -5,9 +5,9 @@ import {
   Check,
   ChevronDown,
   Copy,
+  Info,
   Moon,
   Plus,
-  Shield,
   Sliders,
   Sun,
   Trash2,
@@ -28,9 +28,9 @@ interface TerminalHeaderProps {
   currentMobileTab: 'peers' | 'chat';
   onMobileTabChange: (tab: 'peers' | 'chat') => void;
   onOpenPairing: () => void;
-  onOpenSecurity: () => void;
   onOpenProfile: () => void;
   onOpenSettings: () => void;
+  onOpenAbout: () => void;
   onOpenWipe: () => void;
 }
 
@@ -46,9 +46,9 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   currentMobileTab,
   onMobileTabChange,
   onOpenPairing,
-  onOpenSecurity,
   onOpenProfile,
   onOpenSettings,
+  onOpenAbout,
   onOpenWipe,
 }) => {
   const { theme, toggleTheme } = useTheme();
@@ -257,22 +257,22 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
               <button
                 onClick={() => {
                   setIsMenuOpen(false);
-                  onOpenSecurity();
-                }}
-                className={`${menuItem} text-zinc-300 hover:text-white hover:bg-zinc-900`}
-              >
-                <Shield className="w-3.5 h-3.5" />
-                <span>Safety number</span>
-              </button>
-              <button
-                onClick={() => {
-                  setIsMenuOpen(false);
                   onOpenSettings();
                 }}
                 className={`${menuItem} text-zinc-300 hover:text-white hover:bg-zinc-900`}
               >
                 <Sliders className="w-3.5 h-3.5" />
                 <span>Settings</span>
+              </button>
+              <button
+                onClick={() => {
+                  setIsMenuOpen(false);
+                  onOpenAbout();
+                }}
+                className={`${menuItem} text-zinc-300 hover:text-white hover:bg-zinc-900`}
+              >
+                <Info className="w-3.5 h-3.5" />
+                <span>About</span>
               </button>
               <div className="my-1 h-px bg-zinc-800" />
               <button
