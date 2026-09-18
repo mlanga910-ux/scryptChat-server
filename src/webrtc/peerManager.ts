@@ -30,6 +30,7 @@ import {
   generateEphemeralECDH,
   importPeerECDHKey,
   importPeerECDSAKey,
+  reimportIdentityKeys,
 } from '../crypto/keys';
 import {
   computeSafetyNumber,
@@ -1046,8 +1047,18 @@ export class PeerManager {
    * Browsers without WebCrypto (an insecure context) get a clear message
    * instead of an obscure crypto failure.
    */
-  private requireSigningKey(): CryptoKey {
-    const key = this.identity.privateKeyECDSA;
+  private async requireSigningKey(): Promise<CryptoKey> {
+    let key = this.identity.privateKeyECDSA;
+    // IndexedDB can sometimes hand back a plain-object stub instead of a live
+    // CryptoKey.  When that happens, re-import from the JWK in localStorage.
+    if (key && !(key instanceof CryptoKey)) {
+      try {
+        await reimportIdentityKeys(this.identity);
+        key = this.identity.privateKeyECDSA;
+      } catch (err) {
+        console.warn('Auto-recovery of signing key failed:', err);
+      }
+    }
     if (!key) {
       throw new Error(
         'Secure pairing needs WebCrypto. Open scryptChat over https (or localhost) to pair devices.'
@@ -1156,7 +1167,7 @@ export class PeerManager {
       sdpFingerprintSHA256: sdpHash,
     });
 
-    const signingKey = this.requireSigningKey();
+    const signingKey = await this.requireSigningKey();
     const signature = await signTranscriptHash(signingKey, transcriptHash);
 
     const peerEphemeralCryptoKey = await importPeerECDHKey(offerData.ephemeralPublicKeyRaw);
@@ -1251,7 +1262,8 @@ export class PeerManager {
       throw new Error('SECURITY ALERT: Cryptographic signature verification failed!');
     }
 
-    const ourSignature = await signTranscriptHash(this.requireSigningKey(), transcriptHash);
+    const signingKey = await this.requireSigningKey();
+    const ourSignature = await signTranscriptHash(signingKey, transcriptHash);
     const peerEphemeralCryptoKey = await importPeerECDHKey(answerData.ephemeralPublicKeyRaw);
     const sessionKeys = await deriveSessionKeys(
       this.ephemeralKeyPair.privateKey,

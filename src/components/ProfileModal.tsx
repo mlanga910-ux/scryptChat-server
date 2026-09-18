@@ -16,6 +16,7 @@ import {
   Github,
   Send,
   AtSign,
+  AlertTriangle,
 } from 'lucide-react';
 import { updateIdentityProfile } from '../crypto/keys';
 import { fileToAvatarDataUrl } from '../utils/imageHelper';
@@ -411,6 +412,40 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             <p className="mt-1 font-mono text-[11px] text-zinc-500 break-all select-all">
               {identity?.deviceId}
             </p>
+          </div>
+
+          {/* Key Regeneration — recovery when IndexedDB returns corrupt keys */}
+          <div className="p-3 rounded-2xl border border-amber-900/40 bg-amber-950/20">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+              <div className="space-y-2">
+                <p className="text-[11px] text-amber-200/80 leading-relaxed">
+                  If pairing fails with a <code className="font-mono text-amber-300">SubtleCrypto</code> or
+                  <code className="font-mono text-amber-300"> CryptoKey</code> error, your local keys may be
+                  corrupted. Regenerating fixes pairing but requires you to re-pair all contacts.
+                </p>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!confirm('Regenerate signing keys? All contacts will need to be re-paired.')) return;
+                    try {
+                      localStorage.removeItem('scryptchat_permanent_priv_jwk');
+                      localStorage.removeItem('scryptchat_permanent_pub_raw');
+                      localStorage.removeItem('scryptchat_permanent_device_id');
+                      const { resetIdentityBootstrap } = await import('../crypto/keys');
+                      resetIdentityBootstrap();
+                      alert('Keys cleared. Reload the page to generate new ones and re-onboard.');
+                    } catch (err) {
+                      console.error('Key regeneration failed:', err);
+                      alert('Could not clear keys. Try clearing site data manually.');
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-amber-900/60 hover:bg-amber-900 text-amber-300 text-[11px] font-medium transition-colors cursor-pointer border border-amber-800/60"
+                >
+                  Regenerate Keys
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
