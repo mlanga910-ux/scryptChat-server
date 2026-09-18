@@ -323,7 +323,8 @@ export class CallManager {
         }
 
         this.events.onCallStateChange({ ...this.currentSession });
-        soundEngine.startRingtoneLoop(false);
+        // Ring with whichever preset the user selected in Settings.
+        soundEngine.startRingtoneLoop(false, getSoundSettings().ringtone);
         break;
       }
 

@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { randomBytes, timingSafeEqual } from 'crypto';
 
 interface RoomPeer {
   deviceId: string;
@@ -19,6 +20,14 @@ interface SignalingRoom {
   isConfirmed?: boolean;
   confirmedAt?: number;
   confirmedBy?: string[];
+  /**
+   * Secret handed to the creator only. It is required to revoke or rotate a
+   * permanent link, so knowing (or guessing) the code is not enough to break
+   * someone else's invite.
+   */
+  manageToken?: string;
+  /** How many peers have consumed a reusable link. */
+  joinCount?: number;
 }
 
 interface EncryptedMailboxItem {
@@ -75,12 +84,58 @@ interface LanInviteRecord {
 const lanDevices = new Map<string, LanDeviceRecord>();
 const lanInvites = new Map<string, LanInviteRecord>();
 
-function getClientSubnetKey(req: Request): string {
+function clientIp(req: Request): string {
   const forwarded = req.headers['x-forwarded-for'];
-  let ip = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress || '127.0.0.1';
-  if (ip.startsWith('::ffff:')) {
-    ip = ip.slice(7);
+  const raw =
+    typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress || '127.0.0.1';
+  return raw.startsWith('::ffff:') ? raw.slice(7) : raw;
+}
+
+/**
+ * Small sliding-window limiter, keyed by IP + bucket. The signaling relay is
+ * unauthenticated by design (pairing happens before any identity exists), so
+ * it is rate limited to keep one host from brute forcing codes or flooding
+ * the mailbox for everyone else.
+ */
+const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+
+function allowRequest(req: Request, bucket: string, limit: number, windowMs: number): boolean {
+  const key = `${bucket}:${clientIp(req)}`;
+  const now = Date.now();
+  const entry = rateBuckets.get(key);
+  if (!entry || now > entry.resetAt) {
+    rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
   }
+  entry.count += 1;
+  return entry.count <= limit;
+}
+
+/** Compares a room management token without leaking timing information. */
+function tokenMatches(expected: string | undefined, provided: unknown): boolean {
+  if (!expected || typeof provided !== 'string' || provided.length !== expected.length) {
+    return false;
+  }
+  try {
+    return timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
+  } catch {
+    return false;
+  }
+}
+
+/** Readable, unguessable room code (no 0/O/1/I confusion for typed codes). */
+const ROOM_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+const randomRoomCode = (length: number): string => {
+  const bytes = randomBytes(length);
+  let out = '';
+  for (let i = 0; i < length; i += 1) {
+    out += ROOM_ALPHABET[bytes[i] % ROOM_ALPHABET.length];
+  }
+  return out;
+};
+
+function getClientSubnetKey(req: Request): string {
+  let ip = clientIp(req);
   const parts = ip.split('.');
   if (parts.length === 4) {
     return `${parts[0]}.${parts[1]}.${parts[2]}.0/24`;
@@ -142,6 +197,10 @@ setInterval(() => {
     if (now - lanDev.lastSeen > 30 * 1000) {
       lanDevices.delete(deviceId);
     }
+  }
+  // Drop expired rate-limit windows so the map cannot grow forever.
+  for (const [key, entry] of rateBuckets.entries()) {
+    if (now > entry.resetAt) rateBuckets.delete(key);
   }
   // Prune expired LAN invites
   for (const [inviteId, invite] of lanInvites.entries()) {
@@ -298,22 +357,33 @@ signalingRouter.post('/presence/query', (req: Request, res: Response) => {
  * 1. Create a 15-minute Rolling Dynamic Pairing Room & Token (or Permanent Link)
  */
 signalingRouter.post('/room/create', (req: Request, res: Response) => {
+  if (!allowRequest(req, 'room-create', 12, 60_000)) {
+    res.status(429).json({ error: 'Too many pairing codes from this network. Try again in a minute.' });
+    return;
+  }
+
   const { deviceId, offer, ttlSeconds = 900, isPermanent = false } = req.body;
-  
-  // Generate friendly 6-character code (avoid confusing letters like 0/O, 1/I)
-  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-  let roomId = '';
-  for (let i = 0; i < 6; i++) {
-    roomId += chars.charAt(Math.floor(Math.random() * chars.length));
+
+  // A reusable link gets a much longer code: it never expires, so guessing it
+  // must be far harder than a 15-minute, single-use code.
+  const codeLength = isPermanent ? 10 : 6;
+  let roomId = randomRoomCode(codeLength);
+  let guard = 0;
+  while (rooms.has(roomId) && guard < 20) {
+    roomId = randomRoomCode(codeLength);
+    guard += 1;
   }
 
   const now = Date.now();
   const calculatedExpiry = isPermanent ? now + (365 * 24 * 3600 * 1000) : now + (ttlSeconds * 1000);
+  const manageToken = randomBytes(24).toString('base64url');
   const room: SignalingRoom = {
     roomId,
     createdAt: now,
     expiresAt: calculatedExpiry,
     isPermanent: !!isPermanent,
+    manageToken,
+    joinCount: 0,
     initiator: {
       deviceId: deviceId || 'initiator',
       role: 'initiator',
@@ -327,10 +397,65 @@ signalingRouter.post('/room/create', (req: Request, res: Response) => {
   res.json({
     success: true,
     roomId,
+    // Returned once, to the creator. Required to revoke or rotate the link.
+    manageToken,
     expiresAt: room.expiresAt,
     isPermanent: room.isPermanent,
     ttlSeconds: isPermanent ? 31536000 : ttlSeconds,
   });
+});
+
+/**
+ * Rotate a permanent link's offer (a device that reloaded keeps the same code)
+ * or revoke it entirely. Both require the creator's management token.
+ */
+signalingRouter.post('/room/:roomId/rotate', (req: Request, res: Response) => {
+  const cleanId = (req.params.roomId || '').trim().toUpperCase();
+  const { deviceId, manageToken, offer } = req.body;
+  const room = rooms.get(cleanId);
+  if (!room) {
+    res.status(404).json({ error: 'This pairing link no longer exists.' });
+    return;
+  }
+  if (!tokenMatches(room.manageToken, manageToken)) {
+    res.status(403).json({ error: 'This device does not own that pairing link.' });
+    return;
+  }
+
+  if (offer) {
+    room.initiator = {
+      deviceId: deviceId || room.initiator?.deviceId || 'initiator',
+      role: 'initiator',
+      offer,
+      iceCandidates: [],
+      updatedAt: Date.now(),
+    };
+    // A rotated offer invalidates the previous responder's answer.
+    room.responder = undefined;
+    room.isConfirmed = false;
+    room.confirmedBy = [];
+  }
+  room.expiresAt = room.isPermanent
+    ? Date.now() + 365 * 24 * 3600 * 1000
+    : Math.max(room.expiresAt, Date.now() + 600_000);
+
+  res.json({ success: true, roomId: room.roomId, expiresAt: room.expiresAt });
+});
+
+signalingRouter.post('/room/:roomId/revoke', (req: Request, res: Response) => {
+  const cleanId = (req.params.roomId || '').trim().toUpperCase();
+  const { manageToken } = req.body;
+  const room = rooms.get(cleanId);
+  if (!room) {
+    res.json({ success: true, alreadyGone: true });
+    return;
+  }
+  if (!tokenMatches(room.manageToken, manageToken)) {
+    res.status(403).json({ error: 'This device does not own that pairing link.' });
+    return;
+  }
+  rooms.delete(cleanId);
+  res.json({ success: true, revoked: true });
 });
 
 /**
@@ -362,12 +487,30 @@ signalingRouter.post('/room/:roomId/offer', (req: Request, res: Response) => {
  * 3. Join Room & Fetch Offer
  */
 signalingRouter.post('/room/:roomId/join', (req: Request, res: Response) => {
+  // Guessing a code should not be cheap, so joins are limited per network.
+  if (!allowRequest(req, 'room-join', 25, 60_000)) {
+    res.status(429).json({ error: 'Too many pairing attempts from this network. Wait a minute.' });
+    return;
+  }
+
   const cleanId = (req.params.roomId || '').trim().toUpperCase();
   const { deviceId } = req.body;
   const room = rooms.get(cleanId);
 
   if (!room) {
     res.status(404).json({ error: 'Pairing code not found or expired.' });
+    return;
+  }
+
+  if (Date.now() > room.expiresAt) {
+    rooms.delete(cleanId);
+    res.status(404).json({ error: 'Pairing code not found or expired.' });
+    return;
+  }
+
+  const isRejoin = room.responder?.deviceId === deviceId || room.initiator?.deviceId === deviceId;
+  if (!room.isPermanent && room.responder && !isRejoin) {
+    res.status(409).json({ error: 'This one-time pairing code has already been used.' });
     return;
   }
 
@@ -380,11 +523,13 @@ signalingRouter.post('/room/:roomId/join', (req: Request, res: Response) => {
     iceCandidates: [],
     updatedAt: Date.now(),
   };
+  room.joinCount = (room.joinCount || 0) + 1;
 
   res.json({
     success: true,
     offer: room.initiator?.offer,
     expiresAt: room.expiresAt,
+    isPermanent: !!room.isPermanent,
   });
 });
 
@@ -514,10 +659,28 @@ signalingRouter.get('/room/:roomId/status', (req: Request, res: Response) => {
  * 6. Offline Encrypted Mailbox (Queue messages/files when recipient is offline)
  */
 signalingRouter.post('/mailbox/send', (req: Request, res: Response) => {
+  if (!allowRequest(req, 'mailbox-send', 240, 60_000)) {
+    res.status(429).json({ error: 'Relay rate limit reached. Slow down for a moment.' });
+    return;
+  }
+
   const { senderDeviceId, recipientDeviceId, encryptedEnvelope, fileMetadata, fileBase64Chunk } = req.body;
-  
+
   if (!recipientDeviceId || !encryptedEnvelope) {
     res.status(400).json({ error: 'recipientDeviceId and encryptedEnvelope are required' });
+    return;
+  }
+
+  // The relay only ever stores opaque ciphertext, but it still caps how much a
+  // single request can park in memory so one client cannot exhaust the server.
+  const MAX_ENVELOPE_CHARS = 512 * 1024;
+  const MAX_ATTACHMENT_CHARS = 24 * 1024 * 1024;
+  if (typeof encryptedEnvelope !== 'string' || encryptedEnvelope.length > MAX_ENVELOPE_CHARS) {
+    res.status(413).json({ error: 'Encrypted envelope is too large for the relay.' });
+    return;
+  }
+  if (fileBase64Chunk && String(fileBase64Chunk).length > MAX_ATTACHMENT_CHARS) {
+    res.status(413).json({ error: 'Attachment is too large for the relay mailbox.' });
     return;
   }
 

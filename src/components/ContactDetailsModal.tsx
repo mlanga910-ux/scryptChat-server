@@ -5,7 +5,6 @@ import {
   MessageSquare,
   Phone,
   Video,
-  ShieldCheck,
   Copy,
   Check,
   Trash2,
@@ -15,7 +14,7 @@ import {
   Calendar,
 } from 'lucide-react';
 import { Avatar } from './Avatar';
-import { describePresence } from '../utils/presence';
+import { describePresence, statusColor } from '../utils/presence';
 
 interface ContactDetailsModalProps {
   isOpen: boolean;
@@ -27,7 +26,6 @@ interface ContactDetailsModalProps {
   onClearHistory: (deviceId: string) => void;
   onUpdateAlias: (deviceId: string, newAlias: string) => void;
   onUpdateAvatar?: (deviceId: string, avatarUrl?: string) => void;
-  onToggleVerify: (deviceId: string, verified: boolean) => void;
   onStartCall?: (deviceId: string, alias: string, type: 'audio' | 'video') => void;
 }
 
@@ -41,7 +39,6 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
   onClearHistory,
   onUpdateAlias,
   onUpdateAvatar,
-  onToggleVerify,
   onStartCall,
 }) => {
   const [copiedId, setCopiedId] = useState(false);
@@ -52,7 +49,6 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
 
   if (!isOpen || !contact) return null;
 
-  const isVerified = contact.verificationStatus === 'VERIFIED';
   const presence = describePresence(contact, isConnected);
 
   const copyDeviceId = () => {
@@ -65,10 +61,6 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
     if (!aliasInput.trim()) return;
     onUpdateAlias(contact.deviceId, aliasInput.trim());
     setIsEditingAlias(false);
-  };
-
-  const handleToggleVerification = () => {
-    onToggleVerify(contact.deviceId, !isVerified);
   };
 
   const handleExecuteClearHistory = () => {
@@ -254,30 +246,16 @@ export const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center justify-between py-1 border-b border-zinc-800">
-              <span className="text-zinc-500 flex items-center gap-1.5">
-                <ShieldCheck className="w-3.5 h-3.5 text-zinc-600" />
-                Verification Status
-              </span>
-              <button
-                onClick={handleToggleVerification}
-                className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
-                  isVerified
-                    ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/60 hover:bg-emerald-900/50'
-                    : 'bg-zinc-800 text-zinc-500 border border-zinc-700 hover:text-white'
-                }`}
-                aria-label={isVerified ? 'Unmark as verified' : 'Mark as verified'}
-              >
-                {isVerified ? 'Verified' : 'Unverified'}
-              </button>
-            </div>
-
-            {contact.safetyNumber && (
+            {contact.status && (
               <div className="flex items-center justify-between py-1 border-b border-zinc-800">
-                <span className="text-zinc-500">Safety Number</span>
-                <span className="font-mono text-emerald-400 text-[11px] tracking-wider font-semibold">
-                  {contact.safetyNumber}
+                <span className="text-zinc-500 flex items-center gap-1.5">
+                  <span
+                    className="w-1.5 h-1.5 rounded-full"
+                    style={{ backgroundColor: statusColor(contact.status) }}
+                  />
+                  Status
                 </span>
+                <span className="text-white text-[11px] font-medium">{contact.status}</span>
               </div>
             )}
 

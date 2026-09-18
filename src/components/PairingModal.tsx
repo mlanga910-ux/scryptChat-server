@@ -25,6 +25,8 @@ import {
   Link as LinkIcon,
   Infinity as InfinityIcon,
   Info,
+  Trash2,
+  ShieldOff,
 } from 'lucide-react';
 import {
   LanDiscoveryService,
@@ -38,6 +40,39 @@ interface PairingModalProps {
   initialCode?: string;
   onClose: () => void;
   onPairSuccess: () => void;
+}
+
+/**
+ * A permanent link survives reloads: the code and its management token are kept
+ * on this device only, so it can be re-copied or revoked later. The token never
+ * leaves the device except to manage the link with the relay.
+ */
+const PERMANENT_LINK_KEY = 'scryptchat.permanentLink.v1';
+
+interface StoredPermanentLink {
+  roomId: string;
+  manageToken: string;
+  createdAt: number;
+}
+
+function readPermanentLink(): StoredPermanentLink | null {
+  try {
+    const raw = window.localStorage.getItem(PERMANENT_LINK_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredPermanentLink;
+    return parsed?.roomId && parsed?.manageToken ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePermanentLink(value: StoredPermanentLink | null) {
+  try {
+    if (value) window.localStorage.setItem(PERMANENT_LINK_KEY, JSON.stringify(value));
+    else window.localStorage.removeItem(PERMANENT_LINK_KEY);
+  } catch {
+    /* storage blocked: the link still works for this session */
+  }
 }
 
 type TabType = 'my_code' | 'enter' | 'scan' | 'lan';
@@ -59,6 +94,9 @@ export const PairingModal: React.FC<PairingModalProps> = ({
   const [isGeneratingRoom, setIsGeneratingRoom] = useState(false);
   const [isPermanentMode, setIsPermanentMode] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
+  /** Management token for the current permanent link (device-local). */
+  const [manageToken, setManageToken] = useState<string | null>(null);
+  const [isRevoking, setIsRevoking] = useState(false);
 
   // Join state
   const [joinInput, setJoinInput] = useState(initialCode || '');
@@ -89,6 +127,8 @@ export const PairingModal: React.FC<PairingModalProps> = ({
   // Polling ref
   const pollIntervalRef = useRef<any>(null);
   const countdownIntervalRef = useRef<any>(null);
+  /** Device we joined, so a saved contact can confirm a pairing the relay did not. */
+  const joinedPeerDeviceIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (initialCode) {
@@ -96,6 +136,45 @@ export const PairingModal: React.FC<PairingModalProps> = ({
       setActiveTab('enter');
     }
   }, [initialCode]);
+
+  /**
+   * Re-arms this device's stored permanent link: the same shareable code stays
+   * valid for everyone the user already gave it to, but the relay gets a fresh
+   * offer from this device so it can actually connect again.
+   */
+  const restorePermanentLink = async (): Promise<boolean> => {
+    const stored = readPermanentLink();
+    if (!stored) return false;
+    setRoomCode(stored.roomId);
+    setManageToken(stored.manageToken);
+    setExpiresAt(null);
+    setRemainingSeconds(0);
+    if (typeof window !== 'undefined') {
+      setQrDataUrl(await generateQrDataUrl(`${window.location.origin}/?room=${stored.roomId}`));
+    }
+    try {
+      const offer = await peerManager.createOffer();
+      await peerManager.fetchRelay(
+        `/api/signaling/room/${stored.roomId}/rotate`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            deviceId: offer.deviceId,
+            manageToken: stored.manageToken,
+            offer,
+          }),
+        },
+        8000
+      );
+      setStatusMessage('Your permanent link is active again.');
+      startHostPolling(stored.roomId);
+    } catch {
+      // Offline right now: keep showing the code so it can still be copied.
+      setStatusMessage('Showing your saved permanent link. Reconnect to reactivate it.');
+    }
+    return true;
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -212,6 +291,12 @@ export const PairingModal: React.FC<PairingModalProps> = ({
       setExpiresAt(newExpiry);
       setRemainingSeconds(Math.max(0, Math.floor((newExpiry - Date.now()) / 1000)));
 
+      const token = typeof data.manageToken === 'string' ? data.manageToken : null;
+      setManageToken(token);
+      if (isPermanentMode && token) {
+        writePermanentLink({ roomId: newCode, manageToken: token, createdAt: Date.now() });
+      }
+
       const origin = typeof window !== 'undefined' ? window.location.origin : '';
       const pairingUrl = `${origin}/?room=${newCode}`;
       const dataUrl = await generateQrDataUrl(pairingUrl);
@@ -232,6 +317,68 @@ export const PairingModal: React.FC<PairingModalProps> = ({
     } finally {
       setIsGeneratingRoom(false);
     }
+  };
+
+  /** Revokes the current permanent link on the relay and forgets it here. */
+  const handleRevokeLink = async () => {
+    if (!roomCode || !manageToken || isRevoking) return;
+    setIsRevoking(true);
+    try {
+      await peerManager.fetchRelay(
+        `/api/signaling/room/${roomCode}/revoke`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ manageToken, deviceId: peerManager.identity.deviceId }),
+        },
+        8000
+      );
+    } catch {
+      // Even if the relay cannot be reached, drop the local copy so the user is
+      // never left thinking a link is still live when they asked for it gone.
+    } finally {
+      writePermanentLink(null);
+      stopPolling();
+      stopCountdown();
+      setManageToken(null);
+      setRoomCode('');
+      setQrDataUrl('');
+      setExpiresAt(null);
+      setStatusMessage('Permanent link revoked. Nobody can pair with it any more.');
+      setIsRevoking(false);
+    }
+  };
+
+  /** Replaces the current permanent link with a brand-new one. */
+  const handleRegenerateLink = async () => {
+    if (!isPermanentMode) {
+      stopPolling();
+      stopCountdown();
+      await handleGenerateRoom();
+      return;
+    }
+    if (manageToken && roomCode) {
+      try {
+        await peerManager.fetchRelay(
+          `/api/signaling/room/${roomCode}/revoke`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ manageToken, deviceId: peerManager.identity.deviceId }),
+          },
+          8000
+        );
+      } catch {
+        /* best effort */
+      }
+      writePermanentLink(null);
+      setManageToken(null);
+    }
+    stopPolling();
+    stopCountdown();
+    setRoomCode('');
+    setQrDataUrl('');
+    await handleGenerateRoom();
   };
 
   const startHostPolling = (code: string) => {
@@ -260,6 +407,19 @@ export const PairingModal: React.FC<PairingModalProps> = ({
           }, 800);
         }
       } catch (err: any) {
+        // The link may already be up from the peer's point of view; only report
+        // a failure when there really is no working path.
+        if (peerManager.isConnected()) {
+          stopPolling();
+          stopCountdown();
+          setIsSuccess(true);
+          setStatusMessage('Connected.');
+          setTimeout(() => {
+            onPairSuccess();
+            onClose();
+          }, 800);
+          return;
+        }
         if (!isPermanentMode) {
           stopPolling();
         }
@@ -274,7 +434,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
     const cleanCode = extractRoomCodeFromScannedText(rawCode).trim().toUpperCase();
 
     if (!cleanCode) {
-      setErrorMsg('Please enter a valid 6-character code.');
+      setErrorMsg('Please enter a valid pairing code or link.');
       return;
     }
 
@@ -301,6 +461,8 @@ export const PairingModal: React.FC<PairingModalProps> = ({
       if (!data.success || !data.offer) {
         throw new Error('Key exchange offer was not found.');
       }
+
+      joinedPeerDeviceIdRef.current = data.offer.deviceId;
 
       const existingContact = await db.contacts.get(data.offer.deviceId);
       if (existingContact) {
@@ -353,8 +515,15 @@ export const PairingModal: React.FC<PairingModalProps> = ({
 
         if (attempts >= maxAttempts) {
           clearInterval(timer);
-          if (peerManager.isConnected()) {
+          // The contact is saved the moment the offer is accepted, so a saved
+          // record means the pairing itself worked even if the relay never
+          // reported the final confirmation.
+          const savedContact = joinedPeerDeviceIdRef.current
+            ? await db.contacts.get(joinedPeerDeviceIdRef.current)
+            : null;
+          if (peerManager.isConnected() || savedContact) {
             setIsSuccess(true);
+            setStatusMessage('Pairing successful!');
             setTimeout(() => {
               onPairSuccess();
               onClose();
@@ -636,6 +805,8 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                     onClick={() => {
                       setIsPermanentMode(false);
                       setRoomCode('');
+                      setQrDataUrl('');
+                      setManageToken(null);
                     }}
                     className={`p-2 rounded-lg text-xs font-medium border text-left transition-all cursor-pointer ${
                       !isPermanentMode
@@ -656,6 +827,10 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                     onClick={() => {
                       setIsPermanentMode(true);
                       setRoomCode('');
+                      setQrDataUrl('');
+                      setErrorMsg('');
+                      // Bring back the link this device already owns, if any.
+                      void restorePermanentLink();
                     }}
                     className={`p-2 rounded-lg text-xs font-medium border text-left transition-all cursor-pointer ${
                       isPermanentMode
@@ -796,15 +971,40 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                       </button>
 
                       <button
-                        onClick={handleGenerateRoom}
+                        onClick={handleRegenerateLink}
                         disabled={isGeneratingRoom}
-                        title="Generate new code"
+                        title={isPermanentMode ? 'Generate a new permanent link' : 'Generate new code'}
                         className="p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-500 hover:text-white transition-colors border border-zinc-800 cursor-pointer"
                         aria-label="Regenerate code"
                       >
                         <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingRoom ? 'animate-spin' : ''}`} />
                       </button>
                     </div>
+
+                    {isPermanentMode && manageToken && (
+                      <div className="w-full pt-1 space-y-2">
+                        <div className="flex items-center gap-2 rounded-lg border border-purple-500/25 bg-purple-500/5 px-2.5 py-2 text-[10px] text-purple-300/90 leading-relaxed">
+                          <ShieldOff className="w-3.5 h-3.5 shrink-0" />
+                          <span>
+                            This link stays valid until you revoke it. Revoking keeps other contacts, it
+                            only invalidates this invite.
+                          </span>
+                        </div>
+                        <button
+                          onClick={handleRevokeLink}
+                          disabled={isRevoking}
+                          className="w-full py-2 px-3 rounded-lg bg-rose-950/60 hover:bg-rose-950 text-rose-300 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors border border-rose-900/60 disabled:opacity-50 cursor-pointer"
+                          aria-label="Revoke permanent link"
+                        >
+                          {isRevoking ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5" />
+                          )}
+                          <span>{isRevoking ? 'Revoking…' : 'Revoke link'}</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {/* QR Code */}
@@ -828,7 +1028,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
             <div className="space-y-4">
               <div className="p-4 bg-zinc-900/50 rounded-xl border border-zinc-800 space-y-3">
                 <label className="block text-xs font-medium text-zinc-300">
-                  Enter 6-character Code
+                  Paste a code or pairing link
                 </label>
                 <div className="flex gap-2">
                   <input

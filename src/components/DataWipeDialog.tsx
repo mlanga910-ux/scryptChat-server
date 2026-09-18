@@ -60,7 +60,7 @@ export const DataWipeDialog: React.FC<DataWipeDialogProps> = ({
           <ul className="list-disc pl-5 space-y-1 text-white text-xs">
             <li>IndexedDB messages transcript history</li>
             <li>Stored and cached file blobs</li>
-            <li>Paired contacts &amp; verified Safety Numbers</li>
+            <li>Paired contacts &amp; their conversations</li>
             <li>Long-term ECDSA Identity Keypair</li>
             <li>Active RAM session keys &amp; WebRTC channels</li>
           </ul>

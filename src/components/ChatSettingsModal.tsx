@@ -1,65 +1,47 @@
 import React, { useState } from 'react';
-import {
-  X,
-  EyeOff,
-  Eye,
-  Download,
-  BellOff,
-  Bell,
-  Clock,
-  FileText,
-  Shield,
-  RotateCcw,
-  PhoneOff,
-  VideoOff,
-  Play,
-  Check,
-} from 'lucide-react';
+import { X, BellOff, Bell, EyeOff, PhoneOff, VideoOff, Eraser, UserX, Check } from 'lucide-react';
 import { ContactRecord } from '../types/index';
 import {
   getChatSettings,
   saveChatSettings,
   ChatCustomSettings,
-  DEFAULT_CHAT_SETTINGS,
 } from '../utils/chatSettings';
-import { MessageSoundType, soundEngine } from '../utils/cyberSoundEngine';
+import {
+  MESSAGE_TONES,
+  MessageSoundType,
+  soundEngine,
+} from '../utils/cyberSoundEngine';
+import { Avatar } from './Avatar';
 
 interface ChatSettingsModalProps {
   isOpen: boolean;
   contact: ContactRecord | null;
   onClose: () => void;
   onSettingsChanged?: (settings: ChatCustomSettings) => void;
+  onClearHistory?: (deviceId: string) => void | Promise<void>;
+  onDeleteContact?: (deviceId: string) => void | Promise<void>;
 }
 
-const DISAPPEARING_OPTIONS = [
-  { value: 0, label: 'Off' },
-  { value: 3600, label: '1 Hour' },
-  { value: 86400, label: '24 Hours' },
-  { value: 604800, label: '7 Days' },
-];
-
-const SOUND_OPTIONS: { id: MessageSoundType | 'default'; label: string }[] = [
-  { id: 'default', label: 'Default App Tone' },
-  { id: 'neural_ping', label: 'Neural Ping' },
-  { id: 'quantum_chime', label: 'Quantum Chime' },
-  { id: 'cyber_glitch', label: 'Cyber Glitch' },
-  { id: 'glitch_ping', label: 'Glitch Ping' },
-  { id: 'laser_blip', label: 'Laser Blip' },
-  { id: 'sub_thud', label: 'Sub Thud' },
-  { id: 'matrix_chime', label: 'Matrix Chime' },
-];
-
+/**
+ * Per-chat settings: only the switches that actually affect this conversation,
+ * plus the two destructive actions that were missing before.
+ */
 export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
   isOpen,
   contact,
   onClose,
   onSettingsChanged,
+  onClearHistory,
+  onDeleteContact,
 }) => {
-  if (!isOpen || !contact) return null;
-
   const [settings, setSettingsState] = useState<ChatCustomSettings>(() =>
-    getChatSettings(contact.deviceId)
+    contact ? getChatSettings(contact.deviceId) : ({} as ChatCustomSettings)
   );
+  const [confirmAction, setConfirmAction] = useState<'clear' | 'remove' | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [activeTone, setActiveTone] = useState<string | null>(null);
+
+  if (!isOpen || !contact) return null;
 
   const updateSetting = <K extends keyof ChatCustomSettings>(
     key: K,
@@ -71,293 +53,247 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
     onSettingsChanged?.(updated);
   };
 
-  const handleTestSound = async (soundId: MessageSoundType | 'default') => {
-    if (soundId === 'default') {
-      await soundEngine.playMessageReceived();
-    } else {
-      await soundEngine.playMessageSound(soundId);
+  const previewTone = async (tone: MessageSoundType) => {
+    setActiveTone(tone);
+    await soundEngine.playMessageSound(tone);
+    setTimeout(() => setActiveTone((current) => (current === tone ? null : current)), 600);
+  };
+
+  const runConfirmAction = async () => {
+    if (!confirmAction || busy) return;
+    setBusy(true);
+    try {
+      if (confirmAction === 'clear') await onClearHistory?.(contact.deviceId);
+      else await onDeleteContact?.(contact.deviceId);
+    } finally {
+      setBusy(false);
+      setConfirmAction(null);
+      onClose();
     }
   };
 
-  const handleResetDefaults = () => {
-    setSettingsState(DEFAULT_CHAT_SETTINGS);
-    saveChatSettings(contact.deviceId, DEFAULT_CHAT_SETTINGS);
-    onSettingsChanged?.(DEFAULT_CHAT_SETTINGS);
-  };
+  const row = 'flex items-center justify-between gap-3 px-3.5 py-3';
+  const toggle = (active: boolean, danger = false) =>
+    `w-10 h-6 rounded-full transition-colors relative flex items-center p-0.5 shrink-0 cursor-pointer ${
+      active ? (danger ? 'bg-rose-500/90' : 'bg-[var(--sc-e400)]') : 'bg-zinc-800'
+    }`;
+
+  const selectedTone = settings.customSound === 'default' ? undefined : settings.customSound;
 
   return (
-    <div
-      id="chat-settings-backdrop"
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150 font-sans select-none"
-    >
-      <div className="w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-2xl shadow-xl overflow-hidden text-xs flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 select-none font-sans text-xs animate-in fade-in duration-150">
+      <div className="w-full max-w-sm max-h-[88vh] panel-surface border border-zinc-800 rounded-3xl shadow-[var(--sc-shadow-lg)] flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="px-5 py-4 border-b border-zinc-800 bg-zinc-950/50 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div
-              className="w-8 h-8 rounded-full flex items-center justify-center text-white font-medium text-xs shadow-sm"
-              style={{ backgroundColor: contact.avatarColor || '#3f3f46' }}
-            >
-              {contact.alias.charAt(0).toUpperCase()}
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-white">
-                {contact.alias}
-              </h2>
-              <p className="text-[11px] text-zinc-500">
-                Customized local settings
-              </p>
-            </div>
+        <div className="shrink-0 px-4 py-3.5 flex items-center gap-3 border-b border-zinc-800">
+          <Avatar
+            name={contact.alias}
+            avatarUrl={contact.avatarUrl}
+            avatarColor={contact.avatarColor}
+            size="sm"
+          />
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-semibold text-white truncate">{contact.alias}</h2>
+            <p className="text-[10px] text-zinc-500 font-mono truncate">{contact.deviceId}</p>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-900 rounded-lg transition-colors"
-            aria-label="Close"
+            className="grid place-items-center h-8 w-8 rounded-full text-zinc-500 hover:text-white hover:bg-zinc-900 transition-colors cursor-pointer"
+            aria-label="Close chat settings"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {/* Privacy Note */}
-          <div className="p-3 bg-zinc-900/30 border border-zinc-800 rounded-xl flex items-start gap-2 text-zinc-400 text-[11px]">
-            <Shield className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-            <p>
-              These options are stored locally on your device.
-            </p>
-          </div>
-
-          {/* 1. Blur / Hide Images by Default */}
-          <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="pr-3">
-                <div className="flex items-center gap-1.5 font-medium text-white">
-                  <EyeOff className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Blur Images by Default</span>
-                </div>
-                <p className="text-zinc-500 text-[11px] mt-0.5">
-                  Received photos appear blurred with a reveal button.
-                </p>
+        {/* Body */}
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 space-y-3">
+          {/* Notifications */}
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/40 overflow-hidden">
+            <div className={row}>
+              <div className="flex items-center gap-2 min-w-0">
+                {settings.muteNotifications ? (
+                  <BellOff className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                ) : (
+                  <Bell className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                )}
+                <span className="font-medium text-white">Mute notifications</span>
               </div>
-              <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
-                <input
-                  type="checkbox"
-                  checked={settings.blurMedia}
-                  onChange={(e) => updateSetting('blurMedia', e.target.checked)}
-                  className="sr-only peer"
-                  aria-label="Blur media"
+              <button
+                onClick={() => updateSetting('muteNotifications', !settings.muteNotifications)}
+                className={toggle(settings.muteNotifications, true)}
+                aria-label="Mute notifications"
+                aria-pressed={settings.muteNotifications}
+              >
+                <span
+                  className={`w-5 h-5 rounded-full bg-zinc-950 shadow transition-transform ${
+                    settings.muteNotifications ? 'translate-x-4' : 'translate-x-0'
+                  }`}
                 />
-                <div className="w-9 h-5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-400" />
-              </label>
-            </div>
-          </div>
-
-          {/* 2. Notifications & Mute */}
-          <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="pr-3">
-                <div className="flex items-center gap-1.5 font-medium text-white">
-                  {settings.muteNotifications ? (
-                    <BellOff className="w-3.5 h-3.5 text-rose-400" />
-                  ) : (
-                    <Bell className="w-3.5 h-3.5 text-white" />
-                  )}
-                  <span>Mute Notifications</span>
-                </div>
-                <p className="text-zinc-500 text-[11px] mt-0.5">
-                  Silence alerts and banner notifications from this contact.
-                </p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
-                <input
-                  type="checkbox"
-                  checked={settings.muteNotifications}
-                  onChange={(e) => updateSetting('muteNotifications', e.target.checked)}
-                  className="sr-only peer"
-                  aria-label="Mute notifications"
-                />
-                <div className="w-9 h-5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-rose-600" />
-              </label>
+              </button>
             </div>
 
             {!settings.muteNotifications && (
-              <div className="pt-2 border-t border-zinc-800 space-y-1.5">
-                <label className="block text-zinc-500 font-medium text-[11px]">
-                  Notification Tone for this Chat
-                </label>
-                <div className="flex items-center gap-2">
-                  <select
-                    value={settings.customSound || 'default'}
-                    onChange={(e) => updateSetting('customSound', e.target.value as any)}
-                    className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-white text-xs focus:ring-1 focus:ring-emerald-400/20"
-                    aria-label="Notification tone"
-                  >
-                    {SOUND_OPTIONS.map((opt) => (
-                      <option key={opt.id} value={opt.id}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
+              <div className="px-3.5 pb-3 pt-1 space-y-1.5 border-t border-zinc-800">
+                <span className="block text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
+                  Tone
+                </span>
+                <div className="grid grid-cols-4 gap-1">
                   <button
-                    type="button"
-                    onClick={() => handleTestSound(settings.customSound)}
-                    className="px-3 py-2 bg-white hover:bg-neutral-200 text-zinc-950 font-medium rounded-xl text-xs transition-colors flex-shrink-0 shadow-sm"
-                    aria-label="Test sound"
+                    onClick={() => updateSetting('customSound', 'default')}
+                    className={`py-2 rounded-xl border text-[10px] font-medium transition-colors cursor-pointer ${
+                      settings.customSound === 'default'
+                        ? 'border-transparent bg-[var(--sc-accent)] text-[var(--sc-on-accent)]'
+                        : 'border-zinc-800 text-zinc-400 hover:text-white'
+                    }`}
+                    aria-label="Default tone"
                   >
-                    <Play className="w-3 h-3" />
+                    Default
+                  </button>
+                  {MESSAGE_TONES.map((tone) => (
+                    <button
+                      key={tone.id}
+                      onClick={() => {
+                        updateSetting('customSound', tone.id);
+                        void previewTone(tone.id);
+                      }}
+                      className={`py-2 rounded-xl border text-[10px] font-medium transition-colors cursor-pointer ${
+                        settings.customSound === tone.id
+                          ? 'border-transparent bg-[var(--sc-accent)] text-[var(--sc-on-accent)]'
+                          : 'border-zinc-800 text-zinc-400 hover:text-white'
+                      }`}
+                      aria-label={tone.label}
+                    >
+                      {activeTone === tone.id ? '•' : tone.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Privacy & media */}
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/40 overflow-hidden">
+            <div className={row}>
+              <div className="flex items-center gap-2 min-w-0">
+                <EyeOff className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                <div className="min-w-0">
+                  <div className="font-medium text-white">Blur received photos</div>
+                  <p className="text-[10px] text-zinc-500">Tap to reveal</p>
+                </div>
+              </div>
+              <button
+                onClick={() => updateSetting('blurMedia', !settings.blurMedia)}
+                className={toggle(settings.blurMedia)}
+                aria-label="Blur received photos"
+                aria-pressed={settings.blurMedia}
+              >
+                <span
+                  className={`w-5 h-5 rounded-full bg-zinc-950 shadow transition-transform ${
+                    settings.blurMedia ? 'translate-x-4' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+
+          {/* Calls from this contact */}
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/40 overflow-hidden">
+            <div className={`${row} border-b border-zinc-800`}>
+              <div className="flex items-center gap-2 min-w-0">
+                <PhoneOff className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                <span className="font-medium text-white">Block voice calls</span>
+              </div>
+              <button
+                onClick={() => updateSetting('blockVoiceCalls', !settings.blockVoiceCalls)}
+                className={toggle(settings.blockVoiceCalls, true)}
+                aria-label="Block voice calls"
+                aria-pressed={settings.blockVoiceCalls}
+              >
+                <span
+                  className={`w-5 h-5 rounded-full bg-zinc-950 shadow transition-transform ${
+                    settings.blockVoiceCalls ? 'translate-x-4' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+            <div className={row}>
+              <div className="flex items-center gap-2 min-w-0">
+                <VideoOff className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                <span className="font-medium text-white">Block video calls</span>
+              </div>
+              <button
+                onClick={() => updateSetting('blockVideoCalls', !settings.blockVideoCalls)}
+                className={toggle(settings.blockVideoCalls, true)}
+                aria-label="Block video calls"
+                aria-pressed={settings.blockVideoCalls}
+              >
+                <span
+                  className={`w-5 h-5 rounded-full bg-zinc-950 shadow transition-transform ${
+                    settings.blockVideoCalls ? 'translate-x-4' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+
+          {/* Destructive */}
+          <div className="rounded-2xl border border-rose-900/40 bg-rose-950/10 overflow-hidden">
+            <button
+              onClick={() =>
+                setConfirmAction((current) => (current === 'clear' ? null : 'clear'))
+              }
+              className={`${row} w-full text-left hover:bg-rose-950/20 transition-colors cursor-pointer`}
+            >
+              <div className="flex items-center gap-2">
+                <Eraser className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                <span className="font-medium text-rose-300">Clear chat history</span>
+              </div>
+            </button>
+            <button
+              onClick={() =>
+                setConfirmAction((current) => (current === 'remove' ? null : 'remove'))
+              }
+              className={`${row} w-full text-left border-t border-rose-900/40 hover:bg-rose-950/20 transition-colors cursor-pointer`}
+            >
+              <div className="flex items-center gap-2">
+                <UserX className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                <span className="font-medium text-rose-300">Remove contact</span>
+              </div>
+            </button>
+
+            {confirmAction && (
+              <div className="px-3.5 pb-3.5 pt-1 space-y-2 sc-fade-in">
+                <p className="text-[10px] text-rose-300/90 leading-relaxed">
+                  {confirmAction === 'clear'
+                    ? 'Delete every message and file in this conversation on this device?'
+                    : `Remove ${contact.alias} and this conversation from this device? They stay in their own list until they remove you.`}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={runConfirmAction}
+                    disabled={busy}
+                    className="flex-1 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold transition-colors disabled:opacity-50 cursor-pointer"
+                    aria-label={confirmAction === 'clear' ? 'Confirm clear history' : 'Confirm remove contact'}
+                  >
+                    {confirmAction === 'clear' ? 'Clear' : 'Remove'}
+                  </button>
+                  <button
+                    onClick={() => setConfirmAction(null)}
+                    className="flex-1 py-2 rounded-xl border border-zinc-800 text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                    aria-label="Cancel"
+                  >
+                    Cancel
                   </button>
                 </div>
               </div>
             )}
           </div>
 
-          {/* 3. Auto-Download Media */}
-          <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="pr-3">
-                <div className="flex items-center gap-1.5 font-medium text-white">
-                  <Download className="w-3.5 h-3.5 text-white" />
-                  <span>Auto-Download Media</span>
-                </div>
-                <p className="text-zinc-500 text-[11px] mt-0.5">
-                  Automatically store incoming file chunks locally.
-                </p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
-                <input
-                  type="checkbox"
-                  checked={settings.autoDownloadMedia}
-                  onChange={(e) => updateSetting('autoDownloadMedia', e.target.checked)}
-                  className="sr-only peer"
-                  aria-label="Auto-download media"
-                />
-                <div className="w-9 h-5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-400" />
-              </label>
-            </div>
-          </div>
-
-          {/* 4. Disappearing Messages */}
-          <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-2.5">
-            <div>
-              <div className="flex items-center gap-1.5 font-medium text-white">
-                <Clock className="w-3.5 h-3.5 text-white" />
-                <span>Message Timer</span>
-              </div>
-              <p className="text-zinc-500 text-[11px] mt-0.5">
-                Automatically purge messages older than the selected period.
-              </p>
-            </div>
-            <div className="grid grid-cols-4 gap-1.5">
-              {DISAPPEARING_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => updateSetting('disappearingTimerSeconds', opt.value)}
-                  className={`py-2 px-1 rounded-xl text-center font-medium transition-all ${
-                    settings.disappearingTimerSeconds === opt.value
-                      ? 'bg-emerald-400 text-zinc-950 font-semibold'
-                      : 'bg-zinc-900 border border-zinc-800 text-zinc-500 hover:text-white'
-                  }`}
-                  aria-label={`Set timer to ${opt.label}`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 5. Call & Video Permissions */}
-          <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-3">
-            <div>
-              <div className="font-medium text-white flex items-center gap-1.5">
-                <PhoneOff className="w-3.5 h-3.5 text-rose-400" />
-                <span>Call &amp; Video Call Permissions</span>
-              </div>
-              <p className="text-zinc-500 text-[11px] mt-0.5">
-                Restrict this contact from calling you.
-              </p>
-            </div>
-
-            <div className="space-y-2 pt-1 border-t border-zinc-800">
-              {/* Block Voice Calls */}
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-xs text-white font-medium">Block Voice Calls</span>
-                  <p className="text-[10px] text-zinc-500">Silently reject incoming audio calls</p>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={settings.blockVoiceCalls}
-                    onChange={(e) => updateSetting('blockVoiceCalls', e.target.checked)}
-                    className="sr-only peer"
-                    aria-label="Block voice calls"
-                  />
-                  <div className="w-9 h-5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-rose-600" />
-                </label>
-              </div>
-
-              {/* Block Video Calls */}
-              <div className="flex items-center justify-between pt-1 border-t border-zinc-800">
-                <div>
-                  <span className="text-xs text-white font-medium">Block Video Calls</span>
-                  <p className="text-[10px] text-zinc-500">Silently reject incoming video calls</p>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={settings.blockVideoCalls}
-                    onChange={(e) => updateSetting('blockVideoCalls', e.target.checked)}
-                    className="sr-only peer"
-                    aria-label="Block video calls"
-                  />
-                  <div className="w-9 h-5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-rose-600" />
-                </label>
-              </div>
-            </div>
-          </div>
-
-          {/* 6. Private Notes */}
-          <div className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-xl space-y-2">
-            <div className="flex items-center gap-1.5 font-medium text-white">
-              <FileText className="w-3.5 h-3.5 text-white" />
-              <span>Private Notes</span>
-            </div>
-            <textarea
-              value={settings.privateNotes || ''}
-              onChange={(e) => updateSetting('privateNotes', e.target.value)}
-              placeholder="Notes about this contact (local only)..."
-              rows={2}
-              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-white text-xs placeholder-zinc-500 input-base focus:ring-1 focus:ring-emerald-400/20 resize-none"
-              aria-label="Private notes"
-            />
-          </div>
-
-          {/* Reset button */}
-          <div className="pt-1 flex justify-start">
-            <button
-              type="button"
-              onClick={handleResetDefaults}
-              className="px-3 py-1.5 text-xs text-zinc-500 hover:text-white bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-lg transition-colors flex items-center gap-1.5"
-              aria-label="Reset to defaults"
-            >
-              <RotateCcw className="w-3 h-3" />
-              <span>Reset to Defaults</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="px-5 py-3.5 border-t border-zinc-800 bg-zinc-950/50 flex items-center justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-5 py-2 bg-white text-zinc-950 hover:bg-neutral-200 font-medium rounded-xl transition-colors text-xs shadow-sm"
-            aria-label="Done"
-          >
-            Done
-          </button>
+          {selectedTone && (
+            <p className="flex items-center gap-1.5 text-[10px] text-zinc-600 px-1">
+              <Check className="w-3 h-3" />
+              These settings stay on this device only.
+            </p>
+          )}
         </div>
       </div>
     </div>

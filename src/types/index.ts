@@ -79,6 +79,8 @@ export interface ContactRecord {
   avatarColor?: string;
   avatarUrl?: string;
   statusBio?: string;
+  /** The contact's chosen presence status (Online, Busy, Away, …). */
+  status?: string;
   identityPublicKeyPEM: string;
   publicKeyRaw: string;
   verificationStatus: VerificationStatus;

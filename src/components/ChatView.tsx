@@ -11,12 +11,11 @@ import {
   Send,
   Paperclip,
   Download,
-  ShieldCheck,
-  ShieldAlert,
   Clock,
   ArrowLeft,
   Info,
   Mic,
+  Eye,
   Image as ImageIcon,
   FileCode,
   FileArchive,
@@ -34,17 +33,17 @@ import {
   Plus,
   Wifi,
   UploadCloud,
-  MoreVertical,
 } from 'lucide-react';
 import { db } from '../db/index';
 import { ImageViewerModal } from './ImageViewerModal';
 import { ChatSettingsModal } from './ChatSettingsModal';
+import { FilePreviewModal } from './FilePreviewModal';
 import { CodeViewerModal } from './CodeViewerModal';
 import { CodeBlockCard } from './CodeBlockCard';
 import { Avatar } from './Avatar';
 import { getChatSettings, ChatCustomSettings } from '../utils/chatSettings';
 import { parseMessageContent } from '../utils/codeHelper';
-import { describePresence } from '../utils/presence';
+import { describePresence, statusColor } from '../utils/presence';
 
 const startOfDay = (timestamp: number) => {
   const date = new Date(timestamp);
@@ -91,7 +90,10 @@ interface ChatViewProps {
   onStartCall?: (peerDeviceId: string, peerDisplayName: string, callType: 'audio' | 'video') => void;
   onStartGroupCall?: (group: GroupRecord, callType: 'audio' | 'video') => void;
   onBackToPeers?: () => void;
-  onVerifyContact?: (contact: ContactRecord) => void;
+  /** Clears every stored message and file of this conversation. */
+  onClearHistory?: (deviceId: string) => void | Promise<void>;
+  /** Removes the contact (and its history) from this device. */
+  onDeleteContact?: (deviceId: string) => void | Promise<void>;
   onOpenGroupDetails?: (group: GroupRecord) => void;
 }
 
@@ -111,13 +113,12 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onStartCall,
   onStartGroupCall,
   onBackToPeers,
-  onVerifyContact,
+  onClearHistory,
+  onDeleteContact,
   onOpenGroupDetails,
 }) => {
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
-  const actionsMenuRef = useRef<HTMLDivElement>(null);
 
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -126,6 +127,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
   const [selectedSnippetForModal, setSelectedSnippetForModal] = useState<CodeSnippet | null>(null);
   const [isCodeModalOpen, setIsCodeModalOpen] = useState(false);
+  const [previewFile, setPreviewFile] = useState<FileRecord | null>(null);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -164,18 +166,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
       setChatSettings(getChatSettings(activeContact.deviceId));
       setRevealedMediaIds(new Set());
     }
-    setIsActionsMenuOpen(false);
     setAttachError(null);
   }, [activeContact?.deviceId, activeGroup?.groupId]);
-
-  useEffect(() => {
-    if (!isActionsMenuOpen) return;
-    const close = (event: MouseEvent) => {
-      if (!actionsMenuRef.current?.contains(event.target as Node)) setIsActionsMenuOpen(false);
-    };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, [isActionsMenuOpen]);
 
   const handleScroll = () => {
     const el = scrollContainerRef.current;
@@ -472,7 +464,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
     activeContact ? { ...activeContact, isLan: isLanLink || activeContact.isLan } : null,
     isConnected
   );
-  const isVerified = activeContact?.verificationStatus === 'VERIFIED';
   const headerInitial = isGroup
     ? activeGroup!.name.charAt(0).toUpperCase()
     : (activeContact!.alias || activeContact!.deviceId.slice(4, 6)).charAt(0).toUpperCase();
@@ -527,11 +518,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
               <h2 className="font-semibold text-white text-sm truncate">
                 {isGroup ? activeGroup!.name : activeContact!.alias || activeContact!.deviceId}
               </h2>
-              {!isGroup && isVerified && (
-                <span title="Cryptographically Verified" className="shrink-0 inline-flex items-center">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                </span>
-              )}
             </div>
 
             <div className="flex items-center gap-1.5 text-[11px]">
@@ -571,6 +557,18 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     >
                       <Wifi className="w-2.5 h-2.5" />
                       Direct
+                    </span>
+                  )}
+                  {activeContact?.status && (
+                    <span
+                      className="hidden xs:inline-flex items-center gap-1 rounded-full border border-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400 max-w-[110px]"
+                      title={`Status: ${activeContact.status}`}
+                    >
+                      <span
+                        className="w-1.5 h-1.5 rounded-full shrink-0"
+                        style={{ backgroundColor: statusColor(activeContact.status) }}
+                      />
+                      <span className="truncate">{activeContact.status}</span>
                     </span>
                   )}
                   {latencyMs !== undefined && peerOnline && (
@@ -628,62 +626,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
               <Info className="w-4 h-4" />
             </button>
           ) : (
-            <>
-              <button
-                onClick={() => setIsChatSettingsOpen(true)}
-                className="hidden sm:grid place-items-center h-9 w-9 rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
-                title="Chat preferences"
-                aria-label="Chat preferences"
-              >
-                <Sliders className="w-4 h-4" />
-              </button>
-              {onVerifyContact && activeContact && (
-                <button
-                  onClick={() => onVerifyContact(activeContact)}
-                  className="hidden sm:grid place-items-center h-9 w-9 rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
-                  title="Safety number"
-                  aria-label="Safety number"
-                >
-                  <ShieldCheck className="w-4 h-4" />
-                </button>
-              )}
-              <div className="relative" ref={actionsMenuRef}>
-                <button
-                  onClick={() => setIsActionsMenuOpen((open) => !open)}
-                  className="sm:hidden grid place-items-center h-9 w-9 rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
-                  title="More"
-                  aria-label="More chat actions"
-                >
-                  <MoreVertical className="w-4 h-4" />
-                </button>
-                {isActionsMenuOpen && (
-                  <div className="sm:hidden absolute right-0 top-full mt-1 w-48 p-1.5 rounded-2xl border border-zinc-800 bg-zinc-950 shadow-xl z-40 animate-in animate-scale-in">
-                    {onVerifyContact && (
-                      <button
-                        onClick={() => {
-                          setIsActionsMenuOpen(false);
-                          onVerifyContact(activeContact!);
-                        }}
-                        className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-zinc-300 hover:text-white hover:bg-zinc-900 transition-colors cursor-pointer"
-                      >
-                        <ShieldCheck className="w-3.5 h-3.5" />
-                        <span>Safety number</span>
-                      </button>
-                    )}
-                    <button
-                      onClick={() => {
-                        setIsActionsMenuOpen(false);
-                        setIsChatSettingsOpen(true);
-                      }}
-                      className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-zinc-300 hover:text-white hover:bg-zinc-900 transition-colors cursor-pointer"
-                    >
-                      <Sliders className="w-3.5 h-3.5" />
-                      <span>Chat preferences</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            </>
+            <button
+              onClick={() => setIsChatSettingsOpen(true)}
+              className="grid place-items-center h-9 w-9 rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+              title="Chat settings"
+              aria-label="Chat settings"
+            >
+              <Sliders className="w-4 h-4" />
+            </button>
           )}
         </div>
       </div>
@@ -704,6 +654,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
             const downloadUrl = msg.fileId ? downloadUrls.get(msg.fileId) : undefined;
             const isImage = fileRec?.isImage || msg.mediaType === 'image';
             const isAudio = fileRec?.isAudio || msg.mediaType === 'audio';
+            const isVideo = fileRec?.isVideo || msg.mediaType === 'video';
 
             const parsedParts = (!msg.fileId && !msg.codeSnippet && msg.payloadText)
               ? parseMessageContent(msg.payloadText)
@@ -796,6 +747,54 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     </div>
                   )}
 
+                  {/* Video attachment plays right in the conversation */}
+                  {isVideo && (
+                    <div className="relative">
+                      {downloadUrl ? (
+                        <video
+                          controls
+                          playsInline
+                          preload="metadata"
+                          src={downloadUrl}
+                          className="max-h-72 w-full max-w-md bg-black"
+                        />
+                      ) : (
+                        <div className="w-64 h-40 bg-zinc-900 grid place-items-center text-xs text-zinc-500">
+                          Decrypting video…
+                        </div>
+                      )}
+                      <div className="p-2.5 flex items-center justify-between gap-2 border-t border-black/10">
+                        <span className="truncate max-w-[150px] font-medium opacity-80 text-xs">
+                          {fileRec?.name || 'Video'}
+                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {fileRec && (fileRec.blobRef || downloadUrl) && (
+                            <button
+                              type="button"
+                              onClick={() => setPreviewFile(fileRec)}
+                              className="p-1.5 rounded-lg bg-black/10 hover:bg-black/20 text-current transition-colors cursor-pointer"
+                              title="Open viewer"
+                              aria-label="Open video viewer"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {downloadUrl && (
+                            <a
+                              href={downloadUrl}
+                              download={fileRec?.name || 'video.mp4'}
+                              className="p-1.5 rounded-lg bg-black/10 hover:bg-black/20 text-current transition-colors cursor-pointer"
+                              title="Download video"
+                              aria-label="Download video"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Explicit Staged Code Snippet Card */}
                   {msg.codeSnippet && (
                     <div className="p-1.5">
@@ -845,7 +844,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   )}
 
                   {/* Standard File Attachment Card */}
-                  {msg.fileId && !isImage && !isAudio && !isCode && (
+                  {msg.fileId && !isImage && !isAudio && !isVideo && !isCode && (
                     <div className="p-3 flex items-center justify-between gap-3">
                       <div className="flex items-center gap-2.5 min-w-0">
                         <div className={`p-2 rounded-xl shrink-0 ${isYou ? 'bg-black/10' : 'bg-zinc-800'}`}>
@@ -860,19 +859,37 @@ export const ChatView: React.FC<ChatViewProps> = ({
                           </p>
                         </div>
                       </div>
-                      {downloadUrl && (
-                        <a
-                          href={downloadUrl}
-                          download={fileRec?.name || 'file.bin'}
-                          className={`p-2 rounded-xl transition-colors shrink-0 ${
-                            isYou ? 'bg-black/10 hover:bg-black/20 text-black' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200'
-                          }`}
-                          title="Download File"
-                          aria-label="Download File"
-                        >
-                          <Download className="w-4 h-4" />
-                        </a>
-                      )}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {fileRec &&
+                          (fileRec.blobRef || downloadUrl) && (
+                            <button
+                              type="button"
+                              onClick={() => setPreviewFile(fileRec)}
+                              className={`p-2 rounded-xl transition-colors cursor-pointer ${
+                                isYou
+                                  ? 'bg-black/10 hover:bg-black/20 text-black'
+                                  : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200'
+                              }`}
+                              title="Preview without downloading"
+                              aria-label="Preview file"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          )}
+                        {downloadUrl && (
+                          <a
+                            href={downloadUrl}
+                            download={fileRec?.name || 'file.bin'}
+                            className={`p-2 rounded-xl transition-colors cursor-pointer ${
+                              isYou ? 'bg-black/10 hover:bg-black/20 text-black' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200'
+                            }`}
+                            title="Download File"
+                            aria-label="Download File"
+                          >
+                            <Download className="w-4 h-4" />
+                          </a>
+                        )}
+                      </div>
                     </div>
                   )}
 
@@ -1123,6 +1140,16 @@ export const ChatView: React.FC<ChatViewProps> = ({
         />
       )}
 
+      {/* File viewer (text, code, PDF, DOCX, archives, media) — read only */}
+      {previewFile && (
+        <FilePreviewModal
+          isOpen={!!previewFile}
+          file={previewFile}
+          blobUrl={downloadUrls.get(previewFile.fileId)}
+          onClose={() => setPreviewFile(null)}
+        />
+      )}
+
       {/* Per-Chat Extended Settings Modal */}
       {isChatSettingsOpen && activeContact && (
         <ChatSettingsModal
@@ -1130,6 +1157,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
           contact={activeContact}
           onClose={() => setIsChatSettingsOpen(false)}
           onSettingsChanged={(updated) => setChatSettings(updated)}
+          onClearHistory={onClearHistory}
+          onDeleteContact={onDeleteContact}
         />
       )}
     </div>

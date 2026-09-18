@@ -21,11 +21,11 @@ import { ScryptChatLogo } from './components/ScryptChatLogo';
 import { PeerList } from './components/PeerList';
 import { ChatView } from './components/ChatView';
 import { PairingModal } from './components/PairingModal';
-import { SecurityModal } from './components/SecurityModal';
 import { DataWipeDialog } from './components/DataWipeDialog';
 import { OnboardingModal } from './components/OnboardingModal';
-import { ProfileModal } from './components/ProfileModal';
 import { SettingsModal } from './components/SettingsModal';
+import { ProfileModal } from './components/ProfileModal';
+import { AboutModal, APP_INFO } from './components/AboutModal';
 import { ContactDetailsModal } from './components/ContactDetailsModal';
 import { GroupCreatorModal } from './components/GroupCreatorModal';
 import { GroupDetailsModal } from './components/GroupDetailsModal';
@@ -64,9 +64,9 @@ export default function App() {
   // Modals
   const [isPairingOpen, setIsPairingOpen] = useState(false);
   const [initialPairCode, setInitialPairCode] = useState<string | undefined>(undefined);
-  const [isSecurityOpen, setIsSecurityOpen] = useState(false);
-  const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isWipeOpen, setIsWipeOpen] = useState(false);
   const [isGroupCreatorOpen, setIsGroupCreatorOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -488,18 +488,6 @@ export default function App() {
     }
   };
 
-  const handleToggleVerifyContact = async (deviceId: string, verified: boolean) => {
-    const status = verified ? 'VERIFIED' : 'UNVERIFIED';
-    await db.contacts.update(deviceId, { verificationStatus: status });
-    await refreshContacts();
-    if (activeContact?.deviceId === deviceId) {
-      setActiveContact((prev) => (prev ? { ...prev, verificationStatus: status } : null));
-    }
-    if (selectedContactForDetails?.deviceId === deviceId) {
-      setSelectedContactForDetails((prev) => (prev ? { ...prev, verificationStatus: status } : null));
-    }
-  };
-
   const handleSendMessage = async (text: string) => {
     if (!peerManagerRef.current) return;
     if (activeGroup) {
@@ -672,9 +660,9 @@ export default function App() {
         currentMobileTab={mobileTab}
         onMobileTabChange={setMobileTab}
         onOpenPairing={() => setIsPairingOpen(true)}
-        onOpenSecurity={() => setIsSecurityOpen(true)}
         onOpenProfile={() => setIsProfileOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenAbout={() => setIsAboutOpen(true)}
         onOpenWipe={() => setIsWipeOpen(true)}
       />
 
@@ -721,7 +709,8 @@ export default function App() {
             onStartCall={handleStartCall}
             onRetryMessage={handleRetryMessage}
             isPeerTyping={!!activeContact && !!typingPeers[activeContact.deviceId]}
-            onVerifyContact={() => setIsSecurityOpen(true)}
+            onClearHistory={handleClearHistory}
+            onDeleteContact={handleDeleteContact}
           />
           </div>
         </div>
@@ -765,7 +754,8 @@ export default function App() {
               onRetryMessage={handleRetryMessage}
               isPeerTyping={!!activeContact && !!typingPeers[activeContact.deviceId]}
               onBackToPeers={() => setMobileTab('peers')}
-              onVerifyContact={() => setIsSecurityOpen(true)}
+              onClearHistory={handleClearHistory}
+              onDeleteContact={handleDeleteContact}
             />
           )}
         </div>
@@ -788,7 +778,6 @@ export default function App() {
           onDeleteContact={handleDeleteContact}
           onClearHistory={handleClearHistory}
           onUpdateAlias={handleUpdateContactAlias}
-          onToggleVerify={handleToggleVerifyContact}
           onStartCall={(deviceId, alias, type) => {
             handleStartCall(deviceId, alias, type);
             setSelectedContactForDetails(null);
@@ -847,7 +836,7 @@ export default function App() {
         />
       )}
 
-      {/* Profile Modal */}
+      {/* Profile window */}
       <ProfileModal
         isOpen={isProfileOpen}
         identity={identity}
@@ -855,23 +844,25 @@ export default function App() {
         onUpdate={handleProfileUpdate}
       />
 
-      {/* Global Application Settings Modal */}
+      {/* Settings window: sounds and calls */}
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
-        relayStatus={relayStatus}
-        relayPingMs={relayPingMs}
-        storageMode={describeStorage(storageDriver)}
-        secureContext={secureContext}
+        relayStatusText={
+          relayStatus === 'ONLINE' ? 'Signaling online' : `Signaling ${relayStatus.toLowerCase()}`
+        }
+        vaultText={
+          secureContext
+            ? describeStorage(storageDriver)
+            : `${describeStorage(storageDriver)} · keys need https`
+        }
       />
 
-      {/* Cryptographic Security Modal */}
-      <SecurityModal
-        isOpen={isSecurityOpen}
-        identity={identity}
-        activeContact={activeContact}
-        onClose={() => setIsSecurityOpen(false)}
-        onContactUpdated={refreshContacts}
+      {/* About window */}
+      <AboutModal
+        isOpen={isAboutOpen}
+        onClose={() => setIsAboutOpen(false)}
+        statusLine={`${APP_INFO.name} ${APP_INFO.version} · ${describeStorage(storageDriver)}`}
       />
 
       {/* Local Vault Wipe Dialog */}

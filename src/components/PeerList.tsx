@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { Avatar } from './Avatar';
 import { ScryptChatLogo } from './ScryptChatLogo';
-import { describePresence } from '../utils/presence';
+import { describePresence, statusColor } from '../utils/presence';
 
 interface PeerListProps {
   contacts: ContactRecord[];
@@ -285,6 +285,18 @@ export const PeerList: React.FC<PeerListProps> = ({
                     {presence.state === 'online' && (
                       <span className="shrink-0 text-[10px] text-zinc-500" title={presence.detail}>
                         online
+                      </span>
+                    )}
+                    {contact.status && contact.status !== 'Online' && online && (
+                      <span
+                        className="shrink-0 inline-flex items-center gap-1 rounded-full border border-zinc-800 px-1.5 py-px text-[10px] text-zinc-400 max-w-[92px]"
+                        title={`Status: ${contact.status}`}
+                      >
+                        <span
+                          className="w-1.5 h-1.5 rounded-full shrink-0"
+                          style={{ backgroundColor: statusColor(contact.status) }}
+                        />
+                        <span className="truncate">{contact.status}</span>
                       </span>
                     )}
                     <span className="flex-1" />

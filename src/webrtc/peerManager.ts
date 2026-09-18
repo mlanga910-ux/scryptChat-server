@@ -141,6 +141,21 @@ export class PeerManager {
   private ephemeralPublicKeyBase64 = '';
   private handshakeSalt: Uint8Array | null = null;
   private challengeNonceA: Uint8Array | null = null;
+  /**
+   * The exact offer SDP string we handed to the relay. The transcript hash must
+   * fingerprint what the peer actually received, not the local description as
+   * it looks later (ICE gathering keeps appending candidates, which used to
+   * break the signature check on the initiator side).
+   */
+  private sentOfferSdp: string | null = null;
+
+  /** Max characters per profile frame — safely under every browser's limit. */
+  private static readonly PROFILE_CHUNK_CHARS = 7000;
+  /** Partially received chunked profiles, keyed by chunk set id. */
+  private profileChunks = new Map<
+    string,
+    { parts: Map<number, string>; total: number; startedAt: number }
+  >();
   private challengeNonceB: Uint8Array | null = null;
   private currentRole: 'initiator' | 'responder' = 'initiator';
 
@@ -271,7 +286,8 @@ export class PeerManager {
       identity.displayName !== this.identity.displayName ||
       identity.avatarUrl !== this.identity.avatarUrl ||
       identity.avatarColor !== this.identity.avatarColor ||
-      identity.statusBio !== this.identity.statusBio;
+      identity.statusBio !== this.identity.statusBio ||
+      identity.status !== this.identity.status;
     this.identity = identity;
     this.startRealtimeStream();
     // A photo or name change must reach paired devices immediately.
@@ -1064,6 +1080,8 @@ export class PeerManager {
     const offer = await this.peerConnection.createOffer();
     await this.peerConnection.setLocalDescription(offer);
     await this.waitForIceCandidates(this.peerConnection);
+    // Pin the negotiated SDP before anything else can touch it.
+    this.sentOfferSdp = this.peerConnection.localDescription!.sdp;
 
     const offerData: HandshakeOfferData = {
       protocolVer: PROTOCOL_VERSION,
@@ -1204,7 +1222,10 @@ export class PeerManager {
     );
 
     const ourIdentityRaw = base64ToArrayBuffer(this.identity.publicKeyRaw);
-    const sdpRaw = new TextEncoder().encode(this.peerConnection.localDescription!.sdp);
+    // Use the SDP we actually sent; a re-read local description may already
+    // contain extra ICE candidates and would produce a different transcript.
+    const negotiatedSdp = this.sentOfferSdp || this.peerConnection.localDescription!.sdp;
+    const sdpRaw = new TextEncoder().encode(negotiatedSdp);
     const sdpHash = await sha256(sdpRaw);
 
     const transcriptHash = await computeTranscriptHash({
@@ -1283,6 +1304,11 @@ export class PeerManager {
    */
   private onLinkReady() {
     void this.sendProfileUpdate();
+    // The other side may still be finishing its own handshake when our first
+    // push lands, so send the profile once more shortly after.
+    setTimeout(() => {
+      if (this.isConnected()) void this.sendProfileUpdate();
+    }, 2500);
     void this.detectTransport();
     // A fresh zero-latency link: replay everything still waiting on it.
     this.flushOutbox();
@@ -1318,6 +1344,8 @@ export class PeerManager {
       const next: PeerTransport = isHostPair ? 'lan' : 'direct';
       if (next !== this.transport || this.activeContact?.deviceId !== this.remoteDeviceId) {
         this.transport = next;
+        // Tune the file pipeline for the route we actually got.
+        fileTransferManager.setLanHint(next === 'lan');
         const deviceId = this.remoteDeviceId;
         this.events.onTransportUpdate?.({ deviceId, transport: next });
         if (deviceId) {
@@ -1349,6 +1377,7 @@ export class PeerManager {
       avatarUrl: existing?.avatarUrl,
       avatarColor: existing?.avatarColor,
       statusBio: existing?.statusBio,
+      status: existing?.status,
       profileSyncedAt: existing?.profileSyncedAt,
       identityPublicKeyPEM: publicKeyRaw || existing?.identityPublicKeyPEM || '',
       publicKeyRaw: publicKeyRaw || existing?.publicKeyRaw || '',
@@ -1363,6 +1392,45 @@ export class PeerManager {
     this.activeContact = contact;
     this.events.onPeerInfo(contact);
     return contact;
+  }
+
+  /**
+   * Buffers one profile chunk. Returns the full JSON text once every part of a
+   * set has arrived, otherwise null. Stale sets are dropped so a broken link
+   * cannot leak memory on a phone.
+   */
+  private collectProfileChunk(
+    chunk: { id?: string; index?: number; total?: number },
+    data: string
+  ): string | null {
+    const id = String(chunk?.id || 'default');
+    const index = Number(chunk?.index) || 0;
+    const total = Number(chunk?.total) || 1;
+    if (total <= 1 || total > 400) return null;
+
+    const now = Date.now();
+    for (const [key, entry] of this.profileChunks) {
+      if (now - entry.startedAt > 30000) this.profileChunks.delete(key);
+    }
+
+    const entry = this.profileChunks.get(id) || {
+      parts: new Map<number, string>(),
+      total,
+      startedAt: now,
+    };
+    entry.parts.set(index, data);
+    this.profileChunks.set(id, entry);
+
+    if (entry.parts.size < entry.total) return null;
+    this.profileChunks.delete(id);
+
+    let assembled = '';
+    for (let i = 0; i < entry.total; i += 1) {
+      const part = entry.parts.get(i);
+      if (part === undefined) return null;
+      assembled += part;
+    }
+    return assembled;
   }
 
   /**
@@ -1390,6 +1458,7 @@ export class PeerManager {
       avatarUrl: payload?.avatarUrl || undefined,
       avatarColor: payload?.avatarColor || existing.avatarColor,
       statusBio: payload?.statusBio || undefined,
+      status: payload?.status || undefined,
       alias: keepAlias ? existing.alias : payload?.displayName || existing.alias,
       lastSeenAt: Date.now(),
       profileSyncedAt: stamp,
@@ -1416,32 +1485,27 @@ export class PeerManager {
       updatedAt: stamp,
     };
 
-    // 1. Live link (instant).
+    // 1. Live link (instant). Photos are chunked so no browser's data-channel
+    //    message limit can silently swallow the profile.
+    let deliveredDirectly = false;
     if (this.isConnected() && this.cryptoSession && this.dataChannel) {
-      try {
-        const header = buildPacketHeader(
-          PacketType.PROFILE_INFO,
-          this.cryptoSession.sessionId,
-          0n,
-          0
-        );
-        const frame = await this.cryptoSession.encryptFrame(
-          header,
-          new TextEncoder().encode(JSON.stringify(profile))
-        );
-        this.dataChannel.send(frame);
-      } catch (err) {
-        console.warn('Profile push over data channel failed:', err);
-      }
+      deliveredDirectly = await this.sendProfileOverDataChannel(profile);
     }
 
-    // 2. Relay mailbox for contacts that are not directly connected.
+    // 2. Relay mailbox for contacts that are not directly connected — and for
+    //    the connected one when the direct push did not go through.
     try {
       const contacts = await db.contacts.toArray();
       await Promise.all(
         contacts.map(async (contact) => {
           if (contact.deviceId === this.identity.deviceId) return;
-          if (this.isConnected() && contact.deviceId === this.remoteDeviceId) return;
+          if (
+            deliveredDirectly &&
+            this.isConnected() &&
+            contact.deviceId === this.remoteDeviceId
+          ) {
+            return;
+          }
           const envelope = {
             type: 'PROFILE',
             senderDeviceId: this.identity.deviceId,
@@ -1463,6 +1527,44 @@ export class PeerManager {
       );
     } catch {
       /* the live link already carried it when possible */
+    }
+  }
+
+  /**
+   * Sends the profile over the live data channel, splitting large payloads
+   * (a base64 photo easily passes 32 KB) into independent frames.
+   */
+  private async sendProfileOverDataChannel(profile: ProfileSyncPayload): Promise<boolean> {
+    const session = this.cryptoSession;
+    const channel = this.dataChannel;
+    if (!session || !channel || channel.readyState !== 'open') return false;
+
+    try {
+      const json = JSON.stringify(profile);
+      const header = buildPacketHeader(PacketType.PROFILE_INFO, session.sessionId, 0n, 0);
+
+      if (json.length <= PeerManager.PROFILE_CHUNK_CHARS) {
+        const frame = await session.encryptFrame(header, new TextEncoder().encode(json));
+        channel.send(frame);
+        return true;
+      }
+
+      const total = Math.ceil(json.length / PeerManager.PROFILE_CHUNK_CHARS);
+      const chunkId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+      for (let index = 0; index < total; index += 1) {
+        const slice = json.slice(
+          index * PeerManager.PROFILE_CHUNK_CHARS,
+          (index + 1) * PeerManager.PROFILE_CHUNK_CHARS
+        );
+        const payload = JSON.stringify({ chunk: { id: chunkId, index, total }, data: slice });
+        const chunkHeader = buildPacketHeader(PacketType.PROFILE_INFO, session.sessionId, 0n, index);
+        const frame = await session.encryptFrame(chunkHeader, new TextEncoder().encode(payload));
+        channel.send(frame);
+      }
+      return true;
+    } catch (err) {
+      console.warn('Profile push over data channel failed, falling back to the relay:', err);
+      return false;
     }
   }
 
@@ -1510,9 +1612,10 @@ export class PeerManager {
 
     dc.onclose = () => {
       this.setState('DISCONNECTED');
-      this.stopHeartbeat();
-      this.transport = 'relay';
-      if (this.transportTimer) {
+    this.stopHeartbeat();
+    this.sentOfferSdp = null;
+    this.transport = 'relay';
+    if (this.transportTimer) {
         clearInterval(this.transportTimer);
         this.transportTimer = null;
       }
@@ -1636,7 +1739,15 @@ export class PeerManager {
         case PacketType.PROFILE_INFO: {
           try {
             const remoteProfile = JSON.parse(new TextDecoder().decode(decryptedPayload));
-            await this.applyRemoteProfile(remoteProfile, this.remoteDeviceId);
+            if (remoteProfile?.chunk && typeof remoteProfile.data === 'string') {
+              // Large profile (custom photo): reassemble the chunks first.
+              const assembled = this.collectProfileChunk(remoteProfile.chunk, remoteProfile.data);
+              if (assembled) {
+                await this.applyRemoteProfile(JSON.parse(assembled), this.remoteDeviceId);
+              }
+            } else {
+              await this.applyRemoteProfile(remoteProfile, this.remoteDeviceId);
+            }
           } catch (err) {
             console.warn('Profile packet parse error:', err);
           }
