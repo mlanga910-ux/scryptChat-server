@@ -913,6 +913,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
                       {(!msg.status || msg.status === 'sending' || msg.status === 'queued') && (
                         <Clock className="w-3 h-3 text-zinc-500" aria-label="Sending" />
                       )}
+                      {msg.status === 'sent' && (
+                        <Check className="w-3 h-3 text-zinc-400" aria-label="Sent" />
+                      )}
                       {msg.status === 'delivered' && (
                         <CheckCheck className="w-3 h-3 text-zinc-400" aria-label="Delivered" />
                       )}

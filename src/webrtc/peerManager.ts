@@ -326,11 +326,15 @@ export class PeerManager {
 
       sse.addEventListener('connected', () => {
         this.relayStatus = 'ONLINE';
-        // No invented latency: the status chip shows a ping only once the health
-        // probe has actually measured one.
         this.events.onRelayStatusChange?.('ONLINE', { status: 'online' }, undefined, undefined);
-        // The stream is back: anything still unsent gets another chance.
+        // The stream is back: pull queued messages immediately, then retry
+        // anything still waiting in the outbox.
+        void this.pullMailboxNow();
         this.flushOutbox();
+        // Rapid catch-up: a device that just woke up may have missed several
+        // relay pushes while the stream was down.
+        setTimeout(() => void this.pullMailboxNow(), 800);
+        setTimeout(() => void this.pullMailboxNow(), 2000);
       });
 
       sse.addEventListener('mailbox_item', (e: MessageEvent) => {
@@ -493,8 +497,11 @@ export class PeerManager {
     for (const entry of Array.from(this.outbox.values())) {
       if (entry.nextAttemptAt > now) continue;
 
+      // After the first successful send, keep retrying until the DELIVERY_ACK
+      // arrives — messages in 'sent' state must not be abandoned.  Only mark
+      // 'failed' if we never managed to push the payload at all.
       const maxAttempts = entry.everSent
-        ? 6
+        ? 50
         : entry.kind === 'file'
         ? 60
         : PeerManager.MAX_DELIVERY_ATTEMPTS;
@@ -510,7 +517,9 @@ export class PeerManager {
         await this.deliverOutboxEntry(entry);
         if (!entry.everSent) {
           entry.everSent = true;
-          await this.setMessageStatus(entry.messageId, 'delivered');
+          // Mark as 'sent' — the peer has not confirmed yet. Only a
+          // DELIVERY_ACK from the receiver upgrades this to 'delivered'.
+          await this.setMessageStatus(entry.messageId, 'sent');
           delay = 4000;
         }
       } catch (err: any) {
