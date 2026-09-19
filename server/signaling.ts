@@ -839,6 +839,7 @@ interface RelayFileRecord {
   createdAt: number;
   readyAt?: number;
   notifiedAt?: number;
+  lastRenotifyAt?: number;
 }
 
 const relayFiles = new Map<string, RelayFileRecord>();
@@ -1074,6 +1075,42 @@ signalingRouter.post(
     });
   }
 );
+
+/**
+ * Reports whether the relay still holds a complete transfer, without moving any
+ * bytes. A sender uses it before a retry: if the file is already here there is
+ * nothing to upload, and if it is gone (expired, evicted) the sender knows to
+ * send it again instead of assuming it is safely stored.
+ */
+signalingRouter.get('/file/:transferId/status', (req: Request, res: Response) => {
+  const record = relayFiles.get(String(req.params.transferId || ''));
+  const token = typeof req.query.token === 'string' ? req.query.token : '';
+  if (!record || !tokenMatches(record.token, token)) {
+    res.json({ success: true, known: false, ready: false, received: 0, total: 0 });
+    return;
+  }
+  const ready = !!record.readyAt && record.received >= record.chunkTotal;
+
+  // A sender whose receipt never arrived asks for the recipient to be told
+  // again: the recipient answers with a fresh receipt the moment it sees a file
+  // it already has, which is what recovers a receipt lost to a reload. Throttled
+  // so a retry loop cannot turn into a stream of notifications.
+  if (ready && req.query.renotify === '1') {
+    const now = Date.now();
+    if (now - (record.lastRenotifyAt || 0) > 60_000) {
+      record.lastRenotifyAt = now;
+      notifyAttachmentReady(record);
+    }
+  }
+
+  res.json({
+    success: true,
+    known: true,
+    ready,
+    received: record.received,
+    total: record.chunkTotal,
+  });
+});
 
 /**
  * Downloads a completed attachment as one binary stream, in chunk order.

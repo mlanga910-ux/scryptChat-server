@@ -494,6 +494,33 @@ export class PeerManager {
           nextAttemptAt: Date.now() + 1500,
         });
       }
+
+      // Attachments that reached the relay but were never confirmed are checked
+      // once per session: the relay forgets its copy after a day, and a photo
+      // nobody can download is a message that silently never arrives. The
+      // uploader asks the relay first, so this costs no bandwidth while the file
+      // is still there — and restores it when it is not.
+      const unconfirmed = await db.messages
+        .filter(
+          (m) =>
+            m.direction === 'OUTBOUND' &&
+            !!m.fileId &&
+            m.status === 'sent' &&
+            m.timestamp < Date.now() - 60 * 60 * 1000
+        )
+        .toArray();
+      for (const msg of unconfirmed.slice(-20)) {
+        if (!msg.messageId || !msg.fileId) continue;
+        this.registerOutbox({
+          messageId: msg.messageId,
+          chatDeviceId: msg.chatDeviceId,
+          kind: 'file',
+          fileId: msg.fileId,
+          transferToken: msg.transferToken,
+          attempts: 0,
+          nextAttemptAt: Date.now() + 8000,
+        });
+      }
     } catch {
       /* history stays usable either way */
     }
@@ -813,6 +840,17 @@ export class PeerManager {
       status: 'transferring',
     };
     this.events.onFileProgress({ ...progress });
+
+    // If the relay already holds this exact transfer — a retry after a reload, an
+    // upload that finished while the page was closing — there is not a byte left
+    // to send, so the peer can just download it.
+    if (await this.relayTransferReady(entry.messageId, token)) {
+      progress.transferredChunks = totalChunks;
+      progress.progressPercent = 100;
+      progress.status = 'completed';
+      this.events.onFileProgress({ ...progress });
+      return token;
+    }
 
     let nextChunk = 0;
     let uploaded = 0;
@@ -1613,6 +1651,30 @@ export class PeerManager {
           8000
         ).catch(() => {});
       }
+    }
+  }
+
+  /**
+   * True when the relay already holds the complete attachment. Asks the relay to
+   * remind the recipient as well, because the recipient answers with a fresh
+   * receipt and this is how a receipt lost to a reload finds its way home.
+   */
+  private async relayTransferReady(transferId: string, token: string): Promise<boolean> {
+    try {
+      const response = await this.fetchRelay(
+        `/api/signaling/file/${encodeURIComponent(transferId)}/status?renotify=1&token=${encodeURIComponent(
+          token
+        )}`,
+        { method: 'GET', headers: { Accept: 'application/json' } },
+        8000
+      );
+      if (!response.ok) return false;
+      const data: any = await response.json();
+      return !!data?.ready;
+    } catch {
+      // Unknown: upload it. Sending bytes again is always safe, assuming they
+      // are already there is not.
+      return false;
     }
   }
 
