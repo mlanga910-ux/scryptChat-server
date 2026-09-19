@@ -219,15 +219,22 @@ export const ChatView: React.FC<ChatViewProps> = ({
     let isCancelled = false;
     const loadBlobs = async () => {
       for (const msg of messages) {
-        if (msg.fileId && !fileRecordsMap.has(msg.fileId)) {
-          const rec = await db.files.get(msg.fileId);
-          if (rec && !isCancelled) {
-            setFileRecordsMap((prev) => new Map(prev).set(msg.fileId!, rec));
-            if (rec.blobRef) {
-              const url = URL.createObjectURL(rec.blobRef);
-              setDownloadUrls((prev) => new Map(prev).set(msg.fileId!, url));
-            }
-          }
+        if (!msg.fileId) continue;
+        if (fileRecordsMap.has(msg.fileId) && downloadUrls.has(msg.fileId)) continue;
+        // The record carried by the message row is authoritative and needs no
+        // database round trip, so a photo appears the moment it is sent and a
+        // received one appears as soon as its bytes are stored.
+        const inline = msg.fileRecord;
+        const rec = inline?.blobRef ? inline : await db.files.get(msg.fileId);
+        if (!rec || isCancelled) continue;
+        setFileRecordsMap((prev) =>
+          prev.has(rec.fileId) ? prev : new Map(prev).set(rec.fileId, rec)
+        );
+        if (rec.blobRef && !downloadUrls.has(rec.fileId)) {
+          const url = URL.createObjectURL(rec.blobRef);
+          setDownloadUrls((prev) =>
+            prev.has(rec.fileId) ? prev : new Map(prev).set(rec.fileId!, url)
+          );
         }
       }
     };
@@ -236,6 +243,21 @@ export const ChatView: React.FC<ChatViewProps> = ({
       isCancelled = true;
     };
   }, [messages]);
+
+  // Attachments are handed out as object URLs; releasing them when the
+  // conversation closes keeps a long session from leaking memory.
+  const downloadUrlsRef = useRef(downloadUrls);
+  downloadUrlsRef.current = downloadUrls;
+  useEffect(
+    () => () => {
+      downloadUrlsRef.current.forEach((url) => {
+        try {
+          URL.revokeObjectURL(url);
+        } catch {}
+      });
+    },
+    []
+  );
 
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -707,7 +729,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         />
                       ) : (
                         <div className="w-64 h-48 bg-zinc-900 flex items-center justify-center text-xs text-zinc-500">
-                          Decrypting photo...
+                          {fileRec?.blobRef ? 'Decrypting photo…' : 'Photo unavailable'}
                         </div>
                       )}
                       <div className="p-2.5 flex items-center justify-between gap-2 border-t border-black/10">
@@ -760,7 +782,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         />
                       ) : (
                         <div className="w-64 h-40 bg-zinc-900 grid place-items-center text-xs text-zinc-500">
-                          Decrypting video…
+                          {fileRec?.blobRef ? 'Decrypting video…' : 'Video unavailable'}
                         </div>
                       )}
                       <div className="p-2.5 flex items-center justify-between gap-2 border-t border-black/10">

@@ -556,8 +556,11 @@ export default function App() {
       return;
     }
     if (!activeContact) return;
-    await peerManagerRef.current.sendFile(file, activeContact.deviceId);
-    // The sidebar preview is refreshed by the file's own status events.
+    // The outbox owns delivery (direct link first, then the durable relay and
+    // its receipt), so this returns as soon as the file is stored locally: the
+    // photo appears in the conversation instantly and the ticks follow the
+    // real delivery state instead of a best-effort upload.
+    await peerManagerRef.current.sendAttachment(file, activeContact.deviceId);
   };
 
   const handleUpdateGroup = (updated: GroupRecord) => {

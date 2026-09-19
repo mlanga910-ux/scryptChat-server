@@ -244,13 +244,12 @@ signalingRouter.get('/stream/:deviceId', (req: Request, res: Response) => {
   // Send initial connected handshake
   res.write(`event: connected\ndata: ${JSON.stringify({ success: true, serverTime: Date.now(), deviceId })}\n\n`);
 
-  // Check if there are any queued mailbox messages and flush immediately
+  // Flush whatever is queued for this device. The items stay queued until the
+  // client acknowledges them, so a stream that drops mid-write cannot lose a
+  // message: it is simply offered again on the next connect or poll.
   const pending = mailboxes.get(deviceId) || [];
-  if (pending.length > 0) {
-    for (const item of pending) {
-      res.write(`event: mailbox_item\ndata: ${JSON.stringify(item)}\n\n`);
-    }
-    mailboxes.delete(deviceId);
+  for (const item of pending) {
+    res.write(`event: mailbox_item\ndata: ${JSON.stringify(item)}\n\n`);
   }
 
   // Keep-alive heartbeat ping every 15s to prevent cloud proxy timeouts
@@ -659,7 +658,9 @@ signalingRouter.get('/room/:roomId/status', (req: Request, res: Response) => {
  * 6. Offline Encrypted Mailbox (Queue messages/files when recipient is offline)
  */
 signalingRouter.post('/mailbox/send', (req: Request, res: Response) => {
-  if (!allowRequest(req, 'mailbox-send', 240, 60_000)) {
+  // Attachments arrive as bursts of small chunks, so the write budget is a
+  // little more generous than a pure text relay would need.
+  if (!allowRequest(req, 'mailbox-send', 900, 60_000)) {
     res.status(429).json({ error: 'Relay rate limit reached. Slow down for a moment.' });
     return;
   }
@@ -700,13 +701,16 @@ signalingRouter.post('/mailbox/send', (req: Request, res: Response) => {
     timestamp: Date.now(),
   };
 
-  // Push directly to active real-time SSE stream if recipient is online
+  // Push directly over the real-time SSE stream when the recipient is online…
   const pushed = pushSSEEventToDevice(recipientDeviceId, 'mailbox_item', item);
-  if (!pushed) {
-    const queue = mailboxes.get(recipientDeviceId) || [];
-    queue.push(item);
-    mailboxes.set(recipientDeviceId, queue);
-  }
+  // …and keep the item queued until the recipient explicitly acknowledges it.
+  // A push can land while a tab is reloading and a pull response can be lost on
+  // a flaky network; retention means neither case can drop a message.
+  const queue = mailboxes.get(recipientDeviceId) || [];
+  queue.push(item);
+  // Bound the memory one device can park on the relay.
+  if (queue.length > 240) queue.splice(0, queue.length - 240);
+  mailboxes.set(recipientDeviceId, queue);
 
   res.json({ success: true, messageId: item.id, deliveredRealtime: pushed });
 });
@@ -718,10 +722,35 @@ signalingRouter.get('/mailbox/pull/:deviceId', (req: Request, res: Response) => 
       lastSeen: Date.now(),
     });
   }
+  // Items stay queued: the client drops them with /mailbox/ack once they are
+  // stored on the device, which makes delivery idempotent and retry-safe.
   const items = mailboxes.get(deviceId) || [];
-  // Clear after pulling
-  mailboxes.delete(deviceId);
   res.json({ success: true, items });
+});
+
+/**
+ * Drops mailbox items the recipient has stored locally. Called for every push
+ * and every poll result, so the queue only ever holds what is still missing.
+ */
+signalingRouter.post('/mailbox/ack', (req: Request, res: Response) => {
+  const { deviceId, ids } = req.body || {};
+  if (!deviceId || !Array.isArray(ids) || ids.length === 0) {
+    res.status(400).json({ error: 'deviceId and a non-empty ids array are required' });
+    return;
+  }
+
+  const items = mailboxes.get(deviceId);
+  if (items && items.length > 0) {
+    const acknowledged = new Set<string>(ids.map((id: unknown) => String(id)));
+    const remaining = items.filter((item) => !acknowledged.has(item.id));
+    if (remaining.length > 0) {
+      mailboxes.set(deviceId, remaining);
+    } else {
+      mailboxes.delete(deviceId);
+    }
+  }
+
+  res.json({ success: true, remaining: (mailboxes.get(deviceId) || []).length });
 });
 
 /**
