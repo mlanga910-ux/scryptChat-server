@@ -843,10 +843,39 @@ interface RelayFileRecord {
 }
 
 const relayFiles = new Map<string, RelayFileRecord>();
-let relayStoredBytes = 0;
 
 const relayChunkPath = (record: RelayFileRecord, index: number): string =>
   path.join(record.dir, `chunk_${String(index).padStart(6, '0')}.bin`);
+
+/**
+ * How much of a transfer is really on disk. Counters are derived from storage
+ * rather than accumulated per request, so a restarted relay, a re-sent chunk and
+ * a resumed upload all agree on the same answer instead of drifting apart.
+ */
+async function countStoredChunks(
+  record: RelayFileRecord
+): Promise<{ count: number; bytes: number }> {
+  let count = 0;
+  let bytes = 0;
+  try {
+    const entries = await fs.promises.readdir(record.dir);
+    for (const entry of entries) {
+      const match = /^chunk_(\d{6})\.bin$/.exec(entry);
+      if (!match) continue;
+      if (Number(match[1]) >= record.chunkTotal) continue;
+      const stat = await fs.promises.stat(path.join(record.dir, entry)).catch(() => null);
+      if (!stat || stat.size === 0) continue;
+      count += 1;
+      bytes += stat.size;
+    }
+  } catch {
+    /* nothing stored yet */
+  }
+  return { count, bytes };
+}
+
+const totalRelayStoredBytes = (): number =>
+  Array.from(relayFiles.values()).reduce((sum, record) => sum + record.storedBytes, 0);
 
 /** Forgets a transfer and deletes its bytes. Safe to call twice. */
 async function dropRelayFile(record: RelayFileRecord | undefined): Promise<void> {
@@ -854,17 +883,22 @@ async function dropRelayFile(record: RelayFileRecord | undefined): Promise<void>
   if (relayFiles.get(record.transferId) === record) {
     relayFiles.delete(record.transferId);
   }
-  relayStoredBytes = Math.max(0, relayStoredBytes - record.storedBytes);
   record.storedBytes = 0;
   await fs.promises.rm(record.dir, { recursive: true, force: true }).catch(() => {});
 }
 
-/** Keeps the relay inside its temp-storage budget by dropping the oldest. */
+/**
+ * Keeps the relay inside its temp-storage budget by dropping the oldest.
+ * Only finished transfers are dropped: evicting one mid-upload would strand an
+ * upload whose sender has already sent all of its chunks.
+ */
 async function enforceRelayStorageBudget(): Promise<void> {
-  if (relayStoredBytes <= RELAY_FILE_MAX_STORED_BYTES) return;
-  const oldest = Array.from(relayFiles.values()).sort((a, b) => a.createdAt - b.createdAt);
+  if (totalRelayStoredBytes() <= RELAY_FILE_MAX_STORED_BYTES) return;
+  const oldest = Array.from(relayFiles.values())
+    .filter((record) => !!record.readyAt)
+    .sort((a, b) => a.createdAt - b.createdAt);
   for (const record of oldest) {
-    if (relayStoredBytes <= RELAY_FILE_MAX_STORED_BYTES) break;
+    if (totalRelayStoredBytes() <= RELAY_FILE_MAX_STORED_BYTES) break;
     await dropRelayFile(record);
   }
 }
@@ -982,13 +1016,12 @@ signalingRouter.post(
     }
 
     if (!record) {
-      const dir = path.join(RELAY_FILE_ROOT, transferId.replace(/[^A-Za-z0-9_-]/g, ''));
-      try {
-        await fs.promises.mkdir(dir, { recursive: true });
-      } catch {
-        res.status(500).json({ error: 'Relay storage is unavailable.' });
-        return;
-      }
+      // The record is registered *before* the first await. A sender uploads on
+      // several parallel lanes, so the first two chunks of a new attachment
+      // arrive together; creating the record twice used to give each copy its
+      // own counters, each counting only its own chunk. The transfer then never
+      // looked complete, the recipient was never notified, and the sender still
+      // showed it as sent — precisely a photo that never arrives.
       record = {
         transferId,
         token,
@@ -1004,28 +1037,10 @@ signalingRouter.post(
         chunkTotal,
         received: 0,
         storedBytes: 0,
-        dir,
+        dir: path.join(RELAY_FILE_ROOT, transferId.replace(/[^A-Za-z0-9_-]/g, '')),
         createdAt: Date.now(),
       };
-
-      // A transfer that was already partly uploaded (a retry after a reload or a
-      // relay restart) resumes from the chunks still on disk.
-      try {
-        const existing = await fs.promises.readdir(dir);
-        for (const entry of existing) {
-          const match = /^chunk_(\d{6})\.bin$/.exec(entry);
-          if (!match) continue;
-          if (Number(match[1]) >= chunkTotal) continue;
-          const stat = await fs.promises.stat(path.join(dir, entry)).catch(() => null);
-          if (!stat || stat.size === 0) continue;
-          record.received += 1;
-          record.storedBytes += stat.size;
-        }
-      } catch {
-        /* a fresh transfer simply starts empty */
-      }
       relayFiles.set(transferId, record);
-      relayStoredBytes += record.storedBytes;
     }
 
     if (record.received >= record.chunkTotal && record.readyAt) {
@@ -1036,15 +1051,12 @@ signalingRouter.post(
 
     const chunkFile = relayChunkPath(record, index);
     const tempFile = `${chunkFile}.part`;
-    // Whether this index was already stored decides the accounting: a chunk that
-    // is re-uploaded (a retry, or a resumed transfer) must not be counted twice,
-    // or the reported size would no longer describe what the file really is.
-    const alreadyStored = await fs.promises
-      .stat(chunkFile)
-      .then((stat) => stat.size)
-      .catch(() => 0);
     try {
+      // Safe on every request: creating an existing directory is a no-op.
+      await fs.promises.mkdir(record.dir, { recursive: true });
       await fs.promises.writeFile(tempFile, body);
+      // Rename is atomic, so a chunk file is either absent or complete — a
+      // download can never read a half-written chunk.
       await fs.promises.rename(tempFile, chunkFile);
     } catch {
       await fs.promises.rm(tempFile, { force: true }).catch(() => {});
@@ -1052,15 +1064,14 @@ signalingRouter.post(
       return;
     }
 
-    if (alreadyStored === 0) {
-      record.received += 1;
-    } else {
-      record.storedBytes -= alreadyStored;
-      relayStoredBytes -= alreadyStored;
-    }
-    record.storedBytes += body.byteLength;
-    relayStoredBytes += body.byteLength;
+    // Derived from what is on disk, so parallel lanes, retries and a resumed
+    // transfer all land on the same count.
+    const stored = await countStoredChunks(record);
+    record.received = stored.count;
+    record.storedBytes = stored.bytes;
 
+    // Completion is decided once: the check and the flag that records it happen
+    // in the same synchronous step, so two lanes cannot notify twice.
     if (record.received >= record.chunkTotal && !record.readyAt) {
       record.readyAt = Date.now();
       notifyAttachmentReady(record);
