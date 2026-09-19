@@ -3,7 +3,16 @@ export const PROTOCOL_VERSION: ProtocolVersion = 0x0301;
 
 export type VerificationStatus = 'UNVERIFIED' | 'TOFU' | 'VERIFIED';
 export type MessageDirection = 'INBOUND' | 'OUTBOUND';
-export type MessageStatus = 'queued' | 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | 'verified';
+export type MessageStatus =
+  | 'queued'
+  | 'sending'
+  | 'sent'
+  | 'delivered'
+  | 'read'
+  | 'failed'
+  | 'verified'
+  /** Inbound attachment whose bytes are still on the way. */
+  | 'receiving';
 export type RelayStatus = 'ONLINE' | 'OFFLINE' | 'CONNECTING' | 'RESTARTING';
 
 export interface RelayServerStats {
@@ -185,6 +194,11 @@ export interface MessageRecord {
   timestamp: number;
   status?: MessageStatus;
   offlineEnvelope?: boolean;
+  /**
+   * Secret of the relay transfer that carries this attachment's bytes. Persisted
+   * so a reload resumes the same upload instead of being refused as a stranger.
+   */
+  transferToken?: string;
 }
 
 export interface FileTransferProgress {

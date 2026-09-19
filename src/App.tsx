@@ -271,6 +271,14 @@ export default function App() {
               }
               return [...prev, progress];
             });
+            // A finished transfer lingers briefly (so the last frame is seen)
+            // and then leaves the list, keeping this state from growing.
+            if (progress.status !== 'transferring') {
+              const finishedId = progress.fileId;
+              setTimeout(() => {
+                setActiveTransfers((prev) => prev.filter((p) => p.fileId !== finishedId));
+              }, 1200);
+            }
           },
           onFileCompleted: async () => {
             await refreshContacts();

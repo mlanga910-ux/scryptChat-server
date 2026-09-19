@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   ContactRecord,
   FileRecord,
@@ -33,6 +33,7 @@ import {
   Plus,
   Wifi,
   UploadCloud,
+  ArrowUpFromLine,
 } from 'lucide-react';
 import { db } from '../db/index';
 import { ImageViewerModal } from './ImageViewerModal';
@@ -124,6 +125,12 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
+  // Transfers still moving. Completed ones are dropped so the strip disappears
+  // by itself instead of leaving a finished bar on screen.
+  const liveTransfers = useMemo(
+    () => activeTransfers.filter((transfer) => transfer.status === 'transferring'),
+    [activeTransfers]
+  );
 
   const [selectedSnippetForModal, setSelectedSnippetForModal] = useState<CodeSnippet | null>(null);
   const [isCodeModalOpen, setIsCodeModalOpen] = useState(false);
@@ -242,7 +249,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [messages]);
+    // Re-runs when a freshly stored file record appears, so an attachment is
+    // rendered the moment it lands instead of waiting for a new message.
+  }, [messages, fileRecordsMap]);
 
   // Attachments are handed out as object URLs; releasing them when the
   // conversation closes keeps a long session from leaking memory.
@@ -729,7 +738,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         />
                       ) : (
                         <div className="w-64 h-48 bg-zinc-900 flex items-center justify-center text-xs text-zinc-500">
-                          {fileRec?.blobRef ? 'Decrypting photo…' : 'Photo unavailable'}
+                          {fileRec?.blobRef ? 'Loading photo…' : 'Photo unavailable'}
                         </div>
                       )}
                       <div className="p-2.5 flex items-center justify-between gap-2 border-t border-black/10">
@@ -782,7 +791,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         />
                       ) : (
                         <div className="w-64 h-40 bg-zinc-900 grid place-items-center text-xs text-zinc-500">
-                          {fileRec?.blobRef ? 'Decrypting video…' : 'Video unavailable'}
+                          {fileRec?.blobRef ? 'Loading video…' : 'Video unavailable'}
                         </div>
                       )}
                       <div className="p-2.5 flex items-center justify-between gap-2 border-t border-black/10">
@@ -1001,6 +1010,36 @@ export const ChatView: React.FC<ChatViewProps> = ({
             </span>
           )}
         </button>
+      )}
+
+      {/* Live transfers: an honest progress line instead of a silent wait */}
+      {liveTransfers.length > 0 && (
+        <div className="px-3 sm:px-6 pb-2 shrink-0 space-y-1.5">
+          {liveTransfers.map((transfer) => (
+            <div
+              key={`${transfer.direction}-${transfer.fileId}`}
+              className="flex items-center gap-2.5 rounded-2xl border border-zinc-800 bg-zinc-900/70 px-3 py-2 text-[11px] text-zinc-300"
+            >
+              <ArrowUpFromLine
+                className={`h-3.5 w-3.5 shrink-0 ${
+                  transfer.direction === 'OUTBOUND' ? 'text-emerald-400' : 'text-sky-400'
+                } ${transfer.direction === 'INBOUND' ? 'rotate-180' : ''}`}
+              />
+              <span className="truncate max-w-[38%] font-medium">
+                {transfer.direction === 'OUTBOUND' ? 'Sending' : 'Receiving'} {transfer.name}
+              </span>
+              <div className="flex-1 h-1 rounded-full bg-zinc-800 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-sky-400 transition-[width] duration-300"
+                  style={{ width: `${Math.max(4, Math.min(100, transfer.progressPercent || 0))}%` }}
+                />
+              </div>
+              <span className="tabular-nums text-zinc-500 shrink-0">
+                {Math.round(transfer.progressPercent || 0)}%
+              </span>
+            </div>
+          ))}
+        </div>
       )}
 
       {/* Attachment error (e.g. size limits on the relay path) */}

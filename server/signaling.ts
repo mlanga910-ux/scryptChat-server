@@ -1,5 +1,9 @@
-import { Router, Request, Response } from 'express';
+import express, { Router, Request, Response } from 'express';
 import { randomBytes, timingSafeEqual } from 'crypto';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { once } from 'events';
 
 interface RoomPeer {
   deviceId: string;
@@ -44,6 +48,12 @@ interface EncryptedMailboxItem {
   };
   fileBase64Chunk?: string; // For small offline file transfers / images
   timestamp: number;
+  /**
+   * How many times this item has been handed to the recipient. Items are kept
+   * until the recipient acknowledges them, so a broken or outdated client that
+   * never acknowledges cannot make the relay redeliver forever.
+   */
+  deliveries?: number;
 }
 
 const rooms = new Map<string, SignalingRoom>();
@@ -58,6 +68,14 @@ const devicePresences = new Map<
   { lastSeen: number; online?: boolean; displayName?: string }
 >();
 const PRESENCE_WINDOW_MS = 30000;
+/**
+ * A queued item is only ever dropped when the recipient acknowledges it (or the
+ * 24 hour TTL lapses). It used to be dropped after a fixed number of handovers,
+ * which silently destroyed anything whose processing outlived those handovers —
+ * a photo whose download took a minute, a tab that froze mid-store. Retention
+ * with bounded queues is the correct trade: nothing is lost, memory stays flat.
+ */
+const MAX_MAILBOX_ITEMS_PER_DEVICE = 240;
 
 // Local Network (LAN) discovery registry
 interface LanDeviceRecord {
@@ -190,6 +208,12 @@ setInterval(() => {
     // Prune presences older than 10 minutes
     if (now - presence.lastSeen > 10 * 60 * 1000) {
       devicePresences.delete(deviceId);
+    }
+  }
+  // Attachments the recipient never collected are dropped after the TTL.
+  for (const record of Array.from(relayFiles.values())) {
+    if (now - record.createdAt > RELAY_FILE_TTL_MS) {
+      void dropRelayFile(record);
     }
   }
   // Prune LAN devices inactive for > 30 seconds
@@ -708,10 +732,14 @@ signalingRouter.post('/mailbox/send', (req: Request, res: Response) => {
   // a flaky network; retention means neither case can drop a message.
   const queue = mailboxes.get(recipientDeviceId) || [];
   queue.push(item);
-  // Bound the memory one device can park on the relay.
-  if (queue.length > 240) queue.splice(0, queue.length - 240);
+  // Bound the memory one device can park on the relay. Text and attachment
+  // notifications are tiny, so this is a very large number of items.
+  if (queue.length > MAX_MAILBOX_ITEMS_PER_DEVICE) {
+    queue.splice(0, queue.length - MAX_MAILBOX_ITEMS_PER_DEVICE);
+  }
   mailboxes.set(recipientDeviceId, queue);
 
+  item.deliveries = pushed ? 1 : 0;
   res.json({ success: true, messageId: item.id, deliveredRealtime: pushed });
 });
 
@@ -723,8 +751,15 @@ signalingRouter.get('/mailbox/pull/:deviceId', (req: Request, res: Response) => 
     });
   }
   // Items stay queued: the client drops them with /mailbox/ack once they are
-  // stored on the device, which makes delivery idempotent and retry-safe.
-  const items = mailboxes.get(deviceId) || [];
+  // stored on the device, which makes delivery idempotent and retry-safe. A
+  // plain pull never consumes an item, so however long the client needs to store
+  // it (a big attachment, a frozen tab, a reconnect) the item is still here.
+  const queued = mailboxes.get(deviceId) || [];
+  const items: EncryptedMailboxItem[] = [];
+  for (const item of queued) {
+    item.deliveries = (item.deliveries || 0) + 1;
+    items.push(item);
+  }
   res.json({ success: true, items });
 });
 
@@ -751,6 +786,348 @@ signalingRouter.post('/mailbox/ack', (req: Request, res: Response) => {
   }
 
   res.json({ success: true, remaining: (mailboxes.get(deviceId) || []).length });
+});
+
+// ==========================================
+// 6.5 DURABLE ATTACHMENT RELAY (BINARY, CHUNKED)
+// ==========================================
+//
+// Attachments travel here as raw binary chunks instead of base64 blobs inside
+// mailbox items. The relay writes each chunk straight to disk and, only once the
+// last one has landed, queues a single tiny FILE_READY item in the recipient's
+// mailbox. The recipient then downloads the assembled file with one GET,
+// verifies its SHA-256 locally, stores it and acknowledges it, which frees the
+// bytes on the relay.
+//
+// Why this shape:
+//   * an upload is a series of small, independent, idempotent requests, so a
+//     dropped connection resumes at the next chunk instead of restarting the
+//     whole file (and re-uploading a chunk already stored costs nothing);
+//   * a download is a single complete file, so a recipient either has the whole
+//     attachment or nothing at all — never a half photo in someone's chat;
+//   * the notification is created server-side when the upload is complete, so a
+//     sender that closes its tab mid-upload cannot leave a dangling promise.
+//
+// Attachment bytes are stored in the OS temp directory with a 24 hour TTL, and
+// are dropped the moment the recipient confirms it has them.
+const RELAY_FILE_ROOT = path.join(os.tmpdir(), 'scryptchat-relay-files');
+/** Largest single chunk request the relay accepts (raw bytes, not base64). */
+const RELAY_FILE_MAX_CHUNK_BYTES = 3 * 1024 * 1024;
+/** Largest attachment the relay will hold for a peer. */
+const RELAY_FILE_MAX_BYTES = 64 * 1024 * 1024;
+/** How long an unclaimed attachment stays on the relay. */
+const RELAY_FILE_TTL_MS = 24 * 60 * 60 * 1000;
+/** Total temp storage the relay will use before evicting the oldest files. */
+const RELAY_FILE_MAX_STORED_BYTES = 512 * 1024 * 1024;
+
+interface RelayFileRecord {
+  transferId: string;
+  token: string;
+  senderDeviceId: string;
+  recipientDeviceId: string;
+  messageId: string;
+  fileId: string;
+  name: string;
+  size: number;
+  mimeType: string;
+  hashSHA256: string;
+  senderDisplayName?: string;
+  chunkTotal: number;
+  received: number;
+  storedBytes: number;
+  dir: string;
+  createdAt: number;
+  readyAt?: number;
+  notifiedAt?: number;
+}
+
+const relayFiles = new Map<string, RelayFileRecord>();
+let relayStoredBytes = 0;
+
+const relayChunkPath = (record: RelayFileRecord, index: number): string =>
+  path.join(record.dir, `chunk_${String(index).padStart(6, '0')}.bin`);
+
+/** Forgets a transfer and deletes its bytes. Safe to call twice. */
+async function dropRelayFile(record: RelayFileRecord | undefined): Promise<void> {
+  if (!record) return;
+  if (relayFiles.get(record.transferId) === record) {
+    relayFiles.delete(record.transferId);
+  }
+  relayStoredBytes = Math.max(0, relayStoredBytes - record.storedBytes);
+  record.storedBytes = 0;
+  await fs.promises.rm(record.dir, { recursive: true, force: true }).catch(() => {});
+}
+
+/** Keeps the relay inside its temp-storage budget by dropping the oldest. */
+async function enforceRelayStorageBudget(): Promise<void> {
+  if (relayStoredBytes <= RELAY_FILE_MAX_STORED_BYTES) return;
+  const oldest = Array.from(relayFiles.values()).sort((a, b) => a.createdAt - b.createdAt);
+  for (const record of oldest) {
+    if (relayStoredBytes <= RELAY_FILE_MAX_STORED_BYTES) break;
+    await dropRelayFile(record);
+  }
+}
+
+/**
+ * Tells the recipient an attachment is complete and waiting. This is a normal
+ * retained mailbox item: it survives the recipient being offline, and it is
+ * dropped only when that device confirms the file is stored locally.
+ */
+function notifyAttachmentReady(record: RelayFileRecord): void {
+  const envelope = {
+    type: 'FILE_READY',
+    transferId: record.transferId,
+    token: record.token,
+    messageId: record.messageId,
+    fileId: record.fileId,
+    name: record.name,
+    size: record.size,
+    mimeType: record.mimeType,
+    hashSHA256: record.hashSHA256,
+    chunkTotal: record.chunkTotal,
+    senderDeviceId: record.senderDeviceId,
+    senderDisplayName: record.senderDisplayName,
+    timestamp: Date.now(),
+  };
+  const item: EncryptedMailboxItem = {
+    id: `mail_${Date.now().toString(36)}_${randomBytes(4).toString('hex')}`,
+    senderDeviceId: record.senderDeviceId,
+    recipientDeviceId: record.recipientDeviceId,
+    encryptedEnvelope: Buffer.from(JSON.stringify(envelope), 'utf8').toString('base64'),
+    fileMetadata: {
+      fileId: record.fileId,
+      name: record.name,
+      size: record.size,
+      mimeType: record.mimeType,
+      hashSHA256: record.hashSHA256,
+    },
+    timestamp: Date.now(),
+  };
+
+  pushSSEEventToDevice(record.recipientDeviceId, 'mailbox_item', item);
+  const queue = mailboxes.get(record.recipientDeviceId) || [];
+  queue.push(item);
+  if (queue.length > MAX_MAILBOX_ITEMS_PER_DEVICE) {
+    queue.splice(0, queue.length - MAX_MAILBOX_ITEMS_PER_DEVICE);
+  }
+  mailboxes.set(record.recipientDeviceId, queue);
+  record.notifiedAt = Date.now();
+}
+
+/**
+ * Uploads one chunk of an attachment. Every request carries the full metadata
+ * and the chunk index, so requests are independent and a retry of an already
+ * stored chunk is a no-op.
+ */
+signalingRouter.post(
+  '/file/upload',
+  express.raw({ type: '*/*', limit: '4mb' }),
+  async (req: Request, res: Response) => {
+    if (!allowRequest(req, 'file-upload', 4000, 60_000)) {
+      res.status(429).json({ error: 'Relay upload rate limit reached. Slow down for a moment.' });
+      return;
+    }
+
+    const query = req.query as Record<string, string | undefined>;
+    const transferId = String(query.transferId || '').trim();
+    const token = String(query.token || '');
+    const recipientDeviceId = String(query.recipient || '');
+    const senderDeviceId = String(query.sender || '');
+    const messageId = String(query.messageId || '');
+    const fileId = String(query.fileId || '');
+    const index = Number(query.index);
+    const chunkTotal = Number(query.total);
+    const size = Number(query.size) || 0;
+    const name = String(query.name || 'attachment').slice(0, 400);
+    const mimeType = String(query.mime || 'application/octet-stream').slice(0, 200);
+    const hashSHA256 = String(query.hash || '').slice(0, 128);
+    const senderDisplayName = query.senderName ? String(query.senderName).slice(0, 80) : undefined;
+    const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+
+    if (
+      !transferId ||
+      transferId.length > 120 ||
+      token.length < 16 ||
+      !recipientDeviceId ||
+      !senderDeviceId ||
+      !messageId
+    ) {
+      res.status(400).json({ error: 'transferId, token, recipient, sender and messageId are required.' });
+      return;
+    }
+    if (!Number.isInteger(index) || !Number.isInteger(chunkTotal) || index < 0 || chunkTotal < 1) {
+      res.status(400).json({ error: 'index and total must be valid integers.' });
+      return;
+    }
+    if (index >= chunkTotal || chunkTotal > 2000) {
+      res.status(400).json({ error: 'Chunk index out of range.' });
+      return;
+    }
+    if (size > RELAY_FILE_MAX_BYTES) {
+      res.status(413).json({
+        error: `Attachments over ${RELAY_FILE_MAX_BYTES / 1024 / 1024} MB cannot be relayed.`,
+      });
+      return;
+    }
+    if (body.byteLength === 0 || body.byteLength > RELAY_FILE_MAX_CHUNK_BYTES) {
+      res.status(413).json({ error: 'Chunk is empty or too large.' });
+      return;
+    }
+
+    let record = relayFiles.get(transferId);
+    if (record && (record.token !== token || record.recipientDeviceId !== recipientDeviceId)) {
+      res.status(403).json({ error: 'This transfer belongs to another sender.' });
+      return;
+    }
+
+    if (!record) {
+      const dir = path.join(RELAY_FILE_ROOT, transferId.replace(/[^A-Za-z0-9_-]/g, ''));
+      try {
+        await fs.promises.mkdir(dir, { recursive: true });
+      } catch {
+        res.status(500).json({ error: 'Relay storage is unavailable.' });
+        return;
+      }
+      record = {
+        transferId,
+        token,
+        senderDeviceId,
+        recipientDeviceId,
+        messageId,
+        fileId,
+        name,
+        size,
+        mimeType,
+        hashSHA256,
+        senderDisplayName,
+        chunkTotal,
+        received: 0,
+        storedBytes: 0,
+        dir,
+        createdAt: Date.now(),
+      };
+
+      // A transfer that was already partly uploaded (a retry after a reload or a
+      // relay restart) resumes from the chunks still on disk.
+      try {
+        const existing = await fs.promises.readdir(dir);
+        for (const entry of existing) {
+          const match = /^chunk_(\d{6})\.bin$/.exec(entry);
+          if (!match) continue;
+          if (Number(match[1]) >= chunkTotal) continue;
+          const stat = await fs.promises.stat(path.join(dir, entry)).catch(() => null);
+          if (!stat || stat.size === 0) continue;
+          record.received += 1;
+          record.storedBytes += stat.size;
+        }
+      } catch {
+        /* a fresh transfer simply starts empty */
+      }
+      relayFiles.set(transferId, record);
+      relayStoredBytes += record.storedBytes;
+    }
+
+    if (record.received >= record.chunkTotal && record.readyAt) {
+      // Already complete: nothing to store, just confirm (idempotent retry).
+      res.json({ success: true, received: record.received, total: record.chunkTotal, ready: true });
+      return;
+    }
+
+    const chunkFile = relayChunkPath(record, index);
+    const tempFile = `${chunkFile}.part`;
+    // Whether this index was already stored decides the accounting: a chunk that
+    // is re-uploaded (a retry, or a resumed transfer) must not be counted twice,
+    // or the reported size would no longer describe what the file really is.
+    const alreadyStored = await fs.promises
+      .stat(chunkFile)
+      .then((stat) => stat.size)
+      .catch(() => 0);
+    try {
+      await fs.promises.writeFile(tempFile, body);
+      await fs.promises.rename(tempFile, chunkFile);
+    } catch {
+      await fs.promises.rm(tempFile, { force: true }).catch(() => {});
+      res.status(500).json({ error: 'Could not store this chunk.' });
+      return;
+    }
+
+    if (alreadyStored === 0) {
+      record.received += 1;
+    } else {
+      record.storedBytes -= alreadyStored;
+      relayStoredBytes -= alreadyStored;
+    }
+    record.storedBytes += body.byteLength;
+    relayStoredBytes += body.byteLength;
+
+    if (record.received >= record.chunkTotal && !record.readyAt) {
+      record.readyAt = Date.now();
+      notifyAttachmentReady(record);
+      void enforceRelayStorageBudget();
+    }
+
+    res.json({
+      success: true,
+      received: record.received,
+      total: record.chunkTotal,
+      ready: !!record.readyAt,
+    });
+  }
+);
+
+/**
+ * Downloads a completed attachment as one binary stream, in chunk order.
+ */
+signalingRouter.get('/file/:transferId/:token', async (req: Request, res: Response) => {
+  if (!allowRequest(req, 'file-download', 2000, 60_000)) {
+    res.status(429).json({ error: 'Relay download rate limit reached.' });
+    return;
+  }
+
+  const record = relayFiles.get(String(req.params.transferId || ''));
+  if (!record || !tokenMatches(record.token, req.params.token)) {
+    res.status(404).json({ error: 'Attachment not found on the relay.' });
+    return;
+  }
+  if (!record.readyAt || record.received < record.chunkTotal) {
+    res.status(409).json({ error: 'Attachment is still uploading.' });
+    return;
+  }
+
+  res.setHeader('Content-Type', record.mimeType || 'application/octet-stream');
+  res.setHeader('Content-Length', String(record.storedBytes || record.size));
+  res.setHeader('X-File-Hash', record.hashSHA256);
+  res.setHeader('X-File-Name', encodeURIComponent(record.name));
+  res.setHeader('Cache-Control', 'no-store');
+
+  try {
+    for (let index = 0; index < record.chunkTotal; index += 1) {
+      const chunk = await fs.promises.readFile(relayChunkPath(record, index));
+      if (!res.write(chunk)) await once(res, 'drain');
+    }
+    res.end();
+  } catch {
+    // A file evicted mid-download: tell the client instead of hanging it.
+    res.destroy();
+  }
+});
+
+/**
+ * The recipient confirms the attachment is stored on its device, so the relay
+ * can free the bytes instead of keeping every photo of the day in temp storage.
+ */
+signalingRouter.post('/file/:transferId/ack', (req: Request, res: Response) => {
+  const record = relayFiles.get(String(req.params.transferId || ''));
+  if (!record) {
+    res.json({ success: true, alreadyGone: true });
+    return;
+  }
+  if (!tokenMatches(record.token, req.body?.token)) {
+    res.status(403).json({ error: 'Invalid transfer token.' });
+    return;
+  }
+  void dropRelayFile(record);
+  res.json({ success: true });
 });
 
 /**

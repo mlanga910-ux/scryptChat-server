@@ -95,6 +95,18 @@ export interface PeerManagerEvents {
 }
 
 /**
+ * One attachment being downloaded from the relay. Downloads are attempted in the
+ * background, never more than one at a time per message, and a failure is
+ * retried with a cooldown so a flaky link cannot become a request storm.
+ */
+interface InboundFileState {
+  attempts: number;
+  lastAttemptAt: number;
+  inFlight: boolean;
+  askedForResend: boolean;
+}
+
+/**
  * A locally stored message that has not been confirmed by the peer yet. The
  * outbox keeps re-sending it on a backoff, over the direct link when it exists
  * and through the encrypted relay otherwise, until an acknowledgement arrives.
@@ -110,9 +122,12 @@ interface OutboxEntry {
   everSent?: boolean;
   /** When the payload last reached the peer's relay mailbox. */
   lastSentAt?: number;
-  /** How many times an already-delivered attachment was uploaded again. */
-  everSentCount?: number;
   lastError?: string;
+  /**
+   * Secret for this attachment's relay transfer. Kept so a retry resumes the
+   * same upload (already stored chunks cost nothing) instead of starting over.
+   */
+  transferToken?: string;
 }
 
 export type PeerTransport = 'lan' | 'direct' | 'relay';
@@ -189,42 +204,25 @@ export class PeerManager {
   private lastTypingState = false;
   private static readonly MAX_DELIVERY_ATTEMPTS = 120;
   private static readonly OUTBOX_TICK_MS = 2000;
-  /** Largest attachment the relay path accepts (the direct link has no cap). */
-  private static readonly MAX_RELAY_ATTACHMENT_BYTES = 32 * 1024 * 1024;
-  /** Raw bytes per relay chunk, so no single request is ever large. */
-  private static readonly RELAY_CHUNK_BYTES = 256 * 1024;
-  /** Parallel relay uploads: enough to fill the pipe, few enough for a phone. */
-  private static readonly RELAY_UPLOAD_LANES = 3;
-  /** How long an uploaded attachment waits for its receipt before a re-upload. */
-  private static readonly FILE_ACK_TIMEOUT_MS = 45000;
-  /** Cap on those self-healing re-uploads. */
-  private static readonly MAX_FILE_REUPLOADS = 4;
+  /** Largest attachment the attachment relay accepts (matches the relay cap). */
+  private static readonly MAX_RELAY_ATTACHMENT_BYTES = 64 * 1024 * 1024;
+  /** Raw bytes per upload request: fast to send, quick to retry on a bad line. */
+  private static readonly UPLOAD_CHUNK_BYTES = 1024 * 1024;
+  /** Parallel upload requests: enough to fill the pipe, few enough for a phone. */
+  private static readonly UPLOAD_LANES = 3;
+  /** Minimum gap between two download attempts of the same attachment. */
+  private static readonly DOWNLOAD_RETRY_COOLDOWN_MS = 8000;
+  /** How many download attempts before this side asks the sender to re-upload. */
+  private static readonly MAX_TRANSFER_PULL_REQUESTS = 3;
   /** Relay mailbox items stored here but not yet acknowledged to the server. */
   private mailboxAckQueue = new Set<string>();
   private mailboxAckTimer: any = null;
   /** Consecutive failures per mailbox item, so one bad item cannot loop. */
   private mailboxFailures = new Map<string, number>();
-  /**
-   * Attachments arriving in chunks through the relay, keyed by transfer id.
-   * Chunks are buffered until the set is complete, verified, then committed.
-   */
-  private relayFileChunks = new Map<
-    string,
-    {
-      fileId: string;
-      name: string;
-      size: number;
-      mimeType: string;
-      hashSHA256: string;
-      messageId?: string;
-      senderDeviceId: string;
-      senderDisplayName?: string;
-      total: number;
-      parts: Map<number, Uint8Array>;
-      receivedBytes: number;
-      updatedAt: number;
-    }
-  >();
+  /** Attachments being downloaded from the relay, keyed by message id. */
+  private inboundFiles = new Map<string, InboundFileState>();
+  /** Throttles resend requests the sender serves, keyed by message id. */
+  private lastPullServedAt = new Map<string, number>();
 
   constructor(identity: IdentityRecord, events: PeerManagerEvents) {
     this.identity = identity;
@@ -242,6 +240,7 @@ export class PeerManager {
     this.bindWakeHandler();
     this.startOutboxLoop();
     void this.hydrateOutbox();
+    void this.cleanupStaleInboundAttachments();
   }
 
   /**
@@ -463,7 +462,10 @@ export class PeerManager {
 
   private startOutboxLoop() {
     if (this.outboxInterval) clearInterval(this.outboxInterval);
-    this.outboxInterval = setInterval(() => void this.tickOutbox(), PeerManager.OUTBOX_TICK_MS);
+    this.outboxInterval = setInterval(() => {
+      void this.tickOutbox();
+      this.flushPendingReceipts();
+    }, PeerManager.OUTBOX_TICK_MS);
   }
 
   /** Messages left unsent by a reload or a crash are picked up again. */
@@ -484,9 +486,37 @@ export class PeerManager {
           kind: msg.fileId ? 'file' : 'text',
           text: msg.fileId ? undefined : msg.payloadText,
           fileId: msg.fileId,
+          // The token survives a reload, so an interruption resumes the same
+          // relay transfer (and the chunks already there) instead of colliding
+          // with its own upload.
+          transferToken: msg.transferToken,
           attempts: 0,
           nextAttemptAt: Date.now() + 1500,
         });
+      }
+    } catch {
+      /* history stays usable either way */
+    }
+  }
+
+  /**
+   * Removes bubbles left behind by an interrupted download. Older versions could
+   * park a message in a state that could never finish, which showed up as a
+   * permanently loading photo in the conversation; an absent bubble is honest,
+   * a bubble that can never load is not. Real attachments are never touched.
+   */
+  private async cleanupStaleInboundAttachments(): Promise<void> {
+    try {
+      const stuck = await db.messages
+        .filter((message) => message.direction === 'INBOUND' && message.status === 'receiving')
+        .toArray();
+      for (const row of stuck) {
+        if (row.fileRecord?.blobRef) continue;
+        if (row.fileId) {
+          const stored = await db.files.get(row.fileId);
+          if (stored?.blobRef) continue;
+        }
+        if (row.id !== undefined) await db.messages.delete(row.id);
       }
     } catch {
       /* history stays usable either way */
@@ -519,6 +549,7 @@ export class PeerManager {
       kind: row.fileId ? 'file' : 'text',
       text: row.fileId ? undefined : row.payloadText,
       fileId: row.fileId,
+      transferToken: row.transferToken,
       attempts: 0,
       nextAttemptAt: Date.now(),
     });
@@ -560,26 +591,16 @@ export class PeerManager {
       }
 
       // A text message is tiny, so re-sending it until the peer confirms is
-      // cheap self-healing. An attachment is not. Three cases:
-      //  · the peer is offline — the relay keeps every chunk until it confirms,
-      //    so the file will arrive when it comes back: upload nothing.
-      //  · the peer is online and confirms normally — nothing to do.
-      //  · the peer is online but has not confirmed after a while, which means
-      //    the receiving page went away mid-transfer: upload it once more, so
-      //    the file completes instead of staying half-received forever.
+      // cheap self-healing. An attachment is not: re-uploading it on a timer
+      // would hammer the relay for a peer that is merely slow. Once the bytes
+      // are on the relay the transfer is complete on this side — the relay owns
+      // the notification and holds the file until the peer has it, so all this
+      // entry waits for now is the peer's receipt. Only an explicit request from
+      // the peer (FILE_PULL_REQUEST) restarts an upload.
       if (entry.kind === 'file' && entry.everSent) {
-        const stalledFor = now - (entry.lastSentAt || 0);
-        const worthRetrying =
-          stalledFor > PeerManager.FILE_ACK_TIMEOUT_MS &&
-          (entry.everSentCount || 1) <= PeerManager.MAX_FILE_REUPLOADS &&
-          (await this.isPeerOnline(entry.chatDeviceId));
-        if (!worthRetrying) {
-          entry.nextAttemptAt = now + 10000;
-          continue;
-        }
-        entry.everSentCount = (entry.everSentCount || 1) + 1;
-        entry.attempts = 0;
-        entry.lastSentAt = now;
+        entry.attempts += 1;
+        entry.nextAttemptAt = now + 15000;
+        continue;
       }
 
       entry.attempts += 1;
@@ -606,17 +627,6 @@ export class PeerManager {
         delay = Math.max(delay, 5000);
       }
       entry.nextAttemptAt = now + delay;
-    }
-  }
-
-  /** True when the peer can receive right now (live link or relay presence). */
-  private async isPeerOnline(deviceId: string): Promise<boolean> {
-    if (this.isConnected() && deviceId === this.remoteDeviceId) return true;
-    try {
-      const contact = await db.contacts.get(deviceId);
-      return !!contact?.isOnline;
-    } catch {
-      return false;
     }
   }
 
@@ -664,25 +674,15 @@ export class PeerManager {
             type: record.mimeType || 'application/octet-stream',
           });
 
-    if (hasDirect) {
-      try {
-        await this.runDirectFileTransfer(file, entry.chatDeviceId, entry.messageId, entry.fileId!);
-        return;
-      } catch (err) {
-        console.warn('Direct file retry failed, using relay:', err);
-      }
-    }
+    // One path for every attachment, online or offline, LAN or cellular: upload
+    // the bytes to the relay, which holds them until the peer has them and
+    // notifies that device itself. A single code path is the whole point — two
+    // transports meant two behaviours, and the unreliable one always won.
     // Claim the transfer so no other tick can start a second upload of the
     // same attachment while this one is still in flight.
     this.activeFileTransfers.add(entry.messageId);
     try {
-      await this.pushFileViaRelayChunked(
-        file,
-        entry.chatDeviceId,
-        entry.fileId!,
-        record.hashSHA256 || '',
-        entry.messageId
-      );
+      await this.uploadAttachmentToRelay(file, entry, record);
     } finally {
       this.activeFileTransfers.delete(entry.messageId);
     }
@@ -756,39 +756,56 @@ export class PeerManager {
   }
 
   /**
-   * Uploads an attachment to the peer's relay mailbox one chunk at a time.
+   * Uploads an attachment to the relay in raw binary chunks.
    *
-   * Chunking is what makes photos and documents arrive reliably: no single
-   * oversized request to abort, bounded memory on both sides, real progress —
-   * and every chunk is stored durably until the receiver confirms it, so a
-   * device that is offline right now still receives the whole file later.
+   * Every request is small, independent and idempotent, so an interrupted upload
+   * resumes at the next missing chunk instead of starting over, and re-sending a
+   * chunk the relay already has costs nothing. Nothing here waits for the peer:
+   * the relay holds the finished file and notifies the peer device itself, which
+   * is what turns "the photo sometimes never arrives" into an ordinary case.
+   *
+   * The returned token is remembered on the outbox entry so every retry (and a
+   * resend the peer asks for) continues the same transfer instead of uploading
+   * the file again from byte zero.
    */
-  private async pushFileViaRelayChunked(
+  private async uploadAttachmentToRelay(
     file: File,
-    recipientId: string,
-    fileId: string,
-    hashHex: string,
-    messageId: string
-  ): Promise<void> {
+    entry: OutboxEntry,
+    record: FileRecord
+  ): Promise<string> {
     if (file.size > PeerManager.MAX_RELAY_ATTACHMENT_BYTES) {
       throw Object.assign(
         new Error(
-          `“${file.name}” is ${(file.size / 1024 / 1024).toFixed(1)} MB. Attachments over 64 MB need a direct or LAN link between the two devices.`
+          `“${file.name}” is ${(file.size / 1024 / 1024).toFixed(1)} MB. Attachments over ${
+            PeerManager.MAX_RELAY_ATTACHMENT_BYTES / 1024 / 1024
+          } MB cannot be sent.`
         ),
         { fatal: true }
       );
     }
 
-    const mime = file.type || 'application/octet-stream';
-    const chunkSize = PeerManager.RELAY_CHUNK_BYTES;
+    const token = entry.transferToken || generateRandomHexId(24);
+    if (entry.transferToken !== token) {
+      entry.transferToken = token;
+      // Remembered on the row too: after a reload this upload continues instead
+      // of starting a second transfer the relay would refuse.
+      await db.messages
+        .where('messageId')
+        .equals(entry.messageId)
+        .modify({ transferToken: token })
+        .catch(() => {});
+    }
+
+    const mime = file.type || record.mimeType || 'application/octet-stream';
+    const chunkSize = PeerManager.UPLOAD_CHUNK_BYTES;
     const totalChunks = Math.max(1, Math.ceil(file.size / chunkSize));
 
     const progress: FileTransferProgress = {
-      fileId,
+      fileId: record.fileId,
       name: file.name,
       size: file.size,
       mimeType: mime,
-      hashSHA256: hashHex,
+      hashSHA256: record.hashSHA256,
       direction: 'OUTBOUND',
       totalChunks,
       transferredChunks: 0,
@@ -797,63 +814,82 @@ export class PeerManager {
     };
     this.events.onFileProgress({ ...progress });
 
-    // A few lanes keep the uplink busy without flooding it; the mailbox
-    // tolerates chunks arriving out of order.
     let nextChunk = 0;
-    let transferred = 0;
+    let uploaded = 0;
     let failure: any = null;
 
-    const uploadChunk = async (): Promise<void> => {
+    const uploadOne = async (index: number): Promise<void> => {
+      const start = index * chunkSize;
+      const bytes = new Uint8Array(
+        await file.slice(start, Math.min(start + chunkSize, file.size)).arrayBuffer()
+      );
+      const params = new URLSearchParams({
+        transferId: entry.messageId,
+        token,
+        recipient: entry.chatDeviceId,
+        sender: this.identity.deviceId,
+        senderName: this.identity.displayName || 'Secure Peer',
+        messageId: entry.messageId,
+        fileId: record.fileId,
+        name: file.name,
+        mime,
+        size: String(file.size),
+        hash: record.hashSHA256 || '',
+        index: String(index),
+        total: String(totalChunks),
+      });
+
+      let lastError: any = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 700 * attempt * attempt));
+        }
+        let response: Response | null = null;
+        try {
+          response = await this.fetchRelay(
+            `/api/signaling/file/upload?${params.toString()}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/octet-stream' },
+              body: bytes as unknown as BodyInit,
+            },
+            this.uploadTimeoutMs(bytes.byteLength)
+          );
+        } catch (err: any) {
+          lastError = err;
+          continue;
+        }
+        if (response.ok) return;
+        if (response.status === 413) {
+          throw Object.assign(new Error(`“${file.name}” is too large for the relay.`), {
+            fatal: true,
+          });
+        }
+        if (response.status === 429) {
+          await new Promise((resolve) => setTimeout(resolve, 3000 + attempt * 2000));
+          lastError = new Error('The relay is limiting uploads right now.');
+          continue;
+        }
+        lastError = new Error(`Relay upload failed (HTTP ${response.status}).`);
+      }
+      throw lastError || new Error('Relay upload failed.');
+    };
+
+    const lane = async (): Promise<void> => {
       while (!failure) {
         const index = nextChunk;
         nextChunk += 1;
         if (index >= totalChunks) return;
-
-        const start = index * chunkSize;
-        const slice = file.slice(start, Math.min(start + chunkSize, file.size));
-        const bytes = new Uint8Array(await slice.arrayBuffer());
-        const metadata = {
-          fileId,
-          name: file.name,
-          size: file.size,
-          mimeType: mime,
-          hashSHA256: hashHex,
-          transferId: messageId,
-          messageId,
-          chunkIndex: index,
-          chunkTotal: totalChunks,
-        };
-        const envelope = {
-          type: 'FILE_CHUNK',
-          messageId,
-          transferId: messageId,
-          fileId,
-          fileName: file.name,
-          mimeType: mime,
-          size: file.size,
-          chunkIndex: index,
-          chunkTotal: totalChunks,
-          senderDeviceId: this.identity.deviceId,
-          senderDisplayName: this.identity.displayName || 'Secure Peer',
-          timestamp: Date.now(),
-        };
-
         try {
-          await this.pushMailboxItem(
-            recipientId,
-            envelope,
-            { metadata, base64: arrayBufferToBase64(bytes) },
-            this.uploadTimeoutMs(bytes.byteLength)
-          );
+          await uploadOne(index);
         } catch (err) {
           failure = err;
           return;
         }
-
-        transferred += 1;
-        const percent = Math.round((transferred / totalChunks) * 100);
-        if (percent !== progress.progressPercent || transferred === totalChunks) {
-          progress.transferredChunks = transferred;
+        uploaded += 1;
+        const percent = Math.round((uploaded / totalChunks) * 100);
+        if (percent !== progress.progressPercent || uploaded === totalChunks) {
+          progress.transferredChunks = uploaded;
           progress.progressPercent = percent;
           this.events.onFileProgress({ ...progress });
         }
@@ -861,66 +897,15 @@ export class PeerManager {
     };
 
     await Promise.all(
-      Array.from(
-        { length: Math.min(PeerManager.RELAY_UPLOAD_LANES, totalChunks) },
-        () => uploadChunk()
-      )
+      Array.from({ length: Math.min(PeerManager.UPLOAD_LANES, totalChunks) }, () => lane())
     );
-
     if (failure) throw failure;
 
     progress.status = 'completed';
     progress.progressPercent = 100;
+    progress.transferredChunks = totalChunks;
     this.events.onFileProgress({ ...progress });
-  }
-
-  /**
-   * Streams an attachment over the live link. Resolves only once every chunk has
-   * been acknowledged, so a stalled transfer surfaces as a failure the outbox
-   * can act on instead of an attachment that silently never arrives.
-   */
-  private async runDirectFileTransfer(
-    file: File,
-    recipientId: string,
-    messageId: string,
-    _fileId: string
-  ): Promise<void> {
-    const channel = this.dataChannel;
-    const session = this.cryptoSession;
-    if (
-      !channel ||
-      !session ||
-      channel.readyState !== 'open' ||
-      recipientId !== this.remoteDeviceId
-    ) {
-      throw new Error('No open direct link');
-    }
-    this.activeFileTransfers.add(messageId);
-    try {
-      await fileTransferManager.sendFile(file, channel, session, {
-        onProgress: this.events.onFileProgress,
-        onCompleted: (fileRec) => {
-          void db.messages
-            .where('messageId')
-            .equals(messageId)
-            .modify({
-              fileId: fileRec.fileId,
-              fileRecord: fileRec,
-              mediaType: fileRec.isImage
-                ? 'image'
-                : fileRec.isAudio
-                ? 'audio'
-                : fileRec.isVideo
-                ? 'video'
-                : 'file',
-            })
-            .catch(() => {});
-        },
-        onError: (_fileId, err) => this.events.onError(err),
-      });
-    } finally {
-      this.activeFileTransfers.delete(messageId);
-    }
+    return token;
   }
 
   private async sendTextOverDirect(messageId: string, text: string): Promise<void> {
@@ -976,6 +961,39 @@ export class PeerManager {
    * uplink) or a transient server error is retried here, because a message the
    * relay never stored is a message that can be lost.
    */
+  /**
+   * Delivery receipts that never made it back to the sender. A receipt is what
+   * turns a single tick into a double tick, so losing one silently would leave
+   * the sender believing its photo was never stored — these are retried until
+   * they land (a receipt is idempotent, so repeating one costs nothing).
+   */
+  private pendingReceipts = new Map<
+    string,
+    {
+      ack: { messageId?: string; fileId?: string };
+      targetDeviceId: string;
+      attempts: number;
+      nextAttemptAt: number;
+    }
+  >();
+
+  private flushPendingReceipts() {
+    if (this.pendingReceipts.size === 0) return;
+    const now = Date.now();
+    for (const [key, entry] of Array.from(this.pendingReceipts.entries())) {
+      if (entry.nextAttemptAt > now) continue;
+      if (entry.attempts >= 30) {
+        this.pendingReceipts.delete(key);
+        continue;
+      }
+      entry.attempts += 1;
+      entry.nextAttemptAt = now + 15000;
+      void this.pushEnvelope(entry.targetDeviceId, { type: 'DELIVERY_ACK', ...entry.ack }, 6000)
+        .then(() => this.pendingReceipts.delete(key))
+        .catch(() => {});
+    }
+  }
+
   private async pushMailboxItem(
     recipientId: string,
     envelope: Record<string, any>,
@@ -1077,8 +1095,16 @@ export class PeerManager {
     }
     try {
       await this.pushEnvelope(targetDeviceId, { type: 'DELIVERY_ACK', ...ack }, 6000);
+      this.pendingReceipts.delete(`${ack.messageId || ''}|${ack.fileId || ''}`);
     } catch {
-      /* the sender keeps retrying and will ask again */
+      // Remember it and keep trying: without this receipt the sender would only
+      // ever see a single tick for a file that is safely stored here.
+      this.pendingReceipts.set(`${ack.messageId || ''}|${ack.fileId || ''}`, {
+        ack,
+        targetDeviceId,
+        attempts: 0,
+        nextAttemptAt: Date.now() + 8000,
+      });
     }
   }
 
@@ -1320,11 +1346,22 @@ export class PeerManager {
         return;
       }
 
-      // 3. Attachment arriving through the relay — a chunk of a photo, a
-      //    document, a voice note. The file is committed, and acknowledged,
-      //    only once every chunk of it has arrived and verified.
-      if (item.fileMetadata) {
-        await this.handleRelayFileItem(item, envelope);
+      // 3. A complete attachment is waiting on the relay. It is downloaded,
+      //    verified and stored before it is acknowledged, and it becomes a
+      //    message exactly once — when the whole file is safely here.
+      if (envelope.type === 'FILE_READY') {
+        await this.handleFileReady(envelope, item);
+        return;
+      }
+
+      // 3.1 The peer could not download an attachment we sent (the relay lost
+      //     or expired the bytes). Upload it once more, same transfer, so the
+      //     chunks still on the relay are reused.
+      if (envelope.type === 'FILE_PULL_REQUEST') {
+        await this.handleFileResendRequest(
+          envelope,
+          item.senderDeviceId || envelope.senderDeviceId
+        );
         return;
       }
 
@@ -1425,166 +1462,303 @@ export class PeerManager {
   }
 
   /**
-   * Commits one chunk of an attachment received through the relay.
+   * A complete attachment is waiting on the relay: download it, verify it,
+   * store it and only then confirm it.
    *
-   * Chunks are buffered until the whole set is present, then the file is
-   * verified against the sender's SHA-256, stored in the local vault and shown
-   * in the conversation. Only then does the sender get its delivery receipt.
+   * The conversation is not touched before the whole file is in the local
+   * vault, so a chat can never show a half photo, a stuck “decrypting”
+   * placeholder, or the same photo arriving twice. If anything fails the relay
+   * note is simply left alone and comes back around, which makes a retry
+   * automatic and free.
    */
-  private async handleRelayFileItem(item: any, envelope: any): Promise<void> {
-    const meta = item.fileMetadata || {};
-    const base64Chunk = item.fileBase64Chunk;
-    if (typeof base64Chunk !== 'string' || base64Chunk.length === 0) return;
-
-    const fileId = String(meta.fileId || envelope.fileId || '');
-    if (!fileId) return;
-
-    const total = Math.max(1, Number(meta.chunkTotal ?? envelope.chunkTotal ?? 1));
-    const index = Math.max(0, Number(meta.chunkIndex ?? envelope.chunkIndex ?? 0));
-    // Refuse a nonsensical set instead of buffering it: the sender never ships
-    // more than this, so anything else is junk (or an attack).
-    if (total > 4000 || index >= total) return;
-    const transferId = String(meta.transferId || envelope.transferId || fileId);
-    const senderDeviceId = item.senderDeviceId || envelope.senderDeviceId || '';
-    const messageId = envelope.messageId || meta.messageId;
-    const mimeType = meta.mimeType || envelope.mimeType || 'application/octet-stream';
-    const name = meta.name || envelope.fileName || 'attachment';
-
-    // A peer that reloaded mid-transfer leaves half a file behind: drop stale
-    // partial sets instead of holding their chunks forever.
-    const staleBefore = Date.now() - 120000;
-    for (const [key, value] of this.relayFileChunks) {
-      if (value.updatedAt < staleBefore) this.relayFileChunks.delete(key);
+  private async handleFileReady(envelope: any, item: any): Promise<void> {
+    const transferId = String(envelope.transferId || '');
+    const token = String(envelope.token || '');
+    const messageId = String(envelope.messageId || '');
+    const fileId = String(envelope.fileId || '');
+    const senderDeviceId = String(item.senderDeviceId || envelope.senderDeviceId || '');
+    if (!transferId || !token || !messageId || !senderDeviceId) {
+      if (item?.id) this.ackMailboxItem(item.id);
+      return;
     }
 
-    let entry = this.relayFileChunks.get(transferId);
-    if (!entry || entry.total !== total || entry.fileId !== fileId) {
-      entry = {
+    const now = Date.now();
+    let state = this.inboundFiles.get(messageId);
+    if (!state) {
+      state = { attempts: 0, lastAttemptAt: 0, inFlight: false, askedForResend: false };
+      this.inboundFiles.set(messageId, state);
+    }
+    // One download at a time, never in a tight loop. The relay keeps the note,
+    // so a slow or failed attempt comes back around instead of storming. The
+    // claim happens before any await: the note can arrive twice at once (a push
+    // and a poll), and two passes would mean two photos and two sounds.
+    if (state.inFlight) return;
+    if (now - state.lastAttemptAt < PeerManager.DOWNLOAD_RETRY_COOLDOWN_MS) return;
+    state.inFlight = true;
+    state.lastAttemptAt = now;
+
+    // The file is already here (the relay re-offered its note): confirm it once
+    // more so the sender can stop retrying, then drop the note.
+    if (await this.findStoredAttachment(messageId, fileId)) {
+      state.inFlight = false;
+      this.inboundFiles.delete(messageId);
+      void this.sendDeliveryAck({ messageId, fileId }, senderDeviceId, false);
+      if (item?.id) this.ackMailboxItem(item.id);
+      return;
+    }
+
+    const name = String(envelope.name || 'attachment');
+    const mimeType = String(envelope.mimeType || 'application/octet-stream');
+
+    try {
+      const blob = await this.downloadRelayFile(
+        transferId,
+        token,
         fileId,
         name,
-        size: Number(meta.size) || 0,
         mimeType,
-        hashSHA256: String(meta.hashSHA256 || ''),
-        messageId,
-        senderDeviceId,
-        senderDisplayName: envelope.senderDisplayName,
-        total,
-        parts: new Map(),
-        receivedBytes: 0,
-        updatedAt: Date.now(),
+        Number(envelope.size) || 0
+      );
+      const digest = arrayBufferToHex(await sha256(new Uint8Array(await blob.arrayBuffer())));
+      const expectedHash = String(envelope.hashSHA256 || '');
+      if (expectedHash && digest !== expectedHash) {
+        throw new Error('Attachment failed its integrity check.');
+      }
+
+      const fileRecord: FileRecord = {
+        fileId: fileId || digest.slice(0, 16).toUpperCase(),
+        name,
+        size: Number(envelope.size) || blob.size,
+        mimeType,
+        hashSHA256: digest,
+        blobRef: blob,
+        isImage: mimeType.startsWith('image/'),
+        isAudio: mimeType.startsWith('audio/'),
+        isVideo: mimeType.startsWith('video/'),
       };
-      this.relayFileChunks.set(transferId, entry);
-    }
+      await db.files.put(fileRecord);
 
-    if (!entry.parts.has(index)) {
-      const bytes = new Uint8Array(base64ToArrayBuffer(base64Chunk));
-      entry.parts.set(index, bytes);
-      entry.receivedBytes += bytes.byteLength;
-    }
-    entry.updatedAt = Date.now();
-
-    if (entry.receivedBytes > PeerManager.MAX_RELAY_ATTACHMENT_BYTES + 4 * 1024 * 1024) {
-      this.relayFileChunks.delete(transferId);
-      return;
-    }
-
-    this.events.onFileProgress({
-      fileId,
-      name,
-      size: entry.size,
-      mimeType,
-      hashSHA256: entry.hashSHA256,
-      direction: 'INBOUND',
-      totalChunks: total,
-      transferredChunks: entry.parts.size,
-      progressPercent: Math.min(100, Math.round((entry.parts.size / total) * 100)),
-      status: 'transferring',
-    });
-
-    if (entry.parts.size < total) return;
-
-    // Assemble straight into a Blob: no extra full-size copy is kept in memory,
-    // which matters for a phone with little RAM.
-    const ordered: BlobPart[] = [];
-    for (let part = 0; part < total; part += 1) {
-      const bytes = entry.parts.get(part);
-      if (!bytes) {
-        this.relayFileChunks.delete(transferId);
-        return;
+      // An attachment from a device we have never paired with still needs a
+      // conversation to live in, so the contact exists before the message does.
+      if (!(await db.contacts.get(senderDeviceId))) {
+        await this.saveContact(
+          senderDeviceId,
+          '',
+          '000000',
+          String(envelope.senderDisplayName || `Peer-${senderDeviceId.slice(4, 8)}`)
+        );
       }
-      ordered.push(bytes as unknown as BlobPart);
-    }
-    this.relayFileChunks.delete(transferId);
 
-    const blob = new Blob(ordered, { type: mimeType });
-    const digest = arrayBufferToHex(await sha256(new Uint8Array(await blob.arrayBuffer())));
-    if (entry.hashSHA256 && digest !== entry.hashSHA256) {
-      // Corrupt set: drop it so the sender's next attempt starts clean.
-      this.events.onError(`“${name}” did not survive the transfer. Retrying…`);
-      return;
-    }
-
-    const fileRecord: FileRecord = {
-      fileId,
-      name,
-      size: entry.size || blob.size,
-      mimeType,
-      hashSHA256: digest,
-      blobRef: blob,
-      isImage: mimeType.startsWith('image/'),
-      isAudio: mimeType.startsWith('audio/'),
-      isVideo: mimeType.startsWith('video/'),
-    };
-    await db.files.put(fileRecord);
-
-    const targetDeviceId = senderDeviceId || item.senderDeviceId;
-    if (targetDeviceId) {
-      const existing = await db.messages
-        .filter(
-          (message) =>
-            (!!messageId && message.messageId === messageId) || message.fileId === fileId
-        )
-        .first();
-
-      if (!existing) {
-        const msgRecord: MessageRecord = {
-          messageId: messageId || `msg_${Date.now()}_${generateRandomHexId(8)}`,
-          chatDeviceId: targetDeviceId,
-          direction: 'INBOUND',
-          payloadText: name,
-          fileId,
-          fileRecord,
-          mediaType: fileRecord.isImage
-            ? 'image'
-            : fileRecord.isAudio
-            ? 'audio'
-            : fileRecord.isVideo
-            ? 'video'
-            : 'file',
-          timestamp: item.timestamp || Date.now(),
+      // One row per message id, always: a placeholder left behind by an earlier
+      // attempt is completed here instead of gaining a twin next to it.
+      const existingRow = await db.messages.where('messageId').equals(messageId).first();
+      const row: MessageRecord = {
+        ...(existingRow || {}),
+        messageId,
+        chatDeviceId: senderDeviceId,
+        direction: 'INBOUND',
+        payloadText: existingRow?.payloadText || name,
+        fileId: fileRecord.fileId,
+        fileRecord,
+        mediaType: fileRecord.isImage
+          ? 'image'
+          : fileRecord.isAudio
+          ? 'audio'
+          : fileRecord.isVideo
+          ? 'video'
+          : 'file',
+        timestamp: existingRow?.timestamp || Number(envelope.timestamp) || Date.now(),
+        status: 'delivered',
+      };
+      if (existingRow) {
+        await db.messages.update(existingRow.id!, {
+          payloadText: row.payloadText,
+          fileId: row.fileId,
+          fileRecord: row.fileRecord,
+          mediaType: row.mediaType,
           status: 'delivered',
-        };
-        const rowId = await db.messages.add(msgRecord);
-        msgRecord.id = rowId;
-
-        const existingContact = await db.contacts.get(targetDeviceId);
-        if (!existingContact) {
-          await this.saveContact(
-            targetDeviceId,
-            '',
-            '000000',
-            entry.senderDisplayName || `Peer-${targetDeviceId.slice(4, 8)}`
-          );
-        }
-
-        this.events.onFileCompleted(fileRecord, blob);
-        this.events.onMessageReceived(msgRecord);
+        });
+      } else {
+        row.id = await db.messages.add(row);
       }
 
-      // Whether this was the first delivery or a retry of one we already
-      // stored, confirm it: the sender keeps retrying until this lands.
-      void this.sendDeliveryAck({ messageId, fileId }, targetDeviceId, false);
+      this.inboundFiles.delete(messageId);
+
+      // Exactly one completion, exactly one sound, exactly one bubble: this is
+      // the only place a received attachment becomes a message.
+      this.events.onFileCompleted(fileRecord, blob);
+      this.events.onMessageReceived(row);
+      void this.sendDeliveryAck({ messageId, fileId: fileRecord.fileId }, senderDeviceId, false);
+      if (item?.id) this.ackMailboxItem(item.id);
+      // Stored here, so the relay may let the bytes go.
+      void this.releaseRelayFile(transferId, token);
+    } catch (err) {
+      state.inFlight = false;
+      state.attempts += 1;
+      this.inboundFiles.set(messageId, state);
+      console.warn('Attachment download failed:', err);
+      if (state.attempts >= PeerManager.MAX_TRANSFER_PULL_REQUESTS && !state.askedForResend) {
+        // The relay no longer has it (expired, evicted, or a fresh relay): ask
+        // the sender for the bytes once. Anything more would be a storm.
+        state.askedForResend = true;
+        void this.pushEnvelope(
+          senderDeviceId,
+          {
+            type: 'FILE_PULL_REQUEST',
+            messageId,
+            fileId,
+            senderDeviceId: this.identity.deviceId,
+            timestamp: Date.now(),
+          },
+          8000
+        ).catch(() => {});
+      }
     }
+  }
+
+  /**
+   * Pulls a completed attachment off the relay as a single file, reporting
+   * progress while it streams. One request means the result is either the whole
+   * file or a clean failure — never a partial one to stitch back together.
+   */
+  private async downloadRelayFile(
+    transferId: string,
+    token: string,
+    fileId: string,
+    name: string,
+    mimeType: string,
+    size: number
+  ): Promise<Blob> {
+    // The download budget grows with the attachment: a big video on a slow link
+    // must not be cut off halfway and reported as a failed transfer.
+    const response = await this.fetchRelay(
+      `/api/signaling/file/${encodeURIComponent(transferId)}/${encodeURIComponent(token)}`,
+      { method: 'GET', headers: { Accept: 'application/octet-stream' } },
+      Math.max(45000, this.uploadTimeoutMs(size))
+    );
+    if (!response.ok) {
+      throw new Error(`Attachment is not available on the relay (HTTP ${response.status}).`);
+    }
+
+    const totalBytes = Number(response.headers.get('Content-Length')) || size || 0;
+    const progress: FileTransferProgress = {
+      fileId,
+      name,
+      size: totalBytes,
+      mimeType,
+      hashSHA256: '',
+      direction: 'INBOUND',
+      // Progress is reported in bytes for a download, which is what the user
+      // actually sees moving.
+      totalChunks: totalBytes || 1,
+      transferredChunks: 0,
+      progressPercent: totalBytes ? 0 : 50,
+      status: 'transferring',
+    };
+    this.events.onFileProgress({ ...progress });
+
+    const finish = (received: number) => {
+      progress.transferredChunks = received;
+      progress.progressPercent = 100;
+      progress.status = 'completed';
+      this.events.onFileProgress({ ...progress });
+    };
+
+    if (!response.body) {
+      const buffer = await response.arrayBuffer();
+      finish(buffer.byteLength);
+      return new Blob([buffer], { type: mimeType });
+    }
+
+    const reader = response.body.getReader();
+    const parts: BlobPart[] = [];
+    let received = 0;
+    let lastReport = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      parts.push(value as unknown as BlobPart);
+      received += value.byteLength;
+      const now = Date.now();
+      if (now - lastReport > 120) {
+        lastReport = now;
+        progress.transferredChunks = received;
+        progress.progressPercent = totalBytes
+          ? Math.min(99, Math.round((received / totalBytes) * 100))
+          : 50;
+        this.events.onFileProgress({ ...progress });
+      }
+    }
+
+    finish(received);
+    return new Blob(parts, { type: mimeType });
+  }
+
+  /** Lets the relay drop the bytes now that this device has them. */
+  private async releaseRelayFile(transferId: string, token: string): Promise<void> {
+    try {
+      await this.fetchRelay(
+        `/api/signaling/file/${encodeURIComponent(transferId)}/ack`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        },
+        8000
+      );
+    } catch {
+      // The relay's own TTL cleans up if this never lands.
+    }
+  }
+
+  /** The stored attachment for a message, if this device already has it. */
+  private async findStoredAttachment(messageId: string, fileId: string): Promise<boolean> {
+    const row = await db.messages.where('messageId').equals(messageId).first();
+    if (!row) return false;
+    if (row.fileRecord?.blobRef) return true;
+    if (!fileId) return false;
+    const record = await db.files.get(fileId);
+    return !!record?.blobRef;
+  }
+
+  /**
+   * The peer is telling us an attachment it announced is still missing here.
+   * That is a request to send it again, not to trust anything else, so the
+   * message has to be one of ours and addressed to that device.
+   */
+  private async handleFileResendRequest(envelope: any, requesterDeviceId: string): Promise<void> {
+    const messageId = String(envelope?.messageId || '');
+    if (!messageId || !requesterDeviceId) return;
+    const now = Date.now();
+    // Serve at most one resend per transfer per window, however many devices ask.
+    if (now - (this.lastPullServedAt.get(messageId) || 0) < 15000) return;
+
+    const row = await db.messages.where('messageId').equals(messageId).first();
+    if (!row || row.direction !== 'OUTBOUND' || row.chatDeviceId !== requesterDeviceId) return;
+    if (!row.fileId) return;
+
+    this.lastPullServedAt.set(messageId, now);
+    if (this.lastPullServedAt.size > 200) {
+      const oldest = this.lastPullServedAt.keys().next().value;
+      if (oldest) this.lastPullServedAt.delete(oldest);
+    }
+
+    // Same transfer, same token: the chunks the relay already holds are reused,
+    // so a resend only uploads what is genuinely missing.
+    const previous = this.outbox.get(messageId);
+    this.outbox.delete(messageId);
+    this.activeFileTransfers.delete(messageId);
+    this.registerOutbox({
+      messageId,
+      chatDeviceId: row.chatDeviceId,
+      kind: 'file',
+      fileId: row.fileId,
+      transferToken: previous?.transferToken,
+      attempts: 0,
+      nextAttemptAt: Date.now(),
+    });
+    void this.tickOutbox();
   }
 
   // --- WebRTC Peer Signaling ---
