@@ -17,8 +17,15 @@ import {
   Send,
   AtSign,
   AlertTriangle,
+  Loader2,
+  ShieldCheck,
 } from 'lucide-react';
-import { updateIdentityProfile } from '../crypto/keys';
+import {
+  updateIdentityProfile,
+  checkIdentityKeys,
+  regenerateIdentityKeys,
+  KeyHealth,
+} from '../crypto/keys';
 import { fileToAvatarDataUrl } from '../utils/imageHelper';
 import { STATUS_PRESETS, statusColor } from '../utils/presence';
 
@@ -63,6 +70,67 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const [isSaved, setIsSaved] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Device keys: the state is measured by signing a challenge, never guessed
+  // from a later pairing failure.
+  const [keyHealth, setKeyHealth] = useState<KeyHealth | null>(null);
+  const [isCheckingKeys, setIsCheckingKeys] = useState(false);
+  const [isConfirmingKeyRotation, setIsConfirmingKeyRotation] = useState(false);
+  const [isRotatingKeys, setIsRotatingKeys] = useState(false);
+  const [keyRotationNote, setKeyRotationNote] = useState<string | null>(null);
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setIsConfirmingKeyRotation(false);
+    setKeyRotationNote(null);
+    setIsCheckingKeys(true);
+    let cancelled = false;
+    void checkIdentityKeys(identity)
+      .then((health) => {
+        if (!cancelled) setKeyHealth(health);
+      })
+      .finally(() => {
+        if (!cancelled) setIsCheckingKeys(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, identity?.deviceId]);
+
+  useEffect(
+    () => () => {
+      if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+    },
+    []
+  );
+
+  /**
+   * Replaces the keypair for real, then verifies it. The running app still holds
+   * the previous identity in memory, so the page reloads itself once the new
+   * keys pass their check - no "reload and hope" step for the user.
+   */
+  const rotateKeys = async () => {
+    setIsRotatingKeys(true);
+    setKeyRotationNote('Generating a new keypair…');
+    try {
+      const { health } = await regenerateIdentityKeys();
+      setKeyHealth(health);
+      if (health.state === 'healthy') {
+        setKeyRotationNote('New keys created and verified. Reloading…');
+        reloadTimerRef.current = setTimeout(() => window.location.reload(), 1200);
+      } else {
+        setKeyRotationNote(`The new keypair did not pass its check: ${health.detail}`);
+        setIsConfirmingKeyRotation(true);
+      }
+    } catch (err) {
+      setKeyRotationNote(
+        `Could not generate keys: ${err instanceof Error ? err.message : String(err)}`
+      );
+    } finally {
+      setIsRotatingKeys(false);
+    }
+  };
 
   // Load the current profile every time the window opens.
   useEffect(() => {
@@ -317,7 +385,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             </button>
 
             {showDetails && (
-              <div className="px-3 pb-3 space-y-2.5 sc-fade-in">
+              <div className="px-3 pb-3 space-y-2.5 sc-reveal">
                 <div className="relative">
                   <Phone className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-600" />
                   <input
@@ -402,7 +470,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 aria-label="Copy device ID"
               >
                 {copied ? (
-                  <Check className="w-3 h-3 text-[var(--sc-e400)]" />
+                  <Check className="w-3 h-3 text-[var(--sc-e400)] sc-pop" />
                 ) : (
                   <Copy className="w-3 h-3" />
                 )}
@@ -414,38 +482,106 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             </p>
           </div>
 
-          {/* Key Regeneration — recovery when IndexedDB returns corrupt keys */}
-          <div className="p-3 rounded-2xl border border-amber-900/40 bg-amber-950/20">
-            <div className="flex items-start gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
-              <div className="space-y-2">
-                <p className="text-[11px] text-amber-200/80 leading-relaxed">
-                  If pairing fails with a <code className="font-mono text-amber-300">SubtleCrypto</code> or
-                  <code className="font-mono text-amber-300"> CryptoKey</code> error, your local keys may be
-                  corrupted. Regenerating fixes pairing but requires you to re-pair all contacts.
-                </p>
+          {/* Device keys: measured by a signing check, not guessed from a later
+              pairing failure, and genuinely replaceable when it fails. */}
+          <div
+            className={`p-3 rounded-2xl border space-y-2 ${
+              keyHealth && keyHealth.state !== 'healthy'
+                ? 'border-amber-900/40 bg-amber-950/20'
+                : 'border-zinc-800 bg-zinc-950/40'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                Device keys
+              </span>
+              {isCheckingKeys || !keyHealth ? (
+                <span className="flex items-center gap-1.5 text-[10px] text-zinc-500">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Checking…
+                </span>
+              ) : keyHealth.state === 'healthy' ? (
+                <span
+                  className="flex items-center gap-1.5 text-[10px] sc-pop"
+                  style={{ color: 'var(--sc-e400)' }}
+                >
+                  <ShieldCheck className="w-3 h-3" />
+                  Verified
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 text-[10px] text-amber-400 sc-pop">
+                  <AlertTriangle className="w-3 h-3" />
+                  Needs attention
+                </span>
+              )}
+            </div>
+
+            <p
+              className={`text-[11px] leading-relaxed ${
+                keyHealth && keyHealth.state !== 'healthy'
+                  ? 'text-amber-200/80'
+                  : 'text-zinc-500'
+              }`}
+            >
+              {keyHealth?.detail ||
+                'Signing a test challenge with the keys stored on this device…'}
+            </p>
+
+            {keyHealth?.state === 'healthy' && !isConfirmingKeyRotation && (
+              <button
+                type="button"
+                onClick={() => setIsConfirmingKeyRotation(true)}
+                className="text-[11px] text-zinc-400 hover:text-white transition-colors cursor-pointer"
+              >
+                Replace keys…
+              </button>
+            )}
+
+            {(keyHealth?.state === 'broken' || keyHealth?.state === 'missing') &&
+              !isConfirmingKeyRotation && (
                 <button
                   type="button"
-                  onClick={async () => {
-                    if (!confirm('Regenerate signing keys? All contacts will need to be re-paired.')) return;
-                    try {
-                      localStorage.removeItem('scryptchat_permanent_priv_jwk');
-                      localStorage.removeItem('scryptchat_permanent_pub_raw');
-                      localStorage.removeItem('scryptchat_permanent_device_id');
-                      const { resetIdentityBootstrap } = await import('../crypto/keys');
-                      resetIdentityBootstrap();
-                      alert('Keys cleared. Reload the page to generate new ones and re-onboard.');
-                    } catch (err) {
-                      console.error('Key regeneration failed:', err);
-                      alert('Could not clear keys. Try clearing site data manually.');
-                    }
-                  }}
-                  className="px-3 py-1.5 rounded-lg bg-amber-900/60 hover:bg-amber-900 text-amber-300 text-[11px] font-medium transition-colors cursor-pointer border border-amber-800/60"
+                  onClick={() => setIsConfirmingKeyRotation(true)}
+                  className="sc-lift px-3 py-1.5 rounded-lg bg-amber-900/60 hover:bg-amber-900 text-amber-300 text-[11px] font-medium transition-colors cursor-pointer border border-amber-800/60"
                 >
-                  Regenerate Keys
+                  Regenerate keys
                 </button>
+              )}
+
+            {isConfirmingKeyRotation && (
+              <div className="space-y-2 sc-reveal">
+                <p className="text-[11px] text-amber-200/80 leading-relaxed">
+                  A new keypair means a new device ID. Your name, photo and history stay,
+                  but every contact has to be paired again.
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={rotateKeys}
+                    disabled={isRotatingKeys}
+                    className="sc-lift px-3 py-1.5 rounded-lg bg-amber-900/60 hover:bg-amber-900 disabled:opacity-50 text-amber-200 text-[11px] font-medium transition-colors cursor-pointer border border-amber-800/60"
+                  >
+                    {isRotatingKeys ? 'Generating…' : 'Yes, replace them'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsConfirmingKeyRotation(false)}
+                    disabled={isRotatingKeys}
+                    className="px-3 py-1.5 rounded-lg text-zinc-400 hover:text-white text-[11px] transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
+
+            {keyRotationNote && (
+              <p className="flex items-center gap-1.5 text-[11px] text-zinc-400 sc-fade-in">
+                {isRotatingKeys && <Loader2 className="w-3 h-3 animate-spin" />}
+                {keyRotationNote}
+              </p>
+            )}
           </div>
         </div>
 
@@ -461,7 +597,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
           <button
             type="submit"
             disabled={!displayName.trim() || isSaving}
-            className="px-4 py-2 btn-primary flex items-center gap-1.5"
+            className="px-4 py-2 btn-primary sc-lift sc-sheen flex items-center gap-1.5"
             aria-label="Save profile"
           >
             {isSaved ? (

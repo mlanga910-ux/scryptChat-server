@@ -153,7 +153,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center justify-center gap-2 py-2 rounded-xl transition-colors cursor-pointer ${
+                className={`sc-lift flex items-center justify-center gap-2 py-2 rounded-xl transition-colors cursor-pointer ${
                   activeTab === tab.id
                     ? 'bg-[var(--sc-accent)] text-[var(--sc-on-accent)] font-semibold'
                     : 'text-zinc-500 hover:text-white'
@@ -168,8 +168,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         </div>
 
-        {/* Body */}
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4">
+        {/* Body - keyed by tab so switching panes plays the reveal gesture */}
+        <div
+          key={activeTab}
+          className="sc-reveal flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4"
+        >
           {activeTab === 'audio' && (
             <div className="space-y-4">
               <div className="p-3.5 rounded-2xl border border-zinc-800 bg-zinc-950/40 space-y-3">

@@ -176,6 +176,136 @@ export function resetIdentityBootstrap(): void {
   identityBootstrap = null;
 }
 
+/** Everything the profile screen needs to explain the state of the local keys. */
+export type KeyHealthState = 'healthy' | 'missing' | 'broken' | 'unsupported';
+
+export interface KeyHealth {
+  state: KeyHealthState;
+  /** True when this device can actually take part in a pairing handshake. */
+  pairingReady: boolean;
+  /** One plain sentence, safe to show to the user. */
+  detail: string;
+}
+
+/** Fixed challenge for the self-test; never leaves the device. */
+const KEY_SELF_TEST = 'scryptchat-key-self-test';
+
+/** Signs and verifies with the *stored* keys, healing a stubbed key on the way. */
+async function workingPrivateKey(identity: IdentityRecord): Promise<CryptoKey> {
+  const stored = identity.privateKeyECDSA as unknown;
+  if (isRealCryptoKey(stored)) return stored as CryptoKey;
+  // IndexedDB can hand back a plain object instead of a live CryptoKey. The JWK
+  // backup recovers it, which is exactly what pairing needs before it starts.
+  await reimportIdentityKeys(identity);
+  if (!isRealCryptoKey(identity.privateKeyECDSA)) {
+    throw new Error('The stored private key could not be restored.');
+  }
+  return identity.privateKeyECDSA as CryptoKey;
+}
+
+/**
+ * Proves the local keypair works, instead of guessing from a later failure.
+ *
+ * A device key can be missing, stubbed by the browser's storage layer, or
+ * genuinely unusable. Only the last case deserves a "your keys are corrupted"
+ * warning, and the only honest way to tell them apart is to sign something and
+ * verify it with the stored public key - which is what this does.
+ */
+export async function checkIdentityKeys(identity: IdentityRecord | null): Promise<KeyHealth> {
+  if (!hasWebCrypto()) {
+    return {
+      state: 'unsupported',
+      pairingReady: false,
+      detail:
+        'This browser context has no WebCrypto, so pairing cannot use a device key. Open the app over https (or localhost).',
+    };
+  }
+
+  if (!identity?.deviceId || !identity.publicKeyECDSA || !identity.privateKeyECDSA) {
+    return {
+      state: 'missing',
+      pairingReady: false,
+      detail: 'No device keypair is stored on this device yet.',
+    };
+  }
+
+  try {
+    const payload = new TextEncoder().encode(`${KEY_SELF_TEST}:${identity.deviceId}`);
+    const privateKey = await workingPrivateKey(identity);
+    const signature = await crypto.subtle.sign(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      privateKey,
+      payload
+    );
+    const verified = await crypto.subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      identity.publicKeyECDSA,
+      signature,
+      payload
+    );
+    if (verified) {
+      return {
+        state: 'healthy',
+        pairingReady: true,
+        detail: 'Signing and verification both work with the keys stored here.',
+      };
+    }
+    return {
+      state: 'broken',
+      pairingReady: false,
+      detail: 'The stored keypair did not pass a signing check.',
+    };
+  } catch (err) {
+    return {
+      state: 'broken',
+      pairingReady: false,
+      detail: `The stored keypair could not be used: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Replaces this device's keypair with a brand new one.
+ *
+ * It has to remove the identity from the vault as well as from the localStorage
+ * backup - clearing only the backup left the old, unusable identity in
+ * IndexedDB, which is why the warning used to come straight back after a reload.
+ * The profile itself (name, photo, bio, status) is kept: only the keys change.
+ * The new keypair is verified before this resolves, so the caller can report the
+ * truth instead of "try reloading".
+ */
+export async function regenerateIdentityKeys(): Promise<{
+  identity: IdentityRecord;
+  health: KeyHealth;
+}> {
+  let previousName: string | undefined;
+  let previousColor: string | undefined;
+  try {
+    previousName = localStorage.getItem(STORAGE_KEY_NAME) || undefined;
+    previousColor = localStorage.getItem(STORAGE_KEY_COLOR) || undefined;
+  } catch {
+    /* storage blocked: the vault still holds the profile */
+  }
+
+  try {
+    await db.identity.clear();
+  } catch (err) {
+    console.warn('Identity vault clear warning:', err);
+  }
+  try {
+    localStorage.removeItem(STORAGE_KEY_PRIV_JWK);
+    localStorage.removeItem(STORAGE_KEY_PUB);
+    localStorage.removeItem(STORAGE_KEY_DEV_ID);
+  } catch {
+    /* nothing else to clear */
+  }
+
+  resetIdentityBootstrap();
+  const identity = await getOrCreateIdentity(previousName, previousColor);
+  const health = await checkIdentityKeys(identity);
+  return { identity, health };
+}
+
 async function bootstrapIdentity(customDisplayName?: string, customAvatarColor?: string): Promise<IdentityRecord> {
   const cryptoReady = hasWebCrypto();
 
