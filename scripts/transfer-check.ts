@@ -44,6 +44,20 @@ const PHOTO_BYTES = 6 * 1024 * 1024;
 const MESSAGE_ID = 'msg_harness_photo_1';
 
 let failures = 0;
+let exifSkips = 0;
+
+// The engine asks exifr for photo metadata on every image; exifr needs a browser
+// FileReader, which Node does not have. The engine already treats missing
+// metadata as "no metadata", so the harness counts these and reports them once
+// instead of printing a stack trace per frame.
+const realWarn = console.warn.bind(console);
+console.warn = (...args: any[]) => {
+  if (String(args[0] ?? '').includes('EXIF')) {
+    exifSkips += 1;
+    return;
+  }
+  realWarn(...args);
+};
 
 function check(label: string, condition: boolean, detail = ''): void {
   if (condition) {
@@ -449,7 +463,14 @@ async function main(): Promise<void> {
   check('still no retransmissions', stalled.duplicateChunks === 0, `${stalled.duplicateChunks}`);
   check('the bubble still gets the sender message id', stalled.meta?.messageId === MESSAGE_ID);
 
-  console.log(failures === 0 ? `\nAll checks passed.\n` : `\n${failures} check(s) failed.\n`);
+  if (exifSkips > 0) {
+    console.log(
+      `Note: ${exifSkips} EXIF read(s) were skipped - Node has no FileReader, and the\n` +
+        `engine treats missing photo metadata as "no metadata", exactly as a browser\n` +
+        `does for a picture without an EXIF block.\n`
+    );
+  }
+  console.log(failures === 0 ? `All checks passed.\n` : `${failures} check(s) failed.\n`);
   process.exit(failures === 0 ? 0 : 1);
 }
 
