@@ -73,6 +73,17 @@ export interface FileHeaderPayload {
   hashSHA256: string;
   totalChunks: number;
   chunkSize: number;
+  /**
+   * Conversation metadata. A file sent over the direct link must land in the
+   * very same bubble the relay would have filled, so the message id (and who
+   * sent it) travel with the header. Both are optional: a peer running an older
+   * build simply omits them and the receiver falls back to matching by file id.
+   */
+  messageId?: string;
+  senderDeviceId?: string;
+  senderDisplayName?: string;
+  /** Small inline preview (data URL) so a photo shows before its bytes land. */
+  previewUrl?: string;
 }
 
 export function encodeFileHeaderPayload(info: FileHeaderPayload): Uint8Array {

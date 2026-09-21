@@ -20,6 +20,7 @@ import { TerminalHeader } from './components/TerminalHeader';
 import { ScryptChatLogo } from './components/ScryptChatLogo';
 import { PeerList } from './components/PeerList';
 import { ChatView } from './components/ChatView';
+import { mergeMessageRow } from './utils/messageMerge';
 import { PairingModal } from './components/PairingModal';
 import { DataWipeDialog } from './components/DataWipeDialog';
 import { OnboardingModal } from './components/OnboardingModal';
@@ -197,14 +198,11 @@ export default function App() {
             soundEngine.playMessageReceived();
             const isActiveChat = activeChatKeyRef.current === msg.chatDeviceId;
             if (isActiveChat) {
-              setMessages((prev) =>
-                prev.some((existing) =>
-                  (msg.messageId && existing.messageId === msg.messageId) ||
-                  (msg.id !== undefined && existing.id === msg.id)
-                )
-                  ? prev
-                  : [...prev, msg]
-              );
+              // Merge, never ignore. An attachment is announced first and its
+              // bytes land a moment later: the same message id comes back with
+              // the complete record. Dropping that update (the old behaviour)
+              // left the bubble on its loading placeholder for good.
+              setMessages((prev) => mergeMessageRow(prev, msg));
             }
             updateLastMessageFor(msg);
             // A brand new sender may not be in the sidebar yet.
@@ -414,6 +412,20 @@ export default function App() {
       })
       .catch(() => {});
   }
+
+  /**
+   * A received attachment whose bytes never arrived. The bubble asks for them
+   * again instead of sitting on a spinner nobody can clear.
+   */
+  const handleRetryAttachment = (message: MessageRecord) => {
+    if (!message.messageId || !message.fileId) return;
+    peerManagerRef.current?.requestAttachmentBytes?.(
+      message.messageId,
+      message.fileId,
+      message.chatDeviceId,
+      true
+    );
+  };
 
   const handleRetryMessage = (messageId: string) => {
     void peerManagerRef.current?.retryMessage(messageId).catch(() => {});
@@ -719,6 +731,7 @@ export default function App() {
             onSendFile={handleSendFile}
             onStartCall={handleStartCall}
             onRetryMessage={handleRetryMessage}
+            onRetryAttachment={handleRetryAttachment}
             isPeerTyping={!!activeContact && !!typingPeers[activeContact.deviceId]}
             onClearHistory={handleClearHistory}
             onDeleteContact={handleDeleteContact}
@@ -763,6 +776,7 @@ export default function App() {
               onSendFile={handleSendFile}
               onStartCall={handleStartCall}
               onRetryMessage={handleRetryMessage}
+              onRetryAttachment={handleRetryAttachment}
               isPeerTyping={!!activeContact && !!typingPeers[activeContact.deviceId]}
               onBackToPeers={() => setMobileTab('peers')}
               onClearHistory={handleClearHistory}

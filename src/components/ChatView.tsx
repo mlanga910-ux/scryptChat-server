@@ -34,8 +34,11 @@ import {
   Wifi,
   UploadCloud,
   ArrowUpFromLine,
+  Loader2,
+  RotateCcw,
 } from 'lucide-react';
 import { db } from '../db/index';
+import { onVaultChange } from '../utils/vaultEvents';
 import { ImageViewerModal } from './ImageViewerModal';
 import { ChatSettingsModal } from './ChatSettingsModal';
 import { FilePreviewModal } from './FilePreviewModal';
@@ -82,6 +85,8 @@ interface ChatViewProps {
   isPeerTyping?: boolean;
   /** Re-sends a message whose delivery failed. */
   onRetryMessage?: (messageId: string) => void;
+  /** Asks the sender for an attachment whose bytes never arrived. */
+  onRetryAttachment?: (message: MessageRecord) => void;
   peerManager?: any;
   onSendMessage: (
     text: string,
@@ -108,6 +113,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   latencyMs,
   isPeerTyping,
   onRetryMessage,
+  onRetryAttachment,
   peerManager,
   onSendMessage,
   onSendFile,
@@ -146,6 +152,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
   const [downloadUrls, setDownloadUrls] = useState<Map<string, string>>(new Map());
   const [fileRecordsMap, setFileRecordsMap] = useState<Map<string, FileRecord>>(new Map());
+  /**
+   * Bumped whenever bytes land in the local vault. Attachment resolution is
+   * driven by it, so a photo sharpens the instant its file is stored - however
+   * it arrived, and without waiting for another message to trigger a repaint.
+   */
+  const [vaultVersion, setVaultVersion] = useState(0);
+
+  useEffect(() => onVaultChange(() => setVaultVersion((v) => v + 1)), []);
 
   const [selectedImageFile, setSelectedImageFile] = useState<FileRecord | null>(null);
   const [selectedImageBlobUrl, setSelectedImageBlobUrl] = useState<string | undefined>(undefined);
@@ -232,11 +246,17 @@ export const ChatView: React.FC<ChatViewProps> = ({
         // database round trip, so a photo appears the moment it is sent and a
         // received one appears as soon as its bytes are stored.
         const inline = msg.fileRecord;
-        const rec = inline?.blobRef ? inline : await db.files.get(msg.fileId);
+        const rec = inline?.blobRef ? inline : await db.files.get(msg.fileId) || inline;
         if (!rec || isCancelled) continue;
-        setFileRecordsMap((prev) =>
-          prev.has(rec.fileId) ? prev : new Map(prev).set(rec.fileId, rec)
-        );
+        // Always keep the freshest record: the message row may carry metadata
+        // only, while db.files holds the bytes that arrived a moment later.
+        setFileRecordsMap((prev) => {
+          const current = prev.get(rec.fileId!);
+          if (current && current.blobRef === rec.blobRef && current.previewUrl === rec.previewUrl) {
+            return prev;
+          }
+          return new Map(prev).set(rec.fileId!, rec);
+        });
         if (rec.blobRef && !downloadUrls.has(rec.fileId)) {
           const url = URL.createObjectURL(rec.blobRef);
           setDownloadUrls((prev) =>
@@ -251,7 +271,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     };
     // Re-runs when a freshly stored file record appears, so an attachment is
     // rendered the moment it lands instead of waiting for a new message.
-  }, [messages, fileRecordsMap]);
+  }, [messages, fileRecordsMap, vaultVersion]);
 
   // Attachments are handed out as object URLs; releasing them when the
   // conversation closes keeps a long session from leaking memory.
@@ -687,6 +707,15 @@ export const ChatView: React.FC<ChatViewProps> = ({
             const isAudio = fileRec?.isAudio || msg.mediaType === 'audio';
             const isVideo = fileRec?.isVideo || msg.mediaType === 'video';
 
+            // An attachment sent to us can be announced before its bytes land.
+            // These three flags decide what the bubble shows meanwhile, and
+            // whether it offers to fetch the file again.
+            const isInboundAttachment = !isYou && !!msg.fileId;
+            const attachmentFailed =
+              isInboundAttachment && msg.attachmentState === 'failed';
+            const attachmentStalled =
+              isInboundAttachment && !attachmentFailed && Date.now() - msg.timestamp > 45000;
+
             const parsedParts = (!msg.fileId && !msg.codeSnippet && msg.payloadText)
               ? parseMessageContent(msg.payloadText)
               : [];
@@ -736,9 +765,34 @@ export const ChatView: React.FC<ChatViewProps> = ({
                           className="max-h-72 w-auto object-cover cursor-pointer hover:opacity-95 transition-opacity"
                           onClick={() => fileRec && openImageViewer(fileRec, downloadUrl, msg)}
                         />
+                      ) : fileRec?.previewUrl ? (
+                        <div className="relative">
+                          <img
+                            src={fileRec.previewUrl}
+                            alt={fileRec?.name || 'Photo'}
+                            className="max-h-72 w-auto object-cover blur-[2px] transition-all"
+                          />
+                          <div className="absolute inset-0 grid place-items-center bg-black/35">
+                            <span className="inline-flex items-center gap-2 rounded-full bg-black/60 px-3 py-1.5 text-[11px] font-medium text-white">
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              Receiving…
+                            </span>
+                          </div>
+                        </div>
+                      ) : attachmentFailed || attachmentStalled ? (
+                        <button
+                          type="button"
+                          onClick={() => onRetryAttachment?.(msg)}
+                          className="w-64 h-48 bg-zinc-900 flex flex-col items-center justify-center gap-2 text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                        >
+                          <RotateCcw className="w-5 h-5" />
+                          <span>The photo has not arrived yet</span>
+                          <span className="text-[10px] text-zinc-500">Tap to fetch it again</span>
+                        </button>
                       ) : (
-                        <div className="w-64 h-48 bg-zinc-900 flex items-center justify-center text-xs text-zinc-500">
-                          {fileRec?.blobRef ? 'Loading photo…' : 'Photo unavailable'}
+                        <div className="w-64 h-48 bg-zinc-900 flex flex-col items-center justify-center gap-2 text-xs text-zinc-500">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Receiving…</span>
                         </div>
                       )}
                       <div className="p-2.5 flex items-center justify-between gap-2 border-t border-black/10">
@@ -789,9 +843,21 @@ export const ChatView: React.FC<ChatViewProps> = ({
                           src={downloadUrl}
                           className="max-h-72 w-full max-w-md bg-black"
                         />
+                      ) : attachmentFailed || attachmentStalled ? (
+                        <button
+                          type="button"
+                          onClick={() => onRetryAttachment?.(msg)}
+                          className="w-64 h-40 bg-zinc-900 grid place-items-center text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                        >
+                          <span className="inline-flex items-center gap-2">
+                            <RotateCcw className="w-4 h-4" />
+                            Tap to fetch the video again
+                          </span>
+                        </button>
                       ) : (
-                        <div className="w-64 h-40 bg-zinc-900 grid place-items-center text-xs text-zinc-500">
-                          {fileRec?.blobRef ? 'Loading video…' : 'Video unavailable'}
+                        <div className="w-64 h-40 bg-zinc-900 flex flex-col items-center justify-center gap-2 text-xs text-zinc-500">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Receiving video…</span>
                         </div>
                       )}
                       <div className="p-2.5 flex items-center justify-between gap-2 border-t border-black/10">
@@ -886,11 +952,32 @@ export const ChatView: React.FC<ChatViewProps> = ({
                             {fileRec?.name || msg.payloadText}
                           </p>
                           <p className="text-[11px] opacity-70 font-mono">
-                            {fileRec ? `${(fileRec.size / 1024).toFixed(1)} KB` : 'File'}
+                            {!downloadUrl && isInboundAttachment
+                              ? attachmentFailed || attachmentStalled
+                                ? 'Not received yet'
+                                : 'Receiving…'
+                              : fileRec
+                              ? `${(fileRec.size / 1024).toFixed(1)} KB`
+                              : 'File'}
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
+                        {!downloadUrl && isInboundAttachment && (attachmentFailed || attachmentStalled) && (
+                          <button
+                            type="button"
+                            onClick={() => onRetryAttachment?.(msg)}
+                            className={`p-2 rounded-xl transition-colors cursor-pointer ${
+                              isYou
+                                ? 'bg-black/10 hover:bg-black/20 text-black'
+                                : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200'
+                            }`}
+                            title="Fetch this file again"
+                            aria-label="Fetch this file again"
+                          >
+                            <RotateCcw className="w-4 h-4" />
+                          </button>
+                        )}
                         {fileRec &&
                           (fileRec.blobRef || downloadUrl) && (
                             <button

@@ -33,9 +33,38 @@ const ACK_WAIT_TIMEOUT_MS = 15000; // Total wait for final ACK before declaring 
 const MAX_CHUNK_RETRIES = 3; // Maximum retransmission attempts per chunk
 const BACKOFF_BASE_MS = 500; // Exponential backoff base for chunk resend
 
+/**
+ * Conversation metadata that rides in the FILE_HEADER.
+ *
+ * It is what lets an attachment delivered over the direct link land in the same
+ * bubble the relay would have used: the receiver stores the file under the
+ * sender's message id instead of inventing a second message for it.
+ */
+export interface FileCompletionMeta {
+  messageId?: string;
+  senderDeviceId?: string;
+  senderDisplayName?: string;
+  previewUrl?: string;
+}
+
+/**
+ * Where a completed inbound attachment is handed over.
+ *
+ * The peer manager owns the conversation, so it is the one that knows whether
+ * an attachment completes a bubble the sender already announced or has to open
+ * a new one. The transfer engine therefore stores nothing itself: it reports the
+ * file, its bytes and the metadata that travelled in the header, and exactly one
+ * store step follows - whichever transport carried the bytes.
+ */
+export type AttachmentCompletionSink = (
+  fileRecord: FileRecord,
+  blob: Blob,
+  meta?: FileCompletionMeta
+) => Promise<void> | void;
+
 export interface FileTransferEvents {
   onProgress?: (progress: FileTransferProgress) => void;
-  onCompleted?: (fileRecord: FileRecord, blob: Blob) => void;
+  onCompleted?: (fileRecord: FileRecord, blob: Blob, meta?: FileCompletionMeta) => void;
   onError?: (fileId: string, error: string) => void;
 }
 
@@ -48,6 +77,8 @@ export interface TransferOptions {
   isLan?: boolean;
   /** Force a frame size (tests, or a caller that already measured the link). */
   chunkSize?: number;
+  /** Conversation metadata carried in the header (message id, sender, preview). */
+  meta?: FileCompletionMeta;
 }
 
 /**
@@ -76,7 +107,34 @@ interface PendingChunk {
   timer: ReturnType<typeof setTimeout> | null;
 }
 
+/**
+ * Highest chunk index with no gap below it.
+ *
+ * The data channel is ordered and reliable, so this is normally simply the last
+ * chunk received - but computing it honestly means a missing frame can never be
+ * acknowledged away by a later one.
+ */
+function highestContiguousChunk(chunks: Map<number, Uint8Array>): number {
+  let index = -1;
+  while (chunks.has(index + 1)) index += 1;
+  return index;
+}
+
 export class FileTransferManager {
+  /** Chunks between two acknowledgements on the receiving side. */
+  private static readonly ACK_EVERY_CHUNKS = 16;
+  /**
+   * Never let the sender wait longer than this for a sign of life, whatever the
+   * batch size: it is well under the sender's own chunk resend timeout.
+   */
+  private static readonly ACK_MAX_DELAY_MS = 2000;
+  /**
+   * Shortest gap between two progress reports. A transfer is not a stopwatch:
+   * repainting the chat hundreds of times a second is work taken away from
+   * moving the bytes, and on a phone it is felt as a slow transfer.
+   */
+  private static readonly PROGRESS_REPORT_MS = 140;
+
   private activeTransfers: Map<string, FileTransferProgress> = new Map();
   private incomingFiles: Map<
     string,
@@ -85,6 +143,11 @@ export class FileTransferManager {
       chunks: Map<number, Uint8Array>;
       receivedBytes: number;
       startTime: number;
+      /** When this side last told the sender it holds chunks. */
+      lastAckAt: number;
+      /** Throttles progress repaints; see `PROGRESS_REPORT_MS`. */
+      lastReportAt: number;
+      lastReportedPercent: number;
     }
   > = new Map();
   private outgoingAckResolvers: Map<string, Map<number, () => void>> = new Map();
@@ -110,6 +173,13 @@ export class FileTransferManager {
    * a stale hint can never break a transfer.
    */
   private lanHint = false;
+
+  /** Registered once by the peer manager; see `AttachmentCompletionSink`. */
+  private completionSink: AttachmentCompletionSink | null = null;
+
+  public setAttachmentCompletionSink(sink: AttachmentCompletionSink | null): void {
+    this.completionSink = sink;
+  }
 
   public setLanHint(isLan: boolean): void {
     this.lanHint = isLan;
@@ -314,6 +384,7 @@ export class FileTransferManager {
       hashSHA256: hashHex,
       totalChunks,
       chunkSize,
+      ...(options?.meta || {}),
     };
 
     const progress: FileTransferProgress = {
@@ -365,6 +436,7 @@ export class FileTransferManager {
       dataChannel.send(encryptedHeaderFrame);
 
       const startTime = Date.now();
+      let lastReportAt = startTime;
 
       // 2. Stream CHUNKS with backpressure and ACK tracking
       for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
@@ -401,8 +473,15 @@ export class FileTransferManager {
         }
 
         // Repainting the chat on every frame would cost more than the transfer
-        // itself, so a big file reports on percent changes and every 32 frames.
-        if (pct !== lastPct || chunkIdx % 32 === 0 || transferred === totalChunks) {
+        // itself, so reports are throttled by time, by whole percent, and by
+        // every 32 frames - with the final frame always reported.
+        const nowMs = Date.now();
+        if (
+          transferred === totalChunks ||
+          (nowMs - lastReportAt >= FileTransferManager.PROGRESS_REPORT_MS &&
+            (pct !== lastPct || chunkIdx % 32 === 0))
+        ) {
+          lastReportAt = nowMs;
           events?.onProgress?.({ ...progress });
         }
       }
@@ -477,6 +556,9 @@ export class FileTransferManager {
         chunks: new Map(),
         receivedBytes: 0,
         startTime: Date.now(),
+        lastAckAt: Date.now(),
+        lastReportAt: 0,
+        lastReportedPercent: -1,
       });
 
       const progress: FileTransferProgress = {
@@ -512,28 +594,51 @@ export class FileTransferManager {
         incoming.receivedBytes += payload.byteLength;
       }
 
-      // Send CHUNK_ACK (0x22) - always acknowledge even duplicates
-      try {
-        const ackPayload: ChunkAckPayload = {
-          chunkIndex: sequenceIndex,
-          status: isDuplicate ? AckStatus.OK_ACK : AckStatus.OK_ACK,
-        };
-        const encodedAck = encodeChunkAckPayload(ackPayload);
-        const ackHeader = buildPacketHeader(
-          PacketType.CHUNK_ACK,
-          session.sessionId,
-          objectId,
-          sequenceIndex
-        );
-        const encryptedAck = await session.encryptFrame(ackHeader, encodedAck);
-        if (dataChannel.readyState === 'open') {
-          dataChannel.send(encryptedAck);
+      // Acknowledge in batches. One small encrypted ACK per frame is a lot of
+      // traffic on top of the file - on a link whose frames are 64 KB it is one
+      // ACK for every 64 KB - and every one of them competes with the chunks
+      // themselves for the channel. A chunk is acknowledged when the batch is
+      // full, when the last chunk of the file arrives (the sender is waiting for
+      // exactly that one), or after a short delay so a slow link never looks
+      // stalled to the sender's resend timer. A duplicate is always answered
+      // immediately, which is what heals a lost ACK.
+      // The index carried is the highest one this side holds (the channel is
+      // ordered, so that is the highest contiguous chunk), which is what makes
+      // the cumulative ACK on the sender's side correct.
+      const highestHeld = Math.max(sequenceIndex, highestContiguousChunk(incoming.chunks));
+      const isComplete = incoming.chunks.size >= incoming.header.totalChunks;
+      const shouldAck =
+        isDuplicate ||
+        isComplete ||
+        highestHeld % FileTransferManager.ACK_EVERY_CHUNKS === 0 ||
+        Date.now() - incoming.lastAckAt >= FileTransferManager.ACK_MAX_DELAY_MS;
+      if (shouldAck) {
+        incoming.lastAckAt = Date.now();
+        try {
+          const ackPayload: ChunkAckPayload = {
+            chunkIndex: highestHeld,
+            status: AckStatus.OK_ACK,
+          };
+          const encodedAck = encodeChunkAckPayload(ackPayload);
+          const ackHeader = buildPacketHeader(
+            PacketType.CHUNK_ACK,
+            session.sessionId,
+            objectId,
+            highestHeld
+          );
+          const encryptedAck = await session.encryptFrame(ackHeader, encodedAck);
+          if (dataChannel.readyState === 'open') {
+            dataChannel.send(encryptedAck);
+          }
+        } catch (err) {
+          console.error('Failed to send CHUNK_ACK:', err);
         }
-      } catch (err) {
-        console.error('Failed to send CHUNK_ACK:', err);
       }
 
-      // Update progress
+      // Update progress, but do not repaint per chunk. Every report re-renders
+      // the conversation, and on a link with small frames that was one repaint
+      // per 64 KB - more work than moving the bytes. Reports are throttled by
+      // time and by whole percent, and the receiver always reports completion.
       const progress = this.activeTransfers.get(fileIdHex);
       if (progress) {
         const transferred = incoming.chunks.size;
@@ -544,7 +649,18 @@ export class FileTransferManager {
         progress.transferredChunks = transferred;
         progress.progressPercent = pct;
         progress.speedBps = speed;
-        events?.onProgress?.({ ...progress });
+
+        const nowMs = Date.now();
+        const isLastChunk = transferred >= incoming.header.totalChunks;
+        if (
+          isLastChunk ||
+          (pct !== incoming.lastReportedPercent &&
+            nowMs - incoming.lastReportAt >= FileTransferManager.PROGRESS_REPORT_MS)
+        ) {
+          incoming.lastReportAt = nowMs;
+          incoming.lastReportedPercent = pct;
+          events?.onProgress?.({ ...progress });
+        }
       }
 
       // Check if all chunks received (account for out-of-order arrival)
@@ -628,7 +744,16 @@ export class FileTransferManager {
           };
 
           await db.files.put(fileRecord);
-          events?.onCompleted?.(fileRecord, blob);
+          const meta: FileCompletionMeta = {
+            messageId: incoming.header.messageId,
+            senderDeviceId: incoming.header.senderDeviceId,
+            senderDisplayName: incoming.header.senderDisplayName,
+            previewUrl: incoming.header.previewUrl,
+          };
+          // Stored first, so the conversation holds the complete attachment
+          // before anything else reacts to it.
+          await this.completionSink?.(fileRecord, blob, meta);
+          events?.onCompleted?.(fileRecord, blob, meta);
 
           return { fileRecord, blob };
         } catch (reassembleErr: any) {
@@ -652,15 +777,18 @@ export class FileTransferManager {
       }
       this.receivedAcks.get(fileIdHex)!.add(ack.chunkIndex);
 
-      // Cancel the pending chunk's resend timer
+      // Acknowledged chunks are retired cumulatively. The channel delivers in
+      // order, so an ACK for chunk N also means every chunk before N is safely
+      // there: one batched ACK clears the whole batch instead of leaving the
+      // fifteen resend timers of the chunks it covers running, which used to
+      // turn batching into a burst of pointless retransmissions.
       const pending = this.pendingChunks.get(fileIdHex);
       if (pending) {
-        const chunk = pending.get(ack.chunkIndex);
-        if (chunk && chunk.timer) {
-          clearTimeout(chunk.timer);
-          chunk.timer = null;
+        for (const [index, chunk] of Array.from(pending.entries())) {
+          if (index > ack.chunkIndex) continue;
+          if (chunk.timer) clearTimeout(chunk.timer);
+          pending.delete(index);
         }
-        pending.delete(ack.chunkIndex);
       }
 
       // Explicit NACK: retransmit that chunk right away.

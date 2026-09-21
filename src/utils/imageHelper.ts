@@ -11,9 +11,35 @@ const AVATAR_MAX_DIM = 256;
 /** Above this the image is re-encoded smaller (data URL characters). */
 const AVATAR_MAX_CHARS = 90000;
 
+/** Chat previews: big enough to read the photo, small enough to travel in one frame. */
+const PREVIEW_MAX_DIM = 720;
+/** Roughly a 120 KB thumbnail once base64 overhead is counted. */
+const PREVIEW_MAX_CHARS = 160000;
+
+/**
+ * A small inline preview of a photo, as a data URL.
+ *
+ * It is sent alongside the attachment so the receiver can show the picture
+ * immediately — blurred and labelled while the real bytes are still on their
+ * way — instead of a loading box. Never throws: a browser that cannot encode
+ * simply contributes no preview.
+ */
+export async function fileToImagePreviewDataUrl(file: File): Promise<string | undefined> {
+  try {
+    if (!file.type.startsWith('image/') || file.type === 'image/gif') return undefined;
+    // Skip anything with pixels this cheap: the file itself is already tiny.
+    if (file.size > 24 * 1024 * 1024) return undefined;
+    const dataUrl = await fileToAvatarDataUrl(file, PREVIEW_MAX_DIM, PREVIEW_MAX_CHARS);
+    return dataUrl && dataUrl.startsWith('data:image/') ? dataUrl : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function fileToAvatarDataUrl(
   file: File,
-  maxDim = AVATAR_MAX_DIM
+  maxDim = AVATAR_MAX_DIM,
+  maxChars = AVATAR_MAX_CHARS
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -53,8 +79,15 @@ export async function fileToAvatarDataUrl(
         };
 
         let dataUrl = encode(maxDim, keepAlpha ? 0.85 : 0.82);
-        if (dataUrl.length > AVATAR_MAX_CHARS) dataUrl = encode(180, 0.72);
-        if (dataUrl.length > AVATAR_MAX_CHARS) dataUrl = encode(128, 0.6);
+        if (dataUrl.length > maxChars) {
+          dataUrl = encode(Math.round(maxDim * 0.7), 0.72);
+        }
+        if (dataUrl.length > maxChars) {
+          dataUrl = encode(Math.round(maxDim * 0.5), 0.6);
+        }
+        if (dataUrl.length > maxChars) {
+          dataUrl = encode(128, 0.5);
+        }
 
         resolve(dataUrl || String(event.target?.result || ''));
       };

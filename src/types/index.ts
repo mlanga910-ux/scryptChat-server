@@ -193,6 +193,12 @@ export interface MessageRecord {
   codeSnippet?: CodeSnippet;
   timestamp: number;
   status?: MessageStatus;
+  /**
+   * Where an attachment stands on this device: `receiving` while its bytes are
+   * still travelling, `ready` once they are in the local vault, `failed` when
+   * the transfer gave up. Absent for text messages.
+   */
+  attachmentState?: 'receiving' | 'ready' | 'failed';
   offlineEnvelope?: boolean;
   /**
    * Secret of the relay transfer that carries this attachment's bytes. Persisted
