@@ -34,7 +34,6 @@ import {
   Wifi,
   UploadCloud,
   ArrowUpFromLine,
-  Loader2,
   RotateCcw,
 } from 'lucide-react';
 import { db } from '../db/index';
@@ -70,6 +69,22 @@ const formatDayLabel = (timestamp: number) => {
     month: 'short',
     year: sameYear ? undefined : 'numeric',
   });
+};
+
+/** "12.4 MB/s" - the only throughput unit that means anything at a glance. */
+const formatSpeed = (bytesPerSecond?: number): string => {
+  if (!bytesPerSecond || bytesPerSecond <= 0 || !Number.isFinite(bytesPerSecond)) return '';
+  const mbPerSecond = bytesPerSecond / (1024 * 1024);
+  if (mbPerSecond >= 1) return `${mbPerSecond.toFixed(1)} MB/s`;
+  return `${(bytesPerSecond / 1024).toFixed(0)} KB/s`;
+};
+
+const formatBytes = (bytes?: number): string => {
+  if (!bytes || bytes <= 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 };
 
 interface ChatViewProps {
@@ -161,6 +176,27 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
   useEffect(() => onVaultChange(() => setVaultVersion((v) => v + 1)), []);
 
+  /**
+   * A download that has quietly stopped only becomes visible through the
+   * passage of time, and nothing else re-renders the conversation while a
+   * transfer is silent. This slow tick turns a stuck placeholder into the
+   * "tap to fetch" fallback instead of leaving a spinner running forever.
+   */
+  const [stallTick, setStallTick] = useState(0);
+  const hasPendingInboundAttachment = useMemo(
+    () =>
+      messages.some(
+        (m) => m.direction === 'INBOUND' && !!m.fileId && m.attachmentState !== 'ready'
+      ),
+    [messages]
+  );
+  useEffect(() => {
+    if (!hasPendingInboundAttachment) return;
+    const timer = setInterval(() => setStallTick((t) => t + 1), 10000);
+    return () => clearInterval(timer);
+  }, [hasPendingInboundAttachment]);
+  void stallTick;
+
   const [selectedImageFile, setSelectedImageFile] = useState<FileRecord | null>(null);
   const [selectedImageBlobUrl, setSelectedImageBlobUrl] = useState<string | undefined>(undefined);
   const [selectedImageMessage, setSelectedImageMessage] = useState<MessageRecord | null>(null);
@@ -241,7 +277,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
     const loadBlobs = async () => {
       for (const msg of messages) {
         if (!msg.fileId) continue;
-        if (fileRecordsMap.has(msg.fileId) && downloadUrls.has(msg.fileId)) continue;
+        const known = fileRecordsMap.get(msg.fileId);
+        if (known && downloadUrls.has(msg.fileId)) {
+          // A resolved record is final and needs no database round trip - the
+          // one exception is a throughput stored on the row afterwards, which
+          // is the number the file still has to display.
+          const wantedSpeed = msg.transferSpeedBps;
+          if (!wantedSpeed || known.transferSpeedBps !== undefined) continue;
+        }
         // The record carried by the message row is authoritative and needs no
         // database round trip, so a photo appears the moment it is sent and a
         // received one appears as soon as its bytes are stored.
@@ -716,6 +759,34 @@ export const ChatView: React.FC<ChatViewProps> = ({
             const attachmentStalled =
               isInboundAttachment && !attachmentFailed && Date.now() - msg.timestamp > 45000;
 
+            // Live progress for this very attachment, while it is still moving.
+            // This is where the percentage and the MB/s read-out come from.
+            const transfer = msg.fileId
+              ? activeTransfers.find((t) => t.fileId === msg.fileId)
+              : undefined;
+            const transferSpeed =
+              fileRec?.transferSpeedBps || msg.transferSpeedBps || transfer?.speedBps;
+            const speedSuffix = formatSpeed(transferSpeed)
+              ? ` · ${formatSpeed(transferSpeed)}`
+              : '';
+            const percentSuffix =
+              transfer?.progressPercent !== undefined
+                ? ` · ${Math.round(transfer.progressPercent)}%`
+                : '';
+            // Only an inbound attachment can be waiting for bytes: anything this
+            // device sent is already in its own vault. Treating a sent file as
+            // "receiving" was what made your own photos spin forever after a
+            // reload.
+            const needsFetch =
+              isInboundAttachment && !downloadUrl && (attachmentFailed || attachmentStalled);
+            const attachmentStatus = downloadUrl
+              ? [formatBytes(fileRec?.size), formatSpeed(transferSpeed)].filter(Boolean).join(' · ')
+              : needsFetch
+              ? 'Not received yet · tap to fetch'
+              : isYou
+              ? `Sending…${percentSuffix}${speedSuffix}`
+              : `Receiving…${percentSuffix}${speedSuffix}`;
+
             const parsedParts = (!msg.fileId && !msg.codeSnippet && msg.payloadText)
               ? parseMessageContent(msg.payloadText)
               : [];
@@ -757,7 +828,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 >
                   {/* Photo / Image View */}
                   {isImage && (
-                    <div className="relative group">
+                    <div className="group">
                       {downloadUrl ? (
                         <img
                           src={downloadUrl}
@@ -765,21 +836,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                           className="max-h-72 w-auto object-cover cursor-pointer hover:opacity-95 transition-opacity"
                           onClick={() => fileRec && openImageViewer(fileRec, downloadUrl, msg)}
                         />
-                      ) : fileRec?.previewUrl ? (
-                        <div className="relative">
-                          <img
-                            src={fileRec.previewUrl}
-                            alt={fileRec?.name || 'Photo'}
-                            className="max-h-72 w-auto object-cover blur-[2px] transition-all"
-                          />
-                          <div className="absolute inset-0 grid place-items-center bg-black/35">
-                            <span className="inline-flex items-center gap-2 rounded-full bg-black/60 px-3 py-1.5 text-[11px] font-medium text-white">
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              Receiving…
-                            </span>
-                          </div>
-                        </div>
-                      ) : attachmentFailed || attachmentStalled ? (
+                      ) : needsFetch ? (
                         <button
                           type="button"
                           onClick={() => onRetryAttachment?.(msg)}
@@ -789,24 +846,40 @@ export const ChatView: React.FC<ChatViewProps> = ({
                           <span>The photo has not arrived yet</span>
                           <span className="text-[10px] text-zinc-500">Tap to fetch it again</span>
                         </button>
+                      ) : fileRec?.previewUrl ? (
+                        <img
+                          src={fileRec.previewUrl}
+                          alt={fileRec?.name || 'Photo'}
+                          className="max-h-72 w-auto object-cover blur-[2px] transition-all"
+                        />
                       ) : (
-                        <div className="w-64 h-48 bg-zinc-900 flex flex-col items-center justify-center gap-2 text-xs text-zinc-500">
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>Receiving…</span>
+                        <div className="w-64 h-48 bg-zinc-900 grid place-items-center">
+                          <ImageIcon className="w-6 h-6 text-zinc-600" />
                         </div>
                       )}
-                      <div className="p-2.5 flex items-center justify-between gap-2 border-t border-black/10">
-                        <span
-                          className="truncate max-w-[150px] font-medium opacity-80 cursor-pointer hover:underline"
-                          onClick={() => fileRec && openImageViewer(fileRec, downloadUrl, msg)}
-                        >
-                          {fileRec?.name || 'Photo'}
-                        </span>
+                      {/* Name, size, throughput and transfer state all live
+                          under the picture, never on top of it. */}
+                      <div className="px-2.5 py-2 flex items-center justify-between gap-2 border-t border-black/10">
+                        <div className="min-w-0 flex flex-col leading-tight">
+                          <span
+                            className="truncate max-w-[170px] text-[11px] font-medium opacity-90 cursor-pointer hover:underline"
+                            onClick={() => fileRec && openImageViewer(fileRec, downloadUrl, msg)}
+                          >
+                            {fileRec?.name || 'Photo'}
+                          </span>
+                          <span
+                            className={`truncate text-[10px] font-mono opacity-70 ${
+                              needsFetch ? 'text-amber-400' : ''
+                            }`}
+                          >
+                            {attachmentStatus}
+                          </span>
+                        </div>
                         {downloadUrl && (
                           <a
                             href={downloadUrl}
                             download={fileRec?.name || 'photo.png'}
-                            className="p-1.5 rounded-lg bg-black/10 hover:bg-black/20 text-current transition-colors cursor-pointer"
+                            className="p-1.5 rounded-lg bg-black/10 hover:bg-black/20 text-current transition-colors cursor-pointer shrink-0"
                             title="Download Photo"
                             aria-label="Download Photo"
                           >
@@ -843,7 +916,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                           src={downloadUrl}
                           className="max-h-72 w-full max-w-md bg-black"
                         />
-                      ) : attachmentFailed || attachmentStalled ? (
+                      ) : needsFetch ? (
                         <button
                           type="button"
                           onClick={() => onRetryAttachment?.(msg)}
@@ -856,14 +929,19 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         </button>
                       ) : (
                         <div className="w-64 h-40 bg-zinc-900 flex flex-col items-center justify-center gap-2 text-xs text-zinc-500">
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>Receiving video…</span>
+                          <Film className="w-5 h-5 text-zinc-600" />
+                          <span>{attachmentStatus}</span>
                         </div>
                       )}
-                      <div className="p-2.5 flex items-center justify-between gap-2 border-t border-black/10">
-                        <span className="truncate max-w-[150px] font-medium opacity-80 text-xs">
-                          {fileRec?.name || 'Video'}
-                        </span>
+                      <div className="px-2.5 py-2 flex items-center justify-between gap-2 border-t border-black/10">
+                        <div className="min-w-0 flex flex-col leading-tight">
+                          <span className="truncate max-w-[170px] font-medium opacity-90 text-[11px]">
+                            {fileRec?.name || 'Video'}
+                          </span>
+                          <span className="truncate text-[10px] font-mono opacity-70">
+                            {attachmentStatus}
+                          </span>
+                        </div>
                         <div className="flex items-center gap-1.5 shrink-0">
                           {fileRec && (fileRec.blobRef || downloadUrl) && (
                             <button
@@ -951,19 +1029,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
                           <p className="font-medium text-xs truncate max-w-[160px]">
                             {fileRec?.name || msg.payloadText}
                           </p>
-                          <p className="text-[11px] opacity-70 font-mono">
-                            {!downloadUrl && isInboundAttachment
-                              ? attachmentFailed || attachmentStalled
-                                ? 'Not received yet'
-                                : 'Receiving…'
-                              : fileRec
-                              ? `${(fileRec.size / 1024).toFixed(1)} KB`
-                              : 'File'}
+                          <p className={`text-[11px] font-mono ${needsFetch ? 'text-amber-400' : 'opacity-70'}`}>
+                            {attachmentStatus || 'File'}
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        {!downloadUrl && isInboundAttachment && (attachmentFailed || attachmentStalled) && (
+                        {needsFetch && (
                           <button
                             type="button"
                             onClick={() => onRetryAttachment?.(msg)}
@@ -1121,7 +1193,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   style={{ width: `${Math.max(4, Math.min(100, transfer.progressPercent || 0))}%` }}
                 />
               </div>
-              <span className="tabular-nums text-zinc-500 shrink-0">
+              <span className="tabular-nums text-zinc-500 shrink-0 whitespace-nowrap">
+                {formatSpeed(transfer.speedBps) ? `${formatSpeed(transfer.speedBps)} · ` : ''}
                 {Math.round(transfer.progressPercent || 0)}%
               </span>
             </div>

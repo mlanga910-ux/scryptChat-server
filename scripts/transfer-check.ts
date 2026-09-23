@@ -147,6 +147,8 @@ interface RunResult {
   completions: number;
   meta?: FileCompletionMeta;
   storedInVault: boolean;
+  /** Throughput recorded on the sender's own record. */
+  transferSpeedBps?: number;
 }
 
 /**
@@ -310,6 +312,7 @@ async function transferPhoto(options: {
     completions: stats.completions,
     meta: stats.meta,
     storedInVault,
+    transferSpeedBps: sent.transferSpeedBps,
   };
 }
 
@@ -327,6 +330,56 @@ function report(result: RunResult): void {
 }
 
 async function main(): Promise<void> {
+  console.log('\n0. A burst of frames all authenticate (the multi-frame race)');
+  {
+    // `onmessage` is fired for every frame without waiting for the previous
+    // handler, so a batch of frames really does start decrypting at once. Each
+    // one must still find its own nonce: when they all read the same counter,
+    // one frame succeeds and the rest are silently dropped - which is exactly
+    // what a real file transfer looked like from the user's side.
+    const key = await aesKey();
+    const session = await sessionFor('device-self', key);
+    const FRAMES = 200;
+    const text = (i: number) => `frame-${i}-${'x'.repeat(512)}`;
+    const frames: Array<{ header: Uint8Array; body: Uint8Array; text: string }> = [];
+    for (let i = 0; i < FRAMES; i += 1) {
+      const header = new Uint8Array(24);
+      header[0] = (i >> 8) & 0xff;
+      header[1] = i & 0xff;
+      const body = new TextEncoder().encode(text(i));
+      const encrypted = await session.encryptFrame(header, body);
+      frames.push({ header, body: encrypted.slice(24), text: text(i) });
+    }
+
+    const decoded = await Promise.all(
+      frames.map((frame) => session.decryptFrame(frame.header, frame.body))
+    );
+    const allOk = decoded.every(
+      (bytes, i) => new TextDecoder().decode(bytes) === frames[i].text
+    );
+    const delivered = decoded.filter((bytes) => bytes.byteLength > 0).length;
+    check('every concurrent frame authenticates', allOk, `${delivered}/${FRAMES} frames`);
+
+    // A frame can also overtake its neighbour (it was encrypted first, sent
+    // second). A small reorder must be absorbed, not turned into a lost chunk.
+    const reordered: typeof frames = [];
+    for (let i = 0; i < frames.length; i += 2) {
+      const a = frames[i];
+      const b = frames[i + 1];
+      reordered.push(b || a);
+      if (b) reordered.push(a);
+    }
+    const session2 = await sessionFor('device-self', key);
+    const swapped = await Promise.all(
+      reordered.map((frame) => session2.decryptFrame(frame.header, frame.body))
+    );
+    const swappedOk = swapped.every((bytes, i) => {
+      const expected = reordered[i];
+      return expected ? new TextDecoder().decode(bytes) === expected.text : true;
+    });
+    check('a slightly reordered frame still authenticates', swappedOk);
+  }
+
   console.log('\n1. A photo lands in the bubble that was already announced');
   {
     // What the sender pushes first: a thumbnail and a placeholder.
@@ -394,6 +447,11 @@ async function main(): Promise<void> {
     'the completion carries the sender message id',
     shipped.meta?.messageId === MESSAGE_ID,
     String(shipped.meta?.messageId)
+  );
+  check(
+    'the stored record carries the measured throughput',
+    !!shipped.transferSpeedBps && shipped.transferSpeedBps > 0,
+    `${((shipped.transferSpeedBps || 0) / 1024 / 1024).toFixed(1)} MB/s`
   );
   check('one completion, one bubble', shipped.completions === 1, `${shipped.completions}`);
   check('no retransmissions', shipped.duplicateChunks === 0, `${shipped.duplicateChunks}`);

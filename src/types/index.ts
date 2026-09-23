@@ -150,6 +150,12 @@ export interface FileRecord {
   isVideo?: boolean;
   audioDuration?: number;
   exifData?: ImageExifData;
+  /**
+   * Throughput the attachment actually moved at, in bytes per second. Kept on
+   * the record so the conversation can show "12.4 MB/s" next to a file long
+   * after the transfer finished - including after a page reload.
+   */
+  transferSpeedBps?: number;
 }
 
 export interface CodeSnippet {
@@ -199,6 +205,12 @@ export interface MessageRecord {
    * the transfer gave up. Absent for text messages.
    */
   attachmentState?: 'receiving' | 'ready' | 'failed';
+  /**
+   * Throughput this attachment moved at, in bytes per second. Written once the
+   * transfer settles so the conversation can show it next to the file - and,
+   * because it is part of the stored row, still show it after a reload.
+   */
+  transferSpeedBps?: number;
   offlineEnvelope?: boolean;
   /**
    * Secret of the relay transfer that carries this attachment's bytes. Persisted

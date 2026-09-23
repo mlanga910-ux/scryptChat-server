@@ -161,6 +161,45 @@ export class PeerManager {
   public transport: PeerTransport = 'relay';
   private transportTimer: any = null;
   private presenceBeaconBound = false;
+  /**
+   * Every frame written to the live link goes through this single queue.
+   *
+   * `CryptoSession` allocates a nonce counter the moment `encryptFrame` is
+   * called, but the ciphertext only reaches the wire after an await. Without a
+   * queue a heartbeat or a chunk ACK can be encrypted first and sent second, so
+   * the receiver's strict counter no longer matches and *both* frames fail
+   * authentication - which is exactly what made multi-frame transfers crawl and
+   * randomly lose chunks while single-frame messages always worked.
+   */
+  private directSendChain: Promise<void> = Promise.resolve();
+
+  /**
+   * Encrypts and writes one frame on the live link, in strict order.
+   *
+   * `CryptoSession.encryptFrame` allocates a nonce counter the moment it is
+   * called, but the ciphertext only reaches the wire after an await. Chaining
+   * the encrypt *and* the send keeps the counter order and the wire order the
+   * same, so the receiver's counter stays in step. It also means a chunk never
+   * has to wait for a heartbeat or a text message to finish first.
+   */
+  private sendDirectFrame(
+    session: CryptoSession,
+    header24: Uint8Array,
+    payload: Uint8Array
+  ): Promise<void> {
+    const run = this.directSendChain.then(async () => {
+      const channel = this.dataChannel;
+      if (!channel || channel.readyState !== 'open') {
+        throw new Error('Direct link is not open');
+      }
+      const frame = await session.encryptFrame(header24, payload);
+      if (channel.readyState === 'open') channel.send(frame);
+    });
+    // The queue has to survive a failed frame, or one error would stall every
+    // later send on the link.
+    this.directSendChain = run.catch(() => {});
+    return run;
+  }
   /** Last presence snapshot we surfaced, so idle polls do not churn the UI. */
   private lastPresenceSignature = '';
 
@@ -1261,8 +1300,7 @@ export class PeerManager {
       BigInt('0x' + generateRandomHexId(8)),
       Number(this.cryptoSession.getNextSendCounter())
     );
-    const frame = await this.cryptoSession.encryptFrame(headerBytes, payloadBytes);
-    this.dataChannel.send(frame);
+    await this.sendDirectFrame(this.cryptoSession, headerBytes, payloadBytes);
   }
 
   private async pushTextViaRelay(
@@ -1425,11 +1463,11 @@ export class PeerManager {
           BigInt('0x' + generateRandomHexId(8)),
           Number(session.getNextSendCounter())
         );
-        const frame = await session.encryptFrame(
+        await this.sendDirectFrame(
+          session,
           headerBytes,
           new TextEncoder().encode(JSON.stringify(ack))
         );
-        this.dataChannel.send(frame);
         return;
       } catch (err) {
         console.warn('Direct delivery ack failed, using relay:', err);
@@ -1484,11 +1522,11 @@ export class PeerManager {
           BigInt('0x' + generateRandomHexId(8)),
           Number(session.getNextSendCounter())
         );
-        const frame = await session.encryptFrame(
+        await this.sendDirectFrame(
+          session,
           headerBytes,
           new TextEncoder().encode(JSON.stringify(payload))
         );
-        this.dataChannel.send(frame);
         return;
       } catch {
         /* falls through to the relay */
@@ -1536,11 +1574,11 @@ export class PeerManager {
             BigInt('0x' + generateRandomHexId(8)),
             Number(session.getNextSendCounter())
           );
-          const frame = await session.encryptFrame(
+          await this.sendDirectFrame(
+            session,
             headerBytes,
             new TextEncoder().encode(JSON.stringify(envelope))
           );
-          channel.send(frame);
         } catch {
           await this.pushEnvelope(targetDeviceId, envelope, 4000).catch(() => {});
         }

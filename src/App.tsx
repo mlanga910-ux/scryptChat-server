@@ -21,6 +21,7 @@ import { ScryptChatLogo } from './components/ScryptChatLogo';
 import { PeerList } from './components/PeerList';
 import { ChatView } from './components/ChatView';
 import { mergeMessageRow } from './utils/messageMerge';
+import { notifyVaultChange } from './utils/vaultEvents';
 import { PairingModal } from './components/PairingModal';
 import { DataWipeDialog } from './components/DataWipeDialog';
 import { OnboardingModal } from './components/OnboardingModal';
@@ -46,6 +47,12 @@ export default function App() {
   const [messages, setMessages] = useState<MessageRecord[]>([]);
   const [lastMessagesMap, setLastMessagesMap] = useState<Map<string, MessageRecord>>(new Map());
   const [activeTransfers, setActiveTransfers] = useState<FileTransferProgress[]>([]);
+  /**
+   * Latest measured throughput per attachment. A download reports its final
+   * speed before its row exists, so the number is held here and written to the
+   * vault once the transfer has settled.
+   */
+  const transferSpeedsRef = useRef<Map<string, number>>(new Map());
   const [connectionState, setConnectionState] = useState<ConnectionState>('DISCONNECTED');
   const [relayStatus, setRelayStatus] = useState<RelayStatus>('CONNECTING');
   const [relayPingMs, setRelayPingMs] = useState<number | null>(null);
@@ -260,6 +267,9 @@ export default function App() {
             });
           },
           onFileProgress: (progress) => {
+            if (progress.speedBps && progress.speedBps > 0) {
+              transferSpeedsRef.current.set(progress.fileId, progress.speedBps);
+            }
             setActiveTransfers((prev) => {
               const idx = prev.findIndex((p) => p.fileId === progress.fileId);
               if (idx >= 0) {
@@ -273,12 +283,18 @@ export default function App() {
             // and then leaves the list, keeping this state from growing.
             if (progress.status !== 'transferring') {
               const finishedId = progress.fileId;
+              // Persist the speed once the vault holds everything it needs.
+              setTimeout(() => void persistTransferSpeed(finishedId), 400);
               setTimeout(() => {
                 setActiveTransfers((prev) => prev.filter((p) => p.fileId !== finishedId));
               }, 1200);
             }
           },
-          onFileCompleted: async () => {
+          onFileCompleted: async (fileRecord) => {
+            if (fileRecord?.fileId && fileRecord.transferSpeedBps) {
+              transferSpeedsRef.current.set(fileRecord.fileId, fileRecord.transferSpeedBps);
+            }
+            if (fileRecord?.fileId) void persistTransferSpeed(fileRecord.fileId);
             await refreshContacts();
           },
           onMediaSignal: (signal) => {
@@ -356,6 +372,26 @@ export default function App() {
       }
     }
     setLastMessagesMap(map);
+  };
+
+  /**
+  /**
+   * Stores the measured throughput on the attachment and its message row.
+   *
+   * The value has to live in the vault, not only in React state: the moment the
+   * tab is reloaded the live transfer list is gone, and a file that shows how
+   * fast it went only while the page stays open is not much of a record.
+   */
+  const persistTransferSpeed = async (fileId: string) => {
+    const speed = transferSpeedsRef.current.get(fileId);
+    if (!speed || speed <= 0) return;
+    try {
+      await db.files.update(fileId, { transferSpeedBps: speed });
+      await db.messages.where('fileId').equals(fileId).modify({ transferSpeedBps: speed });
+      notifyVaultChange('file');
+    } catch {
+      /* the speed read-out is a nicety, never a blocker */
+    }
   };
 
   /**

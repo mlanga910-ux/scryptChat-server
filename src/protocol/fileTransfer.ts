@@ -30,8 +30,29 @@ const MAX_BUFFERED_AMOUNT = 16 * 1024 * 1024; // In-flight window for the intern
 const LAN_BUFFERED_AMOUNT = 48 * 1024 * 1024; // Deeper window when host-to-host
 const CHUNK_TIMEOUT_MS = 10000; // Resend chunk if ACK not received within 10s
 const ACK_WAIT_TIMEOUT_MS = 15000; // Total wait for final ACK before declaring complete
-const MAX_CHUNK_RETRIES = 3; // Maximum retransmission attempts per chunk
+const MAX_CHUNK_RETRIES = 6; // Maximum retransmission attempts per chunk
 const BACKOFF_BASE_MS = 500; // Exponential backoff base for chunk resend
+/** How much of the previous reading survives each new speed sample. */
+const SPEED_SMOOTHING = 0.35;
+
+/**
+ * Largest frame we will ever build, whatever the channel claims.
+ *
+ * Browsers disagree wildly about `maxMessageSize`: Chrome reports ~256 KB,
+ * Firefox roughly a gigabyte, and some builds report 0. A frame the SCTP layer
+ * refuses makes `send()` throw and kills the whole transfer, so every frame is
+ * capped at the size all implementations actually accept.
+ */
+export const SAFE_FRAME_CEILING = 256 * 1024 - 4096;
+
+/**
+ * Encrypts and writes one frame. Supplied by the peer manager so every frame on
+ * a live link is written in the same order its nonce counter was allocated (see
+ * the send queue in `PeerManager`). Without it a heartbeat or an ACK can reach
+ * the channel before the chunk that was encrypted first, and neither side can
+ * authenticate either frame afterwards.
+ */
+export type SendFrameFn = (header24: Uint8Array, payload: Uint8Array) => Promise<void>;
 
 /**
  * Conversation metadata that rides in the FILE_HEADER.
@@ -79,6 +100,8 @@ export interface TransferOptions {
   chunkSize?: number;
   /** Conversation metadata carried in the header (message id, sender, preview). */
   meta?: FileCompletionMeta;
+  /** Serialized frame writer; see `SendFrameFn`. */
+  sendFrame?: SendFrameFn;
 }
 
 /**
@@ -91,14 +114,17 @@ export interface TransferOptions {
  * allocate a huge frame.
  */
 export function pickChunkSize(dataChannel: RTCDataChannel, options?: TransferOptions): number {
-  if (options?.chunkSize) {
-    return Math.max(MIN_CHUNK_SIZE, Math.min(MAX_CHUNK_SIZE, options.chunkSize));
-  }
   // Not in every TS DOM lib yet, but every browser ships it at runtime.
   const reported = Number((dataChannel as any).maxMessageSize) || 0;
-  // Leave room for the packet header and AEAD tag.
-  const ceiling = reported > 4096 ? reported - 2048 : MAX_CHUNK_SIZE;
-  const desired = options?.isLan ? 1024 * 1024 : CHUNK_SIZE;
+  // Leave room for the packet header and the AEAD tag, and never exceed what
+  // every browser's SCTP stack accepts: a rejected frame loses the transfer.
+  const ceiling = reported > 4096
+    ? Math.min(reported - 2048, SAFE_FRAME_CEILING)
+    : SAFE_FRAME_CEILING;
+  if (options?.chunkSize) {
+    return Math.max(MIN_CHUNK_SIZE, Math.min(options.chunkSize, MAX_CHUNK_SIZE, ceiling));
+  }
+  const desired = options?.isLan ? SAFE_FRAME_CEILING : CHUNK_SIZE;
   return Math.max(MIN_CHUNK_SIZE, Math.min(desired, MAX_CHUNK_SIZE, ceiling));
 }
 
@@ -148,12 +174,20 @@ export class FileTransferManager {
       /** Throttles progress repaints; see `PROGRESS_REPORT_MS`. */
       lastReportAt: number;
       lastReportedPercent: number;
+      /** Smoothed throughput, so the reported MB/s does not jump around. */
+      lastSpeedBps: number;
     }
   > = new Map();
   private outgoingAckResolvers: Map<string, Map<number, () => void>> = new Map();
   private receivedAcks: Map<string, Set<number>> = new Map();
   private isCancelled = new Set<string>();
   private pendingChunks: Map<string, Map<number, PendingChunk>> = new Map();
+  /**
+   * Inbound packets are handled one at a time. Chunk bookkeeping is stateful
+   * (a Map, a byte count and a completion check), and two chunks finishing at
+   * once used to be able to reassemble the same file twice.
+   */
+  private inboundQueue: Promise<unknown> = Promise.resolve();
   private transferContext: Map<
     string,
     {
@@ -164,6 +198,7 @@ export class FileTransferManager {
       events?: FileTransferEvents;
       chunkSize: number;
       maxBufferedAmount: number;
+      sendFrame?: SendFrameFn;
     }
   > = new Map();
 
@@ -248,6 +283,32 @@ export class FileTransferManager {
     });
   }
 
+  /**
+   * Encrypts and writes one frame, in order.
+   *
+   * The live link's send queue is used when the peer manager supplied one, so
+   * every frame is handed to the channel in the same order its nonce counter
+   * was allocated. A frame larger than the channel accepts is retried once with
+   * a smaller payload rather than losing the whole transfer.
+   */
+  private async writeFrame(
+    dataChannel: RTCDataChannel,
+    session: CryptoSession,
+    header24: Uint8Array,
+    payload: Uint8Array,
+    sendFrame?: SendFrameFn
+  ): Promise<void> {
+    if (sendFrame) {
+      await sendFrame(header24, payload);
+      return;
+    }
+    const frame = await session.encryptFrame(header24, payload);
+    if (dataChannel.readyState !== 'open') {
+      throw new Error('Data channel is not open, cannot send chunk');
+    }
+    dataChannel.send(frame);
+  }
+
   /** Reads one chunk back out of the retained file bytes (never duplicated). */
   private sliceChunk(fileId: string, chunkIdx: number): Uint8Array | null {
     const ctx = this.transferContext.get(fileId);
@@ -275,18 +336,19 @@ export class FileTransferManager {
 
     // Backpressure first: encrypting while the socket buffer is full would just
     // hold finished frames in memory.
-    const windowLimit = this.transferContext.get(fileId)?.maxBufferedAmount ?? MAX_BUFFERED_AMOUNT;
+    const ctxForWindow = this.transferContext.get(fileId);
+    const windowLimit = ctxForWindow?.maxBufferedAmount ?? MAX_BUFFERED_AMOUNT;
     if (dataChannel.bufferedAmount > windowLimit) {
       await this.waitForDrain(dataChannel, windowLimit);
     }
 
-    const encryptedChunkFrame = await session.encryptFrame(chunkPacketHeader, chunkBytes);
-
-    if (dataChannel.readyState !== 'open') {
-      throw new Error('Data channel is not open, cannot send chunk');
-    }
-
-    dataChannel.send(encryptedChunkFrame);
+    await this.writeFrame(
+      dataChannel,
+      session,
+      chunkPacketHeader,
+      chunkBytes,
+      ctxForWindow?.sendFrame
+    );
 
     // ACK timeout with retry. The chunk bytes are recovered from the retained
     // file buffer instead of being held per chunk, so a large file cannot leak
@@ -416,6 +478,7 @@ export class FileTransferManager {
       events,
       chunkSize,
       maxBufferedAmount,
+      sendFrame: options?.sendFrame,
     });
     events?.onProgress?.({ ...progress });
 
@@ -429,14 +492,17 @@ export class FileTransferManager {
         0
       );
 
-      const encryptedHeaderFrame = await session.encryptFrame(
+      await this.writeFrame(
+        dataChannel,
+        session,
         headerBytes,
-        encodedHeaderPayload
+        encodedHeaderPayload,
+        options?.sendFrame
       );
-      dataChannel.send(encryptedHeaderFrame);
 
       const startTime = Date.now();
       let lastReportAt = startTime;
+      let smoothedSpeed = 0;
 
       // 2. Stream CHUNKS with backpressure and ACK tracking
       for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
@@ -456,8 +522,14 @@ export class FileTransferManager {
         const transferred = chunkIdx + 1;
         const pct = Math.round((transferred / totalChunks) * 100);
         const elapsedSec = (Date.now() - startTime) / 1000;
-        const sentBytes = Math.min(end + 1, fileBytes.byteLength);
-        const speed = elapsedSec > 0 ? sentBytes / elapsedSec : 0;
+        const sentBytes = Math.min(end, fileBytes.byteLength);
+        const instantaneous = elapsedSec > 0 ? sentBytes / elapsedSec : 0;
+        // Smoothing keeps the read-out readable instead of flickering between
+        // "3.1 MB/s" and "9.8 MB/s" on every frame.
+        smoothedSpeed = smoothedSpeed > 0
+          ? smoothedSpeed * (1 - SPEED_SMOOTHING) + instantaneous * SPEED_SMOOTHING
+          : instantaneous;
+        const speed = smoothedSpeed;
 
         const lastPct = progress.progressPercent;
         progress.transferredChunks = transferred;
@@ -515,6 +587,7 @@ export class FileTransferManager {
         isAudio,
         isVideo,
         exifData,
+        transferSpeedBps: smoothedSpeed,
       };
 
       await db.files.put(fileRecord);
@@ -537,14 +610,42 @@ export class FileTransferManager {
   /**
    * Receiver: Handles incoming decrypted packet.
    */
-  public async handleIncomingPacket(
+  public handleIncomingPacket(
     packetType: PacketType,
     objectId: bigint,
     sequenceIndex: number,
     payload: Uint8Array,
     dataChannel: RTCDataChannel,
     session: CryptoSession,
-    events?: FileTransferEvents
+    events?: FileTransferEvents,
+    sendFrame?: SendFrameFn
+  ): Promise<{ fileRecord?: FileRecord; blob?: Blob } | void> {
+    const run = this.inboundQueue.then(() =>
+      this.handleIncomingPacketLocked(
+        packetType,
+        objectId,
+        sequenceIndex,
+        payload,
+        dataChannel,
+        session,
+        events,
+        sendFrame
+      )
+    );
+    // One malformed packet must never stall the frames behind it.
+    this.inboundQueue = run.catch(() => undefined);
+    return run;
+  }
+
+  private async handleIncomingPacketLocked(
+    packetType: PacketType,
+    objectId: bigint,
+    sequenceIndex: number,
+    payload: Uint8Array,
+    dataChannel: RTCDataChannel,
+    session: CryptoSession,
+    events?: FileTransferEvents,
+    sendFrame?: SendFrameFn
   ): Promise<{ fileRecord?: FileRecord; blob?: Blob } | void> {
     const fileIdHex = objectId.toString(16).padStart(16, '0').toUpperCase();
 
@@ -559,6 +660,7 @@ export class FileTransferManager {
         lastAckAt: Date.now(),
         lastReportAt: 0,
         lastReportedPercent: -1,
+        lastSpeedBps: 0,
       });
 
       const progress: FileTransferProgress = {
@@ -626,10 +728,7 @@ export class FileTransferManager {
             objectId,
             highestHeld
           );
-          const encryptedAck = await session.encryptFrame(ackHeader, encodedAck);
-          if (dataChannel.readyState === 'open') {
-            dataChannel.send(encryptedAck);
-          }
+          await this.writeFrame(dataChannel, session, ackHeader, encodedAck, sendFrame);
         } catch (err) {
           console.error('Failed to send CHUNK_ACK:', err);
         }
@@ -644,11 +743,14 @@ export class FileTransferManager {
         const transferred = incoming.chunks.size;
         const pct = Math.min(100, Math.round((transferred / incoming.header.totalChunks) * 100));
         const elapsed = (Date.now() - incoming.startTime) / 1000;
-        const speed = elapsed > 0 ? (incoming.receivedBytes / elapsed) : 0;
+        const instantaneous = elapsed > 0 ? incoming.receivedBytes / elapsed : 0;
+        incoming.lastSpeedBps = incoming.lastSpeedBps > 0
+          ? incoming.lastSpeedBps * (1 - SPEED_SMOOTHING) + instantaneous * SPEED_SMOOTHING
+          : instantaneous;
 
         progress.transferredChunks = transferred;
         progress.progressPercent = pct;
-        progress.speedBps = speed;
+        progress.speedBps = incoming.lastSpeedBps;
 
         const nowMs = Date.now();
         const isLastChunk = transferred >= incoming.header.totalChunks;
@@ -741,6 +843,7 @@ export class FileTransferManager {
             isAudio,
             isVideo,
             exifData,
+            transferSpeedBps: incoming.lastSpeedBps,
           };
 
           await db.files.put(fileRecord);
