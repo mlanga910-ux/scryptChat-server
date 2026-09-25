@@ -750,14 +750,16 @@ export const ChatView: React.FC<ChatViewProps> = ({
             const isAudio = fileRec?.isAudio || msg.mediaType === 'audio';
             const isVideo = fileRec?.isVideo || msg.mediaType === 'video';
 
-            // An attachment sent to us can be announced before its bytes land.
-            // These three flags decide what the bubble shows meanwhile, and
-            // whether it offers to fetch the file again.
+            // An attachment can be in the conversation before its bytes are in
+            // it. That state is read from the stored row, never guessed from the
+            // clock: `ready` means the bytes of this attachment really are in
+            // this device's vault.
             const isInboundAttachment = !isYou && !!msg.fileId;
+            const bytesPending = isInboundAttachment && msg.attachmentState !== 'ready';
             const attachmentFailed =
               isInboundAttachment && msg.attachmentState === 'failed';
             const attachmentStalled =
-              isInboundAttachment && !attachmentFailed && Date.now() - msg.timestamp > 45000;
+              bytesPending && Date.now() - msg.timestamp > 45000;
 
             // Live progress for this very attachment, while it is still moving.
             // This is where the percentage and the MB/s read-out come from.
@@ -766,26 +768,44 @@ export const ChatView: React.FC<ChatViewProps> = ({
               : undefined;
             const transferSpeed =
               fileRec?.transferSpeedBps || msg.transferSpeedBps || transfer?.speedBps;
-            const speedSuffix = formatSpeed(transferSpeed)
-              ? ` · ${formatSpeed(transferSpeed)}`
-              : '';
-            const percentSuffix =
-              transfer?.progressPercent !== undefined
-                ? ` · ${Math.round(transfer.progressPercent)}%`
-                : '';
-            // Only an inbound attachment can be waiting for bytes: anything this
+            const percent = transfer?.progressPercent;
+            const isMoving =
+              !!transfer && (transfer.status === 'transferring' || transfer.status === 'verifying');
+            // Only an inbound attachment can be missing bytes: anything this
             // device sent is already in its own vault. Treating a sent file as
-            // "receiving" was what made your own photos spin forever after a
+            // still arriving was what made your own photos spin forever after a
             // reload.
             const needsFetch =
               isInboundAttachment && !downloadUrl && (attachmentFailed || attachmentStalled);
-            const attachmentStatus = downloadUrl
-              ? [formatBytes(fileRec?.size), formatSpeed(transferSpeed)].filter(Boolean).join(' · ')
-              : needsFetch
-              ? 'Not received yet · tap to fetch'
-              : isYou
-              ? `Sending…${percentSuffix}${speedSuffix}`
-              : `Receiving…${percentSuffix}${speedSuffix}`;
+            // The card never says "sending" or "receiving": the file is simply
+            // there, in its real shape, filling in as its bytes move - and it can
+            // only be opened once they are all here.
+            const attachmentStatus = needsFetch
+              ? 'Not on this device · tap to fetch'
+              : isMoving
+              ? [percent !== undefined ? `${Math.round(percent)}%` : '', formatSpeed(transferSpeed)]
+                  .filter(Boolean)
+                  .join(' · ') || formatBytes(fileRec?.size)
+              : [formatBytes(fileRec?.size), formatSpeed(transferSpeed)]
+                  .filter(Boolean)
+                  .join(' · ');
+            // The photo is laid out in its own proportions: the stored pixel size
+            // reserves the exact shape before a byte arrives, so the bubble never
+            // resizes under the reader and the picture is never cropped.
+            const imageStyle = fileRec?.width && fileRec?.height
+              ? { aspectRatio: `${fileRec.width} / ${fileRec.height}` }
+              : undefined;
+            const imageBox = imageStyle ? 'w-[22rem] max-w-full' : 'w-64 h-48';
+            const meterFill = isYou ? 'bg-black/60' : 'bg-emerald-400';
+            const meterTrack = isYou ? 'bg-black/15' : 'bg-white/15';
+            const meter = isMoving ? (
+              <span className={`mt-1 block h-0.5 w-full overflow-hidden rounded-full ${meterTrack}`}>
+                <span
+                  className={`block h-full rounded-full transition-[width] duration-300 ${meterFill}`}
+                  style={{ width: `${Math.max(4, Math.min(100, percent || 0))}%` }}
+                />
+              </span>
+            ) : null;
 
             const parsedParts = (!msg.fileId && !msg.codeSnippet && msg.payloadText)
               ? parseMessageContent(msg.payloadText)
@@ -833,14 +853,16 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         <img
                           src={downloadUrl}
                           alt={fileRec?.name || 'Encrypted Photo'}
-                          className="max-h-72 w-auto object-cover cursor-pointer hover:opacity-95 transition-opacity"
+                          style={imageStyle}
+                          className="block h-auto w-auto max-h-[18rem] max-w-[22rem] object-contain cursor-pointer hover:opacity-95 transition-opacity"
                           onClick={() => fileRec && openImageViewer(fileRec, downloadUrl, msg)}
                         />
                       ) : needsFetch ? (
                         <button
                           type="button"
                           onClick={() => onRetryAttachment?.(msg)}
-                          className="w-64 h-48 bg-zinc-900 flex flex-col items-center justify-center gap-2 text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                          style={imageStyle}
+                          className={`${imageBox} min-h-[8rem] bg-zinc-900 flex flex-col items-center justify-center gap-2 text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer`}
                         >
                           <RotateCcw className="w-5 h-5" />
                           <span>The photo has not arrived yet</span>
@@ -850,10 +872,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         <img
                           src={fileRec.previewUrl}
                           alt={fileRec?.name || 'Photo'}
-                          className="max-h-72 w-auto object-cover blur-[2px] transition-all"
+                          style={imageStyle}
+                          className={`${imageBox} object-cover blur-[2px] transition-all`}
                         />
                       ) : (
-                        <div className="w-64 h-48 bg-zinc-900 grid place-items-center">
+                        <div
+                          style={imageStyle}
+                          className={`${imageBox} min-h-[8rem] bg-zinc-900 grid place-items-center`}
+                        >
                           <ImageIcon className="w-6 h-6 text-zinc-600" />
                         </div>
                       )}
@@ -874,6 +900,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                           >
                             {attachmentStatus}
                           </span>
+                          {meter}
                         </div>
                         {downloadUrl && (
                           <a
@@ -941,6 +968,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                           <span className="truncate text-[10px] font-mono opacity-70">
                             {attachmentStatus}
                           </span>
+                          {meter}
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
                           {fileRec && (fileRec.blobRef || downloadUrl) && (
@@ -1032,6 +1060,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                           <p className={`text-[11px] font-mono ${needsFetch ? 'text-amber-400' : 'opacity-70'}`}>
                             {attachmentStatus || 'File'}
                           </p>
+                          {meter}
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
@@ -1184,9 +1213,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   transfer.direction === 'OUTBOUND' ? 'text-emerald-400' : 'text-sky-400'
                 } ${transfer.direction === 'INBOUND' ? 'rotate-180' : ''}`}
               />
-              <span className="truncate max-w-[38%] font-medium">
-                {transfer.direction === 'OUTBOUND' ? 'Sending' : 'Receiving'} {transfer.name}
-              </span>
+              <span className="truncate max-w-[42%] font-medium">{transfer.name}</span>
               <div className="flex-1 h-1 rounded-full bg-zinc-800 overflow-hidden">
                 <div
                   className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-sky-400 transition-[width] duration-300"

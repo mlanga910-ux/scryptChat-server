@@ -46,7 +46,7 @@ import {
 } from '../protocol/packet';
 import { fileTransferManager, FileCompletionMeta } from '../protocol/fileTransfer';
 import { notifyVaultChange } from '../utils/vaultEvents';
-import { fileToImagePreviewDataUrl } from '../utils/imageHelper';
+import { fileToImagePreviewDataUrl, measureImageDimensions } from '../utils/imageHelper';
 
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
@@ -131,6 +131,12 @@ interface OutboxEntry {
    */
   transferToken?: string;
   /**
+   * When the direct stream last moved bytes. The relay copy is held back only
+   * while this keeps moving: a stalled attempt is handed over within seconds
+   * instead of being given a fixed stretch of time to waste.
+   */
+  directProgressAt?: number;
+  /**
    * When this attachment started streaming over the direct (LAN / peer-to-peer)
    * link. While that transfer is running — and for a short grace period after
    * it finishes, waiting for the peer's receipt — the relay upload is held back,
@@ -200,6 +206,380 @@ export class PeerManager {
     this.directSendChain = run.catch(() => {});
     return run;
   }
+
+  /* ---------------------------------------------------------------------- */
+  /* Direct-link upkeep                                                      */
+  /* ---------------------------------------------------------------------- */
+
+  /** The conversation on screen; the one peer worth a peer-to-peer link. */
+  private activeChatDeviceId: string | null = null;
+  private directLinkAttemptAt = 0;
+  private directLinkFailures = 0;
+  private awaitingDirectAnswer = false;
+  private lastDirectAnswerAt = 0;
+  private directLinkTimer: ReturnType<typeof setInterval> | null = null;
+  /** Throttles the storage sweep; see `enforceAttachmentBudget`. */
+  private budgetCheckAt = 0;
+
+  /**
+   * Tells the manager which conversation is open.
+   *
+   * That is the peer worth a data channel: while a chat is on screen the link is
+   * kept up on its own, so attachments travel host-to-host - at link speed, off
+   * the internet, through no server - instead of through the relay. The relay
+   * stays exactly where it was: the guaranteed copy for everything sent while no
+   * link is up.
+   */
+  public setActiveChat(deviceId: string | null): void {
+    if (this.activeChatDeviceId === deviceId) return;
+    this.activeChatDeviceId = deviceId;
+    // A different chat is worth an immediate attempt rather than a wait.
+    this.directLinkAttemptAt = 0;
+    this.directLinkFailures = 0;
+    this.startDirectLinkUpkeep();
+  }
+
+  /** Keeps trying to give the open conversation a peer-to-peer link. */
+  private startDirectLinkUpkeep(): void {
+    if (this.directLinkTimer) return;
+    this.directLinkTimer = setInterval(() => {
+      void this.ensureDirectLink();
+    }, 8000);
+    void this.ensureDirectLink();
+  }
+
+  /** True while a file is actually moving: a link is never rebuilt under it. */
+  private isLinkBusyWithBytes(): boolean {
+    return fileTransferManager
+      .getAllTransfers()
+      .some((transfer) => transfer.status === 'transferring' || transfer.status === 'verifying');
+  }
+
+  /**
+   * Opens a data channel to the contact whose chat is open.
+   *
+   * Both devices are already paired - their identity keys are stored and
+   * verified - so this is the same signed handshake as a manual pairing, with
+   * its offer carried by the relay mailbox instead of by a pairing code. That is
+   * what lets the link come back on its own after a reload, a phone sleeping or
+   * a network blip, with no user action and no new trust.
+   */
+  private async ensureDirectLink(): Promise<void> {
+    const deviceId = this.activeChatDeviceId;
+    if (!deviceId || deviceId === this.identity.deviceId) return;
+    if (this.relayStatus !== 'ONLINE') return;
+    if (this.canReachDirectly(deviceId)) {
+      this.directLinkFailures = 0;
+      return;
+    }
+    if (this.awaitingDirectAnswer) return;
+    // Never tear a running transfer apart to build a fresh link: the frames in
+    // flight are worth more than the new route.
+    if (this.isLinkBusyWithBytes()) return;
+    // A handshake is already under way (for this peer or another one).
+    if (this.state === 'CONNECTING') return;
+    if (!this.identity.publicKeyRaw || !this.identity.privateKeyECDSA) return;
+
+    // Backing off, so an unreachable peer is not asked every 8 seconds forever.
+    const backoff = Math.min(60_000, 6000 * Math.pow(2, this.directLinkFailures));
+    if (Date.now() - this.directLinkAttemptAt < backoff) return;
+
+    const contact = await db.contacts.get(deviceId);
+    if (!contact?.isOnline) return;
+
+    this.directLinkAttemptAt = Date.now();
+    this.awaitingDirectAnswer = true;
+    try {
+      const offer = await this.createOffer();
+      await this.pushEnvelope(
+        deviceId,
+        {
+          type: 'DIRECT_OFFER',
+          senderDeviceId: this.identity.deviceId,
+          offer,
+          timestamp: Date.now(),
+        },
+        8000
+      );
+      // No answer (an older build on the other side, a peer that went offline
+      // mid-handshake) simply expires, and the next tick tries again.
+      setTimeout(() => {
+        if (!this.awaitingDirectAnswer) return;
+        this.awaitingDirectAnswer = false;
+        this.directLinkFailures += 1;
+        this.cleanup();
+      }, 12_000);
+    } catch (err) {
+      this.awaitingDirectAnswer = false;
+      this.directLinkFailures += 1;
+      console.warn('Could not start a direct link:', err);
+    }
+  }
+
+  /**
+   * A paired device is offering a direct link.
+   *
+   * Only a device whose public key matches a stored contact is answered, so a
+   * stranger can never make this device open a link - the pairing rule stays
+   * exactly as strict as it was, while a contact the user already trusts can
+   * reconnect on its own. Offers for another conversation are ignored: there is
+   * one live link at a time, and it belongs to the chat on screen.
+   */
+  private async handleDirectOffer(envelope: any, item: any): Promise<void> {
+    const offer = envelope.offer as HandshakeOfferData;
+    const senderId = String(item?.senderDeviceId || envelope.senderDeviceId || offer?.deviceId || '');
+    if (!offer?.sdp || !senderId) return;
+    if (offer.protocolVer !== PROTOCOL_VERSION) return;
+    if (this.activeChatDeviceId && this.activeChatDeviceId !== senderId) return;
+
+    const contact = await db.contacts.get(senderId);
+    if (!contact?.publicKeyRaw || contact.publicKeyRaw !== offer.identityPublicKeyRaw) return;
+    if (this.canReachDirectly(senderId)) return;
+    if (this.isLinkBusyWithBytes()) return;
+    if (Date.now() - this.lastDirectAnswerAt < 10_000) return;
+    this.lastDirectAnswerAt = Date.now();
+
+    try {
+      // The peer's offer wins over our own attempt, so the two sides cannot
+      // build two half-links at once.
+      this.awaitingDirectAnswer = false;
+      const answer = await this.acceptOffer(offer);
+      if (!this.activeChatDeviceId) this.activeChatDeviceId = senderId;
+      await this.pushEnvelope(
+        senderId,
+        {
+          type: 'DIRECT_ANSWER',
+          senderDeviceId: this.identity.deviceId,
+          answer,
+          timestamp: Date.now(),
+        },
+        8000
+      );
+    } catch (err) {
+      console.warn('Could not answer a direct-link offer:', err);
+    }
+  }
+
+  /** The peer agreed: finish the handshake and let the outbox use the link. */
+  private async handleDirectAnswer(envelope: any): Promise<void> {
+    if (!this.awaitingDirectAnswer) return;
+    const answer = envelope.answer as HandshakeAnswerData;
+    if (!answer?.sdp) return;
+    this.awaitingDirectAnswer = false;
+    try {
+      const finalize = await this.acceptAnswer(answer);
+      await this.pushEnvelope(
+        String(envelope.senderDeviceId || this.remoteDeviceId),
+        {
+          type: 'DIRECT_FINALIZE',
+          senderDeviceId: this.identity.deviceId,
+          finalize,
+          timestamp: Date.now(),
+        },
+        8000
+      );
+      this.directLinkFailures = 0;
+      // Everything still waiting on this peer goes now, at link speed.
+      this.flushOutbox();
+    } catch (err) {
+      this.directLinkFailures += 1;
+      console.warn('Direct-link handshake failed:', err);
+    }
+  }
+
+  private async handleDirectFinalize(envelope: any): Promise<void> {
+    const finalize = envelope.finalize as HandshakeFinalizeData;
+    if (!finalize) return;
+    try {
+      await this.finalizeHandshake(finalize);
+    } catch {
+      /* the link is either up or gone; nothing to repair here */
+    }
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* Attachments: shape first, bytes after                                */
+  /* ---------------------------------------------------------------------- */
+
+  /**
+   * Puts a file's *shape* in the conversation before its bytes arrive.
+   *
+   * Name, size, kind, real pixel size and - for a photo - the thumbnail, as a
+   * card that cannot be opened yet. There is exactly one row per message id, and
+   * the very same row is completed in place when the bytes land, whichever
+   * transport carried them.
+   */
+  private async showInboundPlaceholder(params: {
+    messageId?: string;
+    fileId: string;
+    senderDeviceId: string;
+    senderDisplayName?: string;
+    name: string;
+    size: number;
+    mimeType: string;
+    hashSHA256?: string;
+    previewUrl?: string;
+    width?: number;
+    height?: number;
+    durationMs?: number;
+    timestamp?: number;
+  }): Promise<void> {
+    if (!params.fileId || !params.senderDeviceId) return;
+    const mime = params.mimeType || 'application/octet-stream';
+    const mediaType = mime.startsWith('image/')
+      ? 'image'
+      : mime.startsWith('audio/')
+      ? 'audio'
+      : mime.startsWith('video/')
+      ? 'video'
+      : 'file';
+
+    const existing = params.messageId
+      ? await db.messages.where('messageId').equals(params.messageId).first()
+      : await db.messages.where('fileId').equals(params.fileId).first();
+    // Complete already: an announcement has nothing left to add.
+    if (existing?.attachmentState === 'ready') return;
+
+    const previous = existing?.fileRecord;
+    const fileMeta: FileRecord = {
+      fileId: params.fileId,
+      name: params.name || previous?.name || 'Attachment',
+      size: params.size || previous?.size || 0,
+      mimeType: mime,
+      hashSHA256: params.hashSHA256 || previous?.hashSHA256 || '',
+      isImage: mime.startsWith('image/'),
+      isAudio: mime.startsWith('audio/'),
+      isVideo: mime.startsWith('video/'),
+      previewUrl: params.previewUrl || previous?.previewUrl,
+      width: params.width || previous?.width,
+      height: params.height || previous?.height,
+      durationMs: params.durationMs ?? previous?.durationMs,
+    };
+
+    if (existing?.id !== undefined) {
+      await db.messages.update(existing.id, {
+        fileId: params.fileId,
+        fileRecord: fileMeta,
+        mediaType:
+          existing.mediaType && existing.mediaType !== 'text' ? existing.mediaType : mediaType,
+        attachmentState: 'receiving',
+      });
+      notifyVaultChange('message');
+      return;
+    }
+
+    // An attachment from a device we have never paired with still needs a
+    // conversation to live in, so the contact exists before the message does.
+    if (!(await db.contacts.get(params.senderDeviceId))) {
+      await this.saveContact(
+        params.senderDeviceId,
+        '',
+        '000000',
+        params.senderDisplayName || `Peer-${params.senderDeviceId.slice(4, 8)}`
+      );
+    }
+
+    const row: MessageRecord = {
+      messageId: params.messageId,
+      chatDeviceId: params.senderDeviceId,
+      direction: 'INBOUND',
+      payloadText: fileMeta.name,
+      fileId: params.fileId,
+      fileRecord: fileMeta,
+      mediaType,
+      senderDisplayName: params.senderDisplayName,
+      timestamp: params.timestamp || Date.now(),
+      status: 'delivered',
+      attachmentState: 'receiving',
+    };
+    row.id = await db.messages.add(row);
+    this.events.onMessageReceived(row);
+    notifyVaultChange('message');
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* Local storage budget                                                    */
+  /* ---------------------------------------------------------------------- */
+
+  private static readonly ATTACHMENT_BUDGET_FALLBACK = 512 * 1024 * 1024;
+  private static readonly ATTACHMENT_BUDGET_FRACTION = 0.35;
+  private static readonly ATTACHMENT_BUDGET_CEILING = 2 * 1024 * 1024 * 1024;
+  /** Attachments this fresh are never evicted: they are still in play. */
+  private static readonly ATTACHMENT_MIN_AGE_MS = 15 * 60_000;
+
+  /**
+   * Keeps the vault from eating the device.
+   *
+   * Thumbnails and metadata are tiny and always kept, so a conversation still
+   * renders in full long after its files are gone; what goes is the *bytes* of
+   * the oldest attachments, once the vault has spent its budget. An evicted
+   * attachment is not lost data: it shows as "not received yet - tap to fetch",
+   * and the sender puts it back on the relay / the direct link when asked.
+   */
+  private async enforceAttachmentBudget(force = false): Promise<void> {
+    if (!force && Date.now() - this.budgetCheckAt < 60_000) return;
+    this.budgetCheckAt = Date.now();
+    try {
+      let budget = PeerManager.ATTACHMENT_BUDGET_FALLBACK;
+      if (typeof navigator !== 'undefined' && navigator.storage?.estimate) {
+        const estimate = await navigator.storage.estimate().catch(() => undefined);
+        if (estimate?.quota) {
+          budget = Math.min(
+            PeerManager.ATTACHMENT_BUDGET_CEILING,
+            Math.max(64 * 1024 * 1024, estimate.quota * PeerManager.ATTACHMENT_BUDGET_FRACTION)
+          );
+        }
+      }
+
+      const rows = (await db.messages.toArray())
+        .filter((row) => !!row.fileId)
+        .sort((a, b) => a.timestamp - b.timestamp);
+      if (rows.length === 0) return;
+
+      // Bytes that are still needed: anything being sent right now, and
+      // anything whose sender has not confirmed it yet.
+      const protectedIds = new Set(
+        fileTransferManager
+          .getAllTransfers()
+          .filter((transfer) => transfer.status !== 'error')
+          .map((transfer) => transfer.fileId)
+      );
+      const outbound = await db.transfers.where('direction').equals('OUTBOUND').toArray().catch(() => []);
+      for (const row of outbound) protectedIds.add(row.fileId);
+      for (const entry of this.outbox.values()) if (entry.fileId) protectedIds.add(entry.fileId);
+
+      let total = 0;
+      const attached: Array<{ row: MessageRecord; fileId: string; bytes: number }> = [];
+      for (const row of rows) {
+        const fileId = row.fileId!;
+        const record = await db.files.get(fileId);
+        const bytes = record?.blobRef?.size || 0;
+        total += bytes;
+        if (bytes > 0) attached.push({ row, fileId, bytes });
+      }
+      if (total <= budget) return;
+
+      const now = Date.now();
+      for (const item of attached) {
+        if (total <= budget) break;
+        if (protectedIds.has(item.fileId)) continue;
+        if (now - item.row.timestamp < PeerManager.ATTACHMENT_MIN_AGE_MS) continue;
+
+        const record = await db.files.get(item.fileId);
+        if (!record?.blobRef) continue;
+        const { blobRef: _bytes, ...withoutBytes } = record;
+        await db.files.put(withoutBytes);
+        if (item.row.id !== undefined) {
+          await db.messages.update(item.row.id, { attachmentState: 'failed' });
+        }
+        total -= item.bytes;
+      }
+      notifyVaultChange('file');
+    } catch (err) {
+      console.warn('Attachment budget sweep failed:', err);
+    }
+  }
+
   /** Last presence snapshot we surfaced, so idle polls do not churn the UI. */
   private lastPresenceSignature = '';
 
@@ -283,8 +663,14 @@ export class PeerManager {
    * a 40 MB video finishes in seconds; the ceiling exists so a device that
    * silently drops off the network cannot strand the file.
    */
-  private static readonly DIRECT_TRANSFER_MAX_MS = 90_000;
+  private static readonly DIRECT_TRANSFER_MAX_MS = 5 * 60_000;
   private static readonly DIRECT_RECEIPT_GRACE_MS = 10_000;
+  /**
+   * How long a direct stream may make no progress at all before the relay copy
+   * stops waiting for it. Short on purpose: the point of the direct link is
+   * speed, and a link that is not delivering must not hold the file back.
+   */
+  private static readonly DIRECT_PROGRESS_GRACE_MS = 12_000;
   /**
    * How often the rescue sweep runs, and how long an attachment may sit without
    * its bytes before the sweep asks for them again. The grace is longer than a
@@ -347,10 +733,57 @@ export class PeerManager {
         messageId: meta?.messageId,
         senderDeviceId: meta?.senderDeviceId || this.remoteDeviceId,
         senderDisplayName: meta?.senderDisplayName,
-        previewUrl: meta?.previewUrl,
+        previewUrl: meta?.previewUrl || fileRecord.previewUrl,
+        width: fileRecord.width ?? meta?.width,
+        height: fileRecord.height ?? meta?.height,
+        durationMs: fileRecord.durationMs ?? meta?.durationMs,
+        transferSpeedBps: fileRecord.transferSpeedBps,
         timestamp: Date.now(),
       });
     });
+
+    // A file is shown the moment it is announced - name, size, kind and its real
+    // pixel size - and becomes openable only when its bytes are complete.
+    fileTransferManager.setAttachmentAnnounceSink(async (announcement, meta) => {
+      await this.showInboundPlaceholder({
+        messageId: meta?.messageId,
+        fileId: announcement.fileId,
+        senderDeviceId: meta?.senderDeviceId || this.remoteDeviceId,
+        senderDisplayName: meta?.senderDisplayName,
+        name: announcement.name,
+        size: announcement.size,
+        mimeType: announcement.mimeType,
+        hashSHA256: announcement.hashSHA256,
+        previewUrl: meta?.previewUrl,
+        width: announcement.width ?? meta?.width,
+        height: announcement.height ?? meta?.height,
+        durationMs: announcement.durationMs ?? meta?.durationMs,
+      });
+      // The bytes just landed in the vault: the budget is checked as they grow.
+      void this.enforceAttachmentBudget();
+    });
+
+    // Resume state for transfers nobody came back to is not worth keeping.
+    void fileTransferManager.pruneTransferState();
+    void this.enforceAttachmentBudget(true);
+    // The open conversation gets a peer-to-peer link as soon as it can have one.
+    this.startDirectLinkUpkeep();
+
+    if (typeof window !== 'undefined') {
+      // A tab that comes back after being suspended (a phone in a pocket, a
+      // laptop that slept) may have lost its link: rebuild it and re-check the
+      // budget while we are here.
+      window.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible') return;
+        this.directLinkAttemptAt = 0;
+        void this.ensureDirectLink();
+        void this.enforceAttachmentBudget();
+      });
+      window.addEventListener('online', () => {
+        this.directLinkAttemptAt = 0;
+        void this.ensureDirectLink();
+      });
+    }
   }
 
   /**
@@ -927,12 +1360,18 @@ export class PeerManager {
     if (!this.canReachDirectly(entry.chatDeviceId)) {
       entry.directStartedAt = undefined;
       entry.directCompletedAt = undefined;
+      entry.directProgressAt = undefined;
       return false;
     }
     if (entry.directCompletedAt) {
       return Date.now() - entry.directCompletedAt < PeerManager.DIRECT_RECEIPT_GRACE_MS;
     }
-    return Date.now() - (entry.directStartedAt || 0) < PeerManager.DIRECT_TRANSFER_MAX_MS;
+    const startedAt = entry.directStartedAt || 0;
+    const lastProgress = entry.directProgressAt || startedAt;
+    // A direct transfer that has stopped moving is not a reason to keep the
+    // only guaranteed copy waiting: the relay takes over a few seconds later.
+    if (Date.now() - lastProgress > PeerManager.DIRECT_PROGRESS_GRACE_MS) return false;
+    return Date.now() - startedAt < PeerManager.DIRECT_TRANSFER_MAX_MS;
   }
 
   /** A live, encrypted data channel to exactly this device. */
@@ -972,19 +1411,34 @@ export class PeerManager {
         channel,
         session,
         {
-          onProgress: this.events.onFileProgress,
+          onProgress: (progress) => {
+            // Keeps the relay copy waiting only while the direct stream is
+            // genuinely moving; see `holdsForDirectLink`.
+            entry.directProgressAt = Date.now();
+            this.events.onFileProgress(progress);
+          },
           onCompleted: () => {
             entry.directCompletedAt = Date.now();
+            entry.directProgressAt = Date.now();
           },
           onError: (_fileId, err) => this.events.onError(err),
         },
         {
           isLan: this.transport === 'lan',
+          sendFrame: (header24, payload) => {
+            const session = this.cryptoSession;
+            if (!session || !this.canReachDirectly(entry.chatDeviceId)) {
+              throw new Error('Direct link is not open');
+            }
+            return this.sendDirectFrame(session, header24, payload);
+          },
           meta: {
             messageId: entry.messageId,
             senderDeviceId: this.identity.deviceId,
             senderDisplayName: this.identity.displayName || 'Secure Peer',
             previewUrl: record.previewUrl,
+            width: record.width,
+            height: record.height,
           },
         }
       );
@@ -998,27 +1452,33 @@ export class PeerManager {
   }
 
   /**
-   * Sends a photo's thumbnail ahead of its bytes.
+   * Announces an attachment's shape to the peer.
    *
-   * The receiver shows the picture straight away — soft, with a tiny progress
-   * badge — and it sharpens the moment the real file lands. It is a retained
-   * envelope, so a device that is offline right now still gets it, and it costs
-   * a fraction of what the photo does.
+   * The receiver lays the file out straight away — name, size, kind, real pixel
+   * size, and for a photo the thumbnail — as a card that cannot be opened until
+   * its bytes are complete. It is a retained envelope, so a device that is
+   * offline right now still gets the shape and fills it in the moment it is
+   * back. Nothing here waits for the file: the announcement is a kilobyte.
    */
-  private async pushAttachmentPreview(
+  private async announceAttachmentShape(
     recipientId: string,
     messageId: string,
     file: File,
     record: FileRecord
   ): Promise<void> {
     try {
-      const previewUrl = await fileToImagePreviewDataUrl(file);
-      if (!previewUrl) return;
-      record.previewUrl = previewUrl;
-      await db.files.put(record).catch(() => {});
-      notifyVaultChange('file');
-      // On a local link the file itself lands within moments: an extra envelope
-      // would only add noise.
+      const mime = record.mimeType || file.type || 'application/octet-stream';
+      let previewUrl: string | undefined = record.previewUrl;
+      if (mime.startsWith('image/')) {
+        previewUrl = (await fileToImagePreviewDataUrl(file)) || previewUrl;
+        if (previewUrl && previewUrl !== record.previewUrl) {
+          record.previewUrl = previewUrl;
+          await db.files.put(record).catch(() => {});
+          notifyVaultChange('file');
+        }
+      }
+      // With a live local link the file's own header announces it and the bytes
+      // follow within moments: a second envelope would only add noise.
       if (this.transport === 'lan' && this.canReachDirectly(recipientId)) return;
       await this.pushEnvelope(
         recipientId,
@@ -1028,8 +1488,11 @@ export class PeerManager {
           fileId: record.fileId,
           name: record.name,
           size: record.size,
-          mimeType: record.mimeType,
+          mimeType: mime,
           previewUrl,
+          width: record.width,
+          height: record.height,
+          durationMs: record.durationMs,
           senderDeviceId: this.identity.deviceId,
           senderDisplayName: this.identity.displayName || 'Secure Peer',
           timestamp: Date.now(),
@@ -1037,8 +1500,9 @@ export class PeerManager {
         12000
       );
     } catch (err) {
-      // A preview is a courtesy: its absence changes nothing about delivery.
-      console.warn('Attachment preview was not sent:', err);
+      // An announcement is a courtesy: its absence changes nothing about
+      // delivery.
+      console.warn('Attachment announcement was not sent:', err);
     }
   }
 
@@ -1065,6 +1529,12 @@ export class PeerManager {
     const isAudio = mime.startsWith('audio/');
     const isVideo = mime.startsWith('video/');
 
+    // The real pixel size is measured here, before anything leaves the device:
+    // the other side lays the photo out at its true proportions from the very
+    // first frame, so the conversation never jumps when the bytes land.
+    let dimensions: { width: number; height: number } | undefined;
+    if (isImage) dimensions = await measureImageDimensions(file).catch(() => undefined);
+
     const fileRecord: FileRecord = {
       fileId,
       name: file.name,
@@ -1075,6 +1545,8 @@ export class PeerManager {
       isImage,
       isAudio,
       isVideo,
+      width: dimensions?.width,
+      height: dimensions?.height,
     };
     // The bytes live in the local vault before anything else happens, so a
     // retry minutes later (or after a reload) still has them.
@@ -1119,8 +1591,8 @@ export class PeerManager {
     if (direct) void this.streamAttachmentDirectly(entry, file, fileRecord);
     void this.tickOutbox();
 
-    // The thumbnail follows on its own so it can never delay the file itself.
-    if (isImage) void this.pushAttachmentPreview(recipientId, messageId, file, fileRecord);
+    // The shape follows on its own so it can never delay the file itself.
+    void this.announceAttachmentShape(recipientId, messageId, file, fileRecord);
 
     return fileRecord;
   }
@@ -1143,6 +1615,8 @@ export class PeerManager {
     entry: OutboxEntry,
     record: FileRecord
   ): Promise<string> {
+    // Relay uploads are chunked and idempotent; a retry continues where the last
+    // one stopped because the relay counts the chunks it already holds.
     if (file.size > PeerManager.MAX_RELAY_ATTACHMENT_BYTES) {
       throw Object.assign(
         new Error(
@@ -1320,6 +1794,7 @@ export class PeerManager {
 
   /** Pushes an encrypted envelope into the peer's relay mailbox. */
   private async pushEnvelope(
+
     recipientId: string,
     envelope: Record<string, any>,
     timeoutMs = 8000
@@ -1656,6 +2131,23 @@ export class PeerManager {
         return;
       }
 
+      // 1.08 Peer-to-peer link upkeep. A paired device can reopen the data
+      // channel by itself - after a reload, a sleeping phone or a network blip -
+      // which is what keeps attachments travelling host-to-host at link speed
+      // instead of through the relay.
+      if (envelope.type === 'DIRECT_OFFER') {
+        await this.handleDirectOffer(envelope, item);
+        return;
+      }
+      if (envelope.type === 'DIRECT_ANSWER') {
+        await this.handleDirectAnswer(envelope);
+        return;
+      }
+      if (envelope.type === 'DIRECT_FINALIZE') {
+        await this.handleDirectFinalize(envelope);
+        return;
+      }
+
       // 1.1 Contact Revocation / Deletion Sync
       if (envelope.type === 'CONTACT_REVOKED') {
         const senderId = item.senderDeviceId || envelope.senderDeviceId;
@@ -1869,6 +2361,12 @@ export class PeerManager {
     senderDeviceId: string;
     senderDisplayName?: string;
     previewUrl?: string;
+    /** Real pixel size, measured by the sender or from the bytes that arrived. */
+    width?: number;
+    height?: number;
+    durationMs?: number;
+    /** Throughput the bytes actually moved at, recorded by the transfer. */
+    transferSpeedBps?: number;
     timestamp?: number;
   }): Promise<{ row: MessageRecord; fileRecord: FileRecord; isNew: boolean } | null> {
     const { messageId, senderDeviceId } = params;
@@ -1886,6 +2384,10 @@ export class PeerManager {
       isAudio: (params.mimeType || '').startsWith('audio/'),
       isVideo: (params.mimeType || '').startsWith('video/'),
       previewUrl: params.previewUrl,
+      width: params.width,
+      height: params.height,
+      durationMs: params.durationMs,
+      transferSpeedBps: params.transferSpeedBps,
     };
     await db.files.put(fileRecord);
 
@@ -1971,7 +2473,30 @@ export class PeerManager {
     const messageId = String(envelope.messageId || '');
     const previewUrl = String(envelope.previewUrl || '');
     const fileId = String(envelope.fileId || '');
-    if (!messageId || !previewUrl || !senderDeviceId) return;
+    if (!messageId || !senderDeviceId) return;
+
+    // The sender announced a file's shape: name, size, kind, real pixel size and
+    // - for a photo - a thumbnail. It becomes a card in the conversation that
+    // cannot be opened until its bytes land, and the very same row is completed
+    // in place when they do.
+    await this.showInboundPlaceholder({
+      messageId,
+      fileId,
+      senderDeviceId,
+      senderDisplayName: envelope.senderDisplayName,
+      name: String(envelope.name || 'Attachment'),
+      size: Number(envelope.size) || 0,
+      mimeType: String(envelope.mimeType || 'application/octet-stream'),
+      previewUrl: previewUrl || undefined,
+      width: Number(envelope.width) || undefined,
+      height: Number(envelope.height) || undefined,
+      durationMs: Number(envelope.durationMs) || undefined,
+      timestamp: Number(envelope.timestamp) || undefined,
+    });
+    // An older build announces a bare thumbnail with no file id: the legacy path
+    // below still puts that picture in the bubble.
+    if (fileId) return;
+    if (!previewUrl) return;
 
     const existing = await db.messages.where('messageId').equals(messageId).first();
     // Fully stored already: the preview has nothing left to add.
@@ -2109,6 +2634,24 @@ export class PeerManager {
     const name = String(envelope.name || 'attachment');
     const mimeType = String(envelope.mimeType || 'application/octet-stream');
 
+    // The shape goes into the conversation before a byte is pulled down: the
+    // file is there - name, size, kind and its real pixel size - as a card that
+    // becomes openable the moment the download verifies.
+    await this.showInboundPlaceholder({
+      messageId,
+      fileId,
+      senderDeviceId,
+      senderDisplayName: envelope.senderDisplayName,
+      name,
+      size: Number(envelope.size) || 0,
+      mimeType,
+      hashSHA256: String(envelope.hashSHA256 || ''),
+      previewUrl: envelope.previewUrl ? String(envelope.previewUrl) : undefined,
+      width: Number(envelope.width) || undefined,
+      height: Number(envelope.height) || undefined,
+      timestamp: Number(envelope.timestamp) || undefined,
+    });
+
     try {
       const blob = await this.downloadRelayFile(
         transferId,
@@ -2124,6 +2667,16 @@ export class PeerManager {
         throw new Error('Attachment failed its integrity check.');
       }
 
+      // Real pixel size: from the announcement when the sender measured it, and
+      // otherwise straight from the bytes that just arrived.
+      let imageWidth = Number(envelope.width) || undefined;
+      let imageHeight = Number(envelope.height) || undefined;
+      if (mimeType.startsWith('image/') && (!imageWidth || !imageHeight)) {
+        const measured = await measureImageDimensions(blob).catch(() => undefined);
+        imageWidth = measured?.width || imageWidth;
+        imageHeight = measured?.height || imageHeight;
+      }
+
       const fileRecord: FileRecord = {
         fileId: fileId || digest.slice(0, 16).toUpperCase(),
         name,
@@ -2134,6 +2687,8 @@ export class PeerManager {
         isImage: mimeType.startsWith('image/'),
         isAudio: mimeType.startsWith('audio/'),
         isVideo: mimeType.startsWith('video/'),
+        width: imageWidth,
+        height: imageHeight,
       };
       await db.files.put(fileRecord);
 
@@ -2168,6 +2723,7 @@ export class PeerManager {
           : 'file',
         timestamp: existingRow?.timestamp || Number(envelope.timestamp) || Date.now(),
         status: 'delivered',
+        attachmentState: 'ready',
       };
       if (existingRow) {
         await db.messages.update(existingRow.id!, {
@@ -2176,6 +2732,7 @@ export class PeerManager {
           fileRecord: row.fileRecord,
           mediaType: row.mediaType,
           status: 'delivered',
+          attachmentState: 'ready',
         });
       } else {
         row.id = await db.messages.add(row);
@@ -3036,57 +3593,44 @@ export class PeerManager {
           break;
         }
 
+        // File framing, acknowledgements and resume points all travel on the
+        // live link. The resume point is what lets an interrupted file continue
+        // instead of starting again: without it every reload re-sends the whole
+        // attachment.
         case PacketType.FILE_HEADER:
         case PacketType.FILE_CHUNK:
-        case PacketType.CHUNK_ACK: {
+        case PacketType.CHUNK_ACK:
+        case PacketType.FILE_RESUME: {
           if (this.dataChannel && this.cryptoSession) {
+            const session = this.cryptoSession;
             await fileTransferManager.handleIncomingPacket(
               header.packetType,
               header.objectId,
               header.sequenceIndex,
               decryptedPayload,
               this.dataChannel,
-              this.cryptoSession,
+              session,
               {
                 onProgress: this.events.onFileProgress,
-                onCompleted: async (fileRec, blob) => {
-                  await db.files.put(fileRec);
-                  // Tell the sender the attachment landed, whether this was the
-                  // first delivery or a retry of one we already stored.
+                onCompleted: async (fileRec) => {
+                  // The bytes, and the single bubble that holds them, are stored
+                  // by the completion sink. What is left here is the receipt the
+                  // sender waits for so it can stop retrying.
                   void this.sendDeliveryAck(
                     { fileId: fileRec.fileId },
                     this.remoteDeviceId,
                     true
                   );
-                  if (await db.messages.where('fileId').equals(fileRec.fileId).first()) {
-                    return;
-                  }
-                  const mediaType = fileRec.isImage
-                    ? 'image'
-                    : fileRec.isAudio
-                    ? 'audio'
-                    : fileRec.isVideo
-                    ? 'video'
-                    : 'file';
-                  const msgRecord: MessageRecord = {
-                    chatDeviceId: this.remoteDeviceId,
-                    direction: 'INBOUND',
-                    payloadText: fileRec.name,
-                    fileId: fileRec.fileId,
-                    fileRecord: fileRec,
-                    mediaType,
-                    timestamp: Date.now(),
-                    status: 'delivered',
-                  };
-                  const id = await db.messages.add(msgRecord);
-                  msgRecord.id = id;
-                  this.events.onFileCompleted(fileRec, blob);
-                  this.events.onMessageReceived(msgRecord);
                 },
                 onError: (fId, err) => {
                   this.events.onError(err);
                 },
-              }
+              },
+              // Acknowledgements and resume points travel through the same
+              // ordered queue as the file itself, so the AEAD counter order and
+              // the wire order always agree.
+              (header24, payloadBytes) =>
+                this.sendDirectFrame(session, header24, payloadBytes)
             );
           }
           break;

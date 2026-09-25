@@ -4,6 +4,7 @@ import {
   GroupRecord,
   IdentityRecord,
   MessageRecord,
+  TransferStateRecord,
 } from '../types/index';
 import {
   DbTable,
@@ -119,6 +120,7 @@ export const db = {
   files: lazyTable<FileRecord>('files'),
   messages: lazyTable<MessageRecord>('messages'),
   groups: lazyTable<GroupRecord>('groups'),
+  transfers: lazyTable<TransferStateRecord>('transfers'),
 };
 
 /** Resolves the storage backend in use. Never rejects. */

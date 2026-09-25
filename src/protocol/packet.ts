@@ -84,6 +84,10 @@ export interface FileHeaderPayload {
   senderDisplayName?: string;
   /** Small inline preview (data URL) so a photo shows before its bytes land. */
   previewUrl?: string;
+  /** Intrinsic pixel size of an image, so the bubble has its real shape. */
+  width?: number;
+  height?: number;
+  durationMs?: number;
 }
 
 export function encodeFileHeaderPayload(info: FileHeaderPayload): Uint8Array {
@@ -94,6 +98,38 @@ export function encodeFileHeaderPayload(info: FileHeaderPayload): Uint8Array {
 export function decodeFileHeaderPayload(payloadBytes: Uint8Array): FileHeaderPayload {
   const jsonStr = new TextDecoder().decode(payloadBytes);
   return JSON.parse(jsonStr) as FileHeaderPayload;
+}
+
+/**
+ * "Start here": the receiver's answer to a FILE_HEADER.
+ *
+ * `bytes` is the length of the contiguous prefix it already holds from offset
+ * zero. The sender aligns that to its own frame grid, so a resume works even
+ * when the two sides ended up with different frame sizes (a LAN link resumed
+ * over an internet fallback, or the other way round).
+ */
+export interface FileResumePayload {
+  bytes: number;
+  chunkSize: number;
+}
+
+export function encodeFileResumePayload(resume: FileResumePayload): Uint8Array {
+  const buffer = new Uint8Array(8);
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  view.setUint32(0, Math.max(0, Math.floor(resume.bytes)) >>> 0, false);
+  view.setUint32(4, Math.max(0, Math.floor(resume.chunkSize)) >>> 0, false);
+  return buffer;
+}
+
+export function decodeFileResumePayload(payloadBytes: Uint8Array): FileResumePayload {
+  if (payloadBytes.byteLength < 8) {
+    throw new Error(`File resume payload too short: ${payloadBytes.byteLength} bytes`);
+  }
+  const view = safeDataView(payloadBytes, 0, 8);
+  return {
+    bytes: view.getUint32(0, false),
+    chunkSize: view.getUint32(4, false),
+  };
 }
 
 export interface ChunkAckPayload {

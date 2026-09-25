@@ -17,6 +17,52 @@ const PREVIEW_MAX_DIM = 720;
 const PREVIEW_MAX_CHARS = 160000;
 
 /**
+ * The real pixel size of an image, read from the image itself.
+ * ---------------------------------------------------------------------------
+ * It is what lets a conversation reserve a photo's exact proportions before a
+ * single byte of it has arrived, so the bubble never resizes when the picture
+ * lands. Decoding is done from the bytes (`createImageBitmap`) with an `<img>`
+ * fallback for the formats a given engine will not decode that way.
+ *
+ * Never throws: an image whose size cannot be read simply has no size, and every
+ * caller treats that as "unknown".
+ */
+export async function measureImageDimensions(
+  input: Blob | File
+): Promise<{ width: number; height: number } | undefined> {
+  const valid = (width: number, height: number) =>
+    width > 0 && height > 0 && Number.isFinite(width) && Number.isFinite(height)
+      ? { width, height }
+      : undefined;
+
+  try {
+    if (typeof createImageBitmap === 'function') {
+      const bitmap = await createImageBitmap(input);
+      const size = valid(bitmap.width, bitmap.height);
+      bitmap.close?.();
+      if (size) return size;
+    }
+  } catch {
+    // Fall through to the element-based decode below.
+  }
+
+  if (typeof document === 'undefined' || typeof Image === 'undefined') return undefined;
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(input);
+    const img = new Image();
+    const done = (size?: { width: number; height: number }) => {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {}
+      resolve(size);
+    };
+    img.onload = () => done(valid(img.naturalWidth, img.naturalHeight));
+    img.onerror = () => done(undefined);
+    img.src = url;
+  });
+}
+
+/**
  * A small inline preview of a photo, as a data URL.
  *
  * It is sent alongside the attachment so the receiver can show the picture

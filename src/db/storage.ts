@@ -1,5 +1,5 @@
 import Dexie from 'dexie';
-import { ContactRecord, FileRecord, GroupRecord, IdentityRecord, MessageRecord } from '../types/index';
+import { ContactRecord, FileRecord, GroupRecord, IdentityRecord, MessageRecord, TransferStateRecord } from '../types/index';
 
 /**
  * Storage that cannot be blocked.
@@ -38,7 +38,7 @@ export interface DbTable<T> {
   where(index: string): { equals(value: any): CollectionLike<T> };
 }
 
-export type TableName = 'identity' | 'contacts' | 'files' | 'messages' | 'groups';
+export type TableName = 'identity' | 'contacts' | 'files' | 'messages' | 'groups' | 'transfers';
 
 interface TableSpec {
   /** Primary key path. */
@@ -67,9 +67,26 @@ export const TABLE_SPECS: Record<TableName, TableSpec> = {
     auto: false,
     indexes: ['groupId', 'name', 'createdAt', 'adminDeviceId', 'lastActivityAt'],
   },
+  /**
+   * Half-finished transfers. The bytes of the prefix that already arrived live
+   * here, so a reload, a closed tab or a dropped link resumes where it stopped
+   * instead of asking the sender to send the file again from byte zero.
+   */
+  transfers: {
+    key: 'transferId',
+    auto: false,
+    indexes: ['transferId', 'messageId', 'direction', 'updatedAt'],
+  },
 };
 
-export const TABLE_NAMES: TableName[] = ['identity', 'contacts', 'files', 'messages', 'groups'];
+export const TABLE_NAMES: TableName[] = [
+  'identity',
+  'contacts',
+  'files',
+  'messages',
+  'groups',
+  'transfers',
+];
 
 export interface StorageDriver {
   readonly name: StorageDriverName;
@@ -213,6 +230,7 @@ class MemoryStore implements StorageDriver {
       files: [],
       messages: [],
       groups: [],
+      transfers: [],
     };
     this.load();
     this.registerFlushHooks();
@@ -458,6 +476,7 @@ export class ScryptChatDatabase extends Dexie {
   files!: Dexie.Table<FileRecord, string>;
   messages!: Dexie.Table<MessageRecord, number>;
   groups!: Dexie.Table<GroupRecord, string>;
+  transfers!: Dexie.Table<TransferStateRecord, string>;
 
   constructor() {
     super('DevTChatDB_v3.1');
@@ -478,6 +497,18 @@ export class ScryptChatDatabase extends Dexie {
       messages:
         '++id, chatDeviceId, chatDeviceId+timestamp, timestamp, fileId, status, groupId, messageId',
       groups: 'groupId, name, createdAt, adminDeviceId, lastActivityAt',
+    });
+
+    // v6 adds `transfers`: the bytes of a partially received attachment, kept
+    // so an interrupted file resumes from its last frame.
+    this.version(6).stores({
+      identity: 'deviceId',
+      contacts: 'deviceId, verificationStatus, lastSeenAt',
+      files: 'fileId, hashSHA256, mimeType',
+      messages:
+        '++id, chatDeviceId, chatDeviceId+timestamp, timestamp, fileId, status, groupId, messageId',
+      groups: 'groupId, name, createdAt, adminDeviceId, lastActivityAt',
+      transfers: 'transferId, messageId, direction, updatedAt',
     });
   }
 }

@@ -30,6 +30,12 @@ export enum PacketType {
   FILE_HEADER = 0x20,
   FILE_CHUNK = 0x21,
   CHUNK_ACK = 0x22,
+  /**
+   * Receiver → sender, in answer to a FILE_HEADER: "I already hold this many
+   * bytes of this file". It is what turns a dropped link, a closed tab or a
+   * reload into a resume instead of a retry from byte zero.
+   */
+  FILE_RESUME = 0x23,
   HEARTBEAT_PING_PONG = 0x30,
   TYPING_INDICATOR = 0x35,
   READ_RECEIPT = 0x36,
@@ -151,6 +157,17 @@ export interface FileRecord {
   audioDuration?: number;
   exifData?: ImageExifData;
   /**
+   * Intrinsic pixel size of an image, measured once and stored with it.
+   *
+   * It travels with the file's metadata (header, preview and relay notice) so a
+   * conversation can lay the photo out at its real proportions before a single
+   * byte of the picture has arrived: the bubble never resizes when it lands.
+   */
+  width?: number;
+  height?: number;
+  /** Length of a video/audio attachment in milliseconds, when known. */
+  durationMs?: number;
+  /**
    * Throughput the attachment actually moved at, in bytes per second. Kept on
    * the record so the conversation can show "12.4 MB/s" next to a file long
    * after the transfer finished - including after a page reload.
@@ -204,7 +221,7 @@ export interface MessageRecord {
    * still travelling, `ready` once they are in the local vault, `failed` when
    * the transfer gave up. Absent for text messages.
    */
-  attachmentState?: 'receiving' | 'ready' | 'failed';
+  attachmentState?: 'queued' | 'sending' | 'receiving' | 'ready' | 'failed';
   /**
    * Throughput this attachment moved at, in bytes per second. Written once the
    * transfer settles so the conversation can show it next to the file - and,
@@ -217,6 +234,36 @@ export interface MessageRecord {
    * so a reload resumes the same upload instead of being refused as a stranger.
    */
   transferToken?: string;
+}
+
+export interface TransferStateRecord {
+  /** Either the fileId or `out:<messageId>` for bytes this device is sending. */
+  transferId: string;
+  direction: MessageDirection;
+  fileId: string;
+  messageId?: string;
+  name: string;
+  size: number;
+  mimeType: string;
+  hashSHA256: string;
+  /** Frame size this side streamed with; the peer aligns its offset to it. */
+  chunkSize: number;
+  totalChunks: number;
+  /**
+   * Bytes of the prefix that are already safely stored: on the receiving side
+   * the contiguous part it holds, on the sending side how far the peer got.
+   */
+  receivedBytes: number;
+  /**
+   * The prefix itself while a transfer is in flight - kept so a reload, a lost
+   * link or a closed tab resumes where it stopped instead of starting over.
+   */
+  blobRef?: Blob;
+  /** Metadata that must survive a reload (sender, preview, image size). */
+  meta?: Record<string, unknown>;
+  width?: number;
+  height?: number;
+  updatedAt: number;
 }
 
 export interface FileTransferProgress {
